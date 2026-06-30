@@ -6,16 +6,9 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration {
     public function up(): void
-    {
-        Schema::table('products', function (Blueprint $table) {
-            $table->string('Material')->nullable()->after('Description');
-            $table->string('ProfileType')->nullable()->after('Material');
-            $table->string('Color')->nullable()->after('ProfileType');
-            $table->decimal('Length', 10, 2)->nullable()->after('Color');
-            $table->decimal('Width', 10, 2)->nullable()->after('Length');
-            $table->decimal('Thickness', 10, 2)->nullable()->after('Width');
-        });
-    }
+{
+    // Columns already exist
+}
 
     public function down(): void
     {

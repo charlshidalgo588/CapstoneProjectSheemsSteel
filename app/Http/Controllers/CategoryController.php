@@ -12,20 +12,28 @@ class CategoryController extends Controller
      * ==========================================================
      * 📌 GET ALL CATEGORIES (Vue dropdown + listings)
      * ==========================================================
+     * FIX: this query never actually counted related products —
+     * it only selected CategoryID/CategoryName, so the frontend's
+     * `cat.products_count` was always undefined and silently
+     * fell back to 0 for every single category, regardless of
+     * how many products were actually assigned to it.
+     *
+     * withCount('products') adds a real `products_count` attribute
+     * to each row via an efficient single subquery (COUNT joined on
+     * the products table), instead of N+1 querying per category.
+     *
      * RETURNS:
      * {
      *   "categories": [
-     *     { "CategoryID": 1, "CategoryName": "Roof" }
+     *     { "CategoryID": 1, "CategoryName": "Roof", "products_count": 4 }
      *   ]
      * }
      * ==========================================================
      */
     public function index()
     {
-        $categories = Category::select(
-                'CategoryID',
-                'CategoryName'
-            )
+        $categories = Category::select('CategoryID', 'CategoryName')
+            ->withCount('products')
             ->orderBy('CategoryName')
             ->get();
 
@@ -38,18 +46,23 @@ class CategoryController extends Controller
      * ==========================================================
      * 📌 GET SINGLE CATEGORY (FIXED)
      * ==========================================================
+     * Also returns products_count now, for consistency with the
+     * list endpoint and in case a future single-category view
+     * (e.g. an edit page) wants to display it.
+     *
      * RETURNS:
      * {
      *   "category": {
      *     "CategoryID": 1,
-     *     "CategoryName": "Roof"
+     *     "CategoryName": "Roof",
+     *     "products_count": 4
      *   }
      * }
      * ==========================================================
      */
     public function show($id)
     {
-        $category = Category::find($id);
+        $category = Category::withCount('products')->find($id);
 
         if (!$category) {
             return response()->json([
@@ -59,8 +72,9 @@ class CategoryController extends Controller
 
         return response()->json([
             'category' => [
-                'CategoryID'   => $category->CategoryID,
-                'CategoryName' => $category->CategoryName,
+                'CategoryID'     => $category->CategoryID,
+                'CategoryName'   => $category->CategoryName,
+                'products_count' => $category->products_count,
             ]
         ]);
     }

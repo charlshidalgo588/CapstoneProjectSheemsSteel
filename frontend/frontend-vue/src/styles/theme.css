@@ -1,0 +1,207 @@
+/*
+ * theme.css — Sheem Steel Design Tokens
+ * Import once in main.js:  import '@/styles/theme.css'
+ *
+ * Dark mode is toggled by setting data-theme="dark" on <html>.
+ * Because tokens live on :root / html, ALL components and pages
+ * inherit light/dark automatically — no per-page changes needed.
+ */
+
+/* ═══════════════════════════════════════════════════
+   LIGHT TOKENS  (default)
+═══════════════════════════════════════════════════ */
+:root {
+  /* ── Accent ─────────────────────────────────────── */
+  --c-accent:         #EA580C;
+  --c-accent-h:       #D95208;     /* hover */
+  --c-accent-deep:    #C2410C;     /* gradient end */
+  --c-accent-glow:    rgba(234, 88, 12, 0.24);
+  --c-accent-soft:    #FFF7ED;     /* tinted bg */
+  --c-accent-border:  #FDBA74;
+  --c-accent-ring:    rgba(234, 88, 12, 0.10);
+
+  /* ── Surfaces ────────────────────────────────────── */
+  --c-bg:             #F3F4F6;     /* page background */
+  --c-surface:        #FFFFFF;     /* cards, sidebar, topbar */
+  --c-surface-raised: #F9FAFB;     /* hover states, subtle raised */
+  --c-surface-sunken: #F3F4F6;     /* input backgrounds */
+  --c-surface-overlay:#FFFFFF;     /* modals, dropdowns */
+
+  /* ── Borders ─────────────────────────────────────── */
+  --c-border:         #E5E7EB;
+  --c-border-strong:  #D1D5DB;
+  --c-border-input:   #D1D5DB;
+
+  /* ── Text ────────────────────────────────────────── */
+  --c-text-primary:   #111827;
+  --c-text-secondary: #374151;
+  --c-text-muted:     #6B7280;
+  --c-text-faint:     #9CA3AF;
+  --c-text-placeholder:#9CA3AF;
+
+  /* ── Sidebar ─────────────────────────────────────── */
+  --c-sidebar-bg:     #FFFFFF;
+  --c-sidebar-bar:    linear-gradient(90deg, #EA580C 0%, #FB923C 100%);
+
+  /* ── Danger / Status ─────────────────────────────── */
+  --c-danger:         #EF4444;
+  --c-danger-deep:    #DC2626;
+  --c-danger-soft:    #FEF2F2;
+  --c-danger-soft-h:  #FEE2E2;
+  --c-online:         #22C55E;
+
+  /* ── Shadows ─────────────────────────────────────── */
+  --c-shadow-sm:      0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+  --c-shadow-md:      0 4px 16px rgba(0,0,0,.08), 0 2px 6px rgba(0,0,0,.05);
+  --c-shadow-lg:      0 8px 32px rgba(0,0,0,.10), 0 2px 8px rgba(0,0,0,.06);
+  --c-shadow-xl:      0 24px 64px rgba(0,0,0,.14);
+  --c-shadow-accent:  0 2px 12px rgba(234,88,12,.30);
+  --c-shadow-accent-h:0 6px 20px rgba(234,88,12,.40);
+  --c-shadow-danger:  0 2px 8px rgba(239,68,68,.30);
+
+  /* ── Overlay ─────────────────────────────────────── */
+  --c-overlay:        rgba(17, 24, 39, 0.40);
+  --c-overlay-blur:   rgba(243, 244, 246, 0.90);
+
+  /* ── Scrollbar ───────────────────────────────────── */
+  --c-scrollbar:      #E5E7EB;
+
+  /* ── Transition ──────────────────────────────────── */
+  --t-theme:          background-color 0.22s ease, color 0.22s ease, border-color 0.22s ease;
+}
+
+/* ═══════════════════════════════════════════════════
+   DARK TOKENS  — Google Material You / Linear-inspired
+   Deep blue-grey base, not warm charcoal.
+   Orange accent gets a neon warmth boost.
+═══════════════════════════════════════════════════ */
+html[data-theme="dark"] {
+  /* ── Accent ─────────────────────────────────────── */
+  --c-accent:         #FB923C;     /* lighter, more visible on dark */
+  --c-accent-h:       #FDBA74;
+  --c-accent-deep:    #EA580C;
+  --c-accent-glow:    rgba(251, 146, 60, 0.30);
+  --c-accent-soft:    rgba(251, 146, 60, 0.10);
+  --c-accent-border:  rgba(251, 146, 60, 0.28);
+  --c-accent-ring:    rgba(251, 146, 60, 0.12);
+
+  /* ── Surfaces ────────────────────────────────────── */
+  /*    Google dark palette: #121212 base, then +elevation */
+  --c-bg:             #0F1117;     /* deepest page bg — near-black blue-grey */
+  --c-surface:        #1A1D27;     /* cards, sidebar, topbar */
+  --c-surface-raised: #222535;     /* hover, raised elements */
+  --c-surface-sunken: #13151E;     /* inputs, sunken areas */
+  --c-surface-overlay:#1E2130;     /* modals, dropdowns */
+
+  /* ── Borders ─────────────────────────────────────── */
+  --c-border:         #2A2D3E;
+  --c-border-strong:  #353849;
+  --c-border-input:   #2A2D3E;
+
+  /* ── Text ────────────────────────────────────────── */
+  --c-text-primary:   #E8EAF0;
+  --c-text-secondary: #C4C8D6;
+  --c-text-muted:     #8B90A8;
+  --c-text-faint:     #555B72;
+  --c-text-placeholder:#454A60;
+
+  /* ── Sidebar ─────────────────────────────────────── */
+  --c-sidebar-bg:     #1A1D27;
+  --c-sidebar-bar:    linear-gradient(90deg, #FB923C 0%, #FBBF24 50%, #FB923C 100%);
+
+  /* ── Danger / Status ─────────────────────────────── */
+  --c-danger:         #F87171;
+  --c-danger-deep:    #EF4444;
+  --c-danger-soft:    rgba(239, 68, 68, 0.12);
+  --c-danger-soft-h:  rgba(239, 68, 68, 0.20);
+  --c-online:         #4ADE80;
+
+  /* ── Shadows — stronger contrast in dark ────────── */
+  --c-shadow-sm:      0 1px 3px rgba(0,0,0,.30);
+  --c-shadow-md:      0 4px 16px rgba(0,0,0,.40);
+  --c-shadow-lg:      0 8px 32px rgba(0,0,0,.50), 0 2px 8px rgba(0,0,0,.30);
+  --c-shadow-xl:      0 24px 80px rgba(0,0,0,.70);
+  --c-shadow-accent:  0 2px 14px rgba(251,146,60,.36);
+  --c-shadow-accent-h:0 6px 24px rgba(251,146,60,.50);
+  --c-shadow-danger:  0 2px 8px rgba(248,113,113,.30);
+
+  /* ── Overlay ─────────────────────────────────────── */
+  --c-overlay:        rgba(0, 0, 0, 0.65);
+  --c-overlay-blur:   rgba(15, 17, 23, 0.92);
+
+  /* ── Scrollbar ───────────────────────────────────── */
+  --c-scrollbar:      #2A2D3E;
+}
+
+/* ═══════════════════════════════════════════════════
+   GLOBAL BASE STYLES
+   Apply tokens universally so every page is themed.
+═══════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--c-bg);
+  color: var(--c-text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  transition: var(--t-theme);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Utility classes pages can use ─────────────────── */
+/* Background */
+.bg-page       { background-color: var(--c-bg) !important; }
+.bg-surface    { background-color: var(--c-surface) !important; }
+.bg-raised     { background-color: var(--c-surface-raised) !important; }
+.bg-sunken     { background-color: var(--c-surface-sunken) !important; }
+
+/* Text */
+.text-primary   { color: var(--c-text-primary) !important; }
+.text-secondary { color: var(--c-text-secondary) !important; }
+.text-muted     { color: var(--c-text-muted) !important; }
+.text-faint     { color: var(--c-text-faint) !important; }
+.text-accent    { color: var(--c-accent) !important; }
+
+/* Borders */
+.border-theme  { border-color: var(--c-border) !important; }
+
+/* Cards — the most commonly needed class across pages */
+.card {
+  background-color: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 16px;
+  box-shadow: var(--c-shadow-sm);
+  transition: var(--t-theme), box-shadow 0.18s ease;
+}
+.card:hover {
+  box-shadow: var(--c-shadow-md);
+}
+
+/* Inputs — global override so ALL inputs go dark */
+input, textarea, select {
+  background-color: var(--c-surface-sunken);
+  color: var(--c-text-primary);
+  border-color: var(--c-border-input);
+  transition: var(--t-theme);
+}
+input::placeholder,
+textarea::placeholder { color: var(--c-text-placeholder); }
+
+/* Tables */
+table { color: var(--c-text-primary); }
+thead { background-color: var(--c-surface-raised); color: var(--c-text-muted); }
+tbody tr { border-color: var(--c-border); }
+tbody tr:hover { background-color: var(--c-surface-raised); }
+
+/* Dividers */
+hr { border-color: var(--c-border); }
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-scrollbar) transparent;
+}
+*::-webkit-scrollbar       { width: 5px; height: 5px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--c-scrollbar); border-radius: 4px; }

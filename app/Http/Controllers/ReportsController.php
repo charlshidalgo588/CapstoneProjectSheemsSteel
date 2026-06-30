@@ -11,21 +11,52 @@ use Carbon\Carbon;
 
 class ReportsController extends Controller
 {
-    public function index()
+    /**
+     * ============================================================
+     * UNIFIED REPORTS ENDPOINT
+     * ============================================================
+     * Supports two modes, switched by ?mode=month|day:
+     *
+     *   ?mode=month&year=2026&month=6   (default if mode omitted)
+     *   ?mode=day&date=2026-06-14
+     *
+     * Both modes return the exact same response shape — KPIs,
+     * top selling items, and the sales chart — just scoped to a
+     * month or to a single day. The frontend has one picker that
+     * switches between the two; everything on the page (KPI cards,
+     * Top Selling Items, the chart) reflects whichever is active.
+     */
+    public function index(Request $request)
     {
-        /**
-         * ============================================================
-         * FIXED DATE CONTEXT (USE 2025 DATA)
-         * ============================================================
-         */
-        $year  = 2025;
-        $month = 12;
+        $mode = $request->query('mode', 'month');
+        $mode = in_array($mode, ['month', 'day']) ? $mode : 'month';
 
-        $today = Carbon::create($year, $month, 1)->startOfMonth();
+        if ($mode === 'day') {
+            return $this->dayReport($request);
+        }
 
-        /* ============================================================
-         * SALES ACTIVITY
-         * ========================================================== */
+        return $this->monthReport($request);
+    }
+
+    /**
+     * ============================================================
+     * MONTH MODE
+     * ============================================================
+     */
+    private function monthReport(Request $request)
+    {
+        // FIX (previous bug): year/month used to be hardcoded to 2025/12,
+        // freezing the whole page on one historical month. Now both come
+        // from the request, defaulting to the REAL current month.
+        $year  = (int) $request->query('year', now()->year);
+        $month = (int) $request->query('month', now()->month);
+
+        // Clamp to plausible bounds — guards against garbage input like
+        // ?month=0 or ?year=99999 producing a nonsense Carbon date.
+        $month = max(1, min($month, 12));
+        $year  = max(2000, min($year, (int) now()->year + 1));
+
+        $periodStart = Carbon::create($year, $month, 1)->startOfMonth();
 
         $totalSales = DB::table('sales')
             ->whereYear('SaleDate', $year)
@@ -42,92 +73,36 @@ class ReportsController extends Controller
             ->whereMonth('SaleDate', $month)
             ->count();
 
-        $voids = Sale::whereYear('SaleDate', $year)
-            ->whereMonth('SaleDate', $month)
-            ->where('TotalAmount', 0)
-            ->count();
+        $profit = DB::table('sales_items')
+            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
+            ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
+            ->whereYear('sales.SaleDate', $year)
+            ->whereMonth('sales.SaleDate', $month)
+            ->selectRaw('
+                SUM((sales_items.PriceAtSale - products.CostPrice) * sales_items.Quantity) as profit
+            ')
+            ->value('profit') ?? 0;
 
-        $monthlyProfit = DB::table('sales_items')
-    ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-    ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
-    ->whereYear('sales.SaleDate', $year)
-    ->whereMonth('sales.SaleDate', $month)
-    ->selectRaw('
-        SUM((sales_items.PriceAtSale - products.CostPrice) * sales_items.Quantity) as profit
-    ')
-    ->value('profit') ?? 0;
-
-$salesActivity = [
-    [
-        'label' => "This Month's Sales",
-        'value' => '₱' . number_format($totalSales, 2),
-    ],
-    [
-        'label' => "Items Sold This Month",
-        'value' => (int) $itemsSold,
-    ],
-    [
-        'label' => "Transactions This Month",
-        'value' => (int) $transactions,
-    ],
-    [
-        'label' => "Monthly Profit",
-        'value' => '₱' . number_format($monthlyProfit, 2),
-    ],
-];
-
-
-
-        /* ============================================================
-         * INVENTORY SUMMARY
-         * ========================================================== */
-
-        $quantityInHand = Inventory::sum('QuantityOnHand');
-
-        $lowStock = DB::table('products')
-            ->join('inventories', 'products.ProductID', '=', 'inventories.ProductID')
-            ->whereColumn('inventories.QuantityOnHand', '<=', 'products.ReorderLevel')
-            ->count();
-
-        $inventorySummary = [
-            [
-                'label' => 'Quantity in Hand',
-                'value' => (int) $quantityInHand,
-            ],
-            [
-                'label' => 'Quantity to Receive',
-                'value' => 0,
-            ],
-            [
-                'label' => 'Low Stock Items',
-                'value' => (int) $lowStock,
-                'isRed' => true,
-            ],
-            [
-                'label' => 'Total Items',
-                'value' => Product::count(),
-            ],
-            [
-                'label' => 'Active Items',
-                'value' => Product::whereHas('inventory', fn ($q) =>
-                    $q->where('QuantityOnHand', '>', 0)
-                )->count(),
-            ],
+        $salesActivity = [
+            ['label' => "This Month's Sales",      'value' => '₱' . number_format($totalSales, 2)],
+            ['label' => "Items Sold This Month",    'value' => (int) $itemsSold],
+            ['label' => "Transactions This Month",  'value' => (int) $transactions],
+            ['label' => "Monthly Profit",           'value' => '₱' . number_format($profit, 2)],
         ];
 
-        /* ============================================================
-         * TOP SELLING ITEMS (MONTH)
-         * ========================================================== */
-
+        // FIX: same issue as day mode — an INNER join to `categories`
+        // silently drops sales rows for any product whose CategoryID is
+        // null or doesn't match a row in `categories`. Switched to
+        // leftJoin + fallback label so this can't hide real sales data.
         $topSelling = DB::table('sales_items')
             ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
             ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
-            ->join('categories', 'products.CategoryID', '=', 'categories.CategoryID')
+            ->leftJoin('categories', 'products.CategoryID', '=', 'categories.CategoryID')
             ->whereYear('sales.SaleDate', $year)
             ->whereMonth('sales.SaleDate', $month)
             ->select(
                 'products.ProductName',
-                'categories.CategoryName',
+                DB::raw("COALESCE(categories.CategoryName, 'Uncategorized') as CategoryName"),
                 DB::raw('SUM(sales_items.Quantity) as total_quantity'),
                 DB::raw('SUM(sales_items.Quantity * sales_items.PriceAtSale) as total_sales')
             )
@@ -135,11 +110,8 @@ $salesActivity = [
             ->orderByDesc('total_quantity')
             ->get();
 
-        /* ============================================================
-         * MONTHLY SALES (CHART)
-         * ========================================================== */
-
-        $monthlySales = Sale::whereYear('SaleDate', $year)
+        // Chart: one point per day across the month
+        $salesChart = Sale::whereYear('SaleDate', $year)
             ->whereMonth('SaleDate', $month)
             ->select(
                 DB::raw('DATE(SaleDate) as date'),
@@ -149,13 +121,166 @@ $salesActivity = [
             ->orderBy('date')
             ->get();
 
-        $monthlyTotal = $totalSales;
+        return response()->json([
+            'mode'              => 'month',
+            'selected_period'   => [
+                'year'  => $year,
+                'month' => $month,
+                'value' => sprintf('%04d-%02d', $year, $month), // for <input type="month">
+                'label' => $periodStart->format('F Y'),         // e.g. "June 2026"
+            ],
+            'sales_activity'    => $salesActivity,
+            'inventory_summary' => $this->inventorySummary(),
+            'top_selling'       => $topSelling,
+            'monthly_sales'     => $salesChart,
+            'monthly_total'     => $totalSales,
+            'sales'             => $this->salesList(),
+        ], 200);
+    }
 
-        /* ============================================================
-         * SALES LIST (TRANSACTIONS PAGE)
-         * ========================================================== */
+    /**
+     * ============================================================
+     * DAY MODE
+     * ============================================================
+     */
+    private function dayReport(Request $request)
+    {
+        $request->validate([
+            'date' => ['required', 'date_format:Y-m-d'],
+        ]);
 
-        $salesList = Sale::with(['customer', 'clerk'])
+        $date = Carbon::createFromFormat('Y-m-d', $request->query('date'));
+
+        // Guard against a future date — there can't be sales data yet.
+        if ($date->isAfter(now()->endOfDay())) {
+            $date = now();
+        }
+
+        $totalSales = DB::table('sales')
+            ->whereDate('SaleDate', $date)
+            ->sum('TotalAmount') ?? 0;
+
+        $itemsSold = DB::table('sales_items')
+            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
+            ->whereDate('sales.SaleDate', $date)
+            ->sum('sales_items.Quantity') ?? 0;
+
+        $transactions = Sale::whereDate('SaleDate', $date)->count();
+
+        $profit = DB::table('sales_items')
+            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
+            ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
+            ->whereDate('sales.SaleDate', $date)
+            ->selectRaw('
+                SUM((sales_items.PriceAtSale - products.CostPrice) * sales_items.Quantity) as profit
+            ')
+            ->value('profit') ?? 0;
+
+        $salesActivity = [
+            ['label' => "Sales This Day",        'value' => '₱' . number_format($totalSales, 2)],
+            ['label' => "Items Sold This Day",    'value' => (int) $itemsSold],
+            ['label' => "Transactions This Day",  'value' => (int) $transactions],
+            ['label' => "Profit This Day",        'value' => '₱' . number_format($profit, 2)],
+        ];
+
+        // FIX: this previously used an INNER join to `categories`, which
+        // silently dropped every sales row for a product whose CategoryID
+        // is null or doesn't match any row in `categories` — even though
+        // that sale clearly happened (the KPI cards above prove it, since
+        // they never join categories at all). Switched to a leftJoin with
+        // a fallback label so a missing/orphaned category can no longer
+        // make real sales data disappear from this table.
+        $topSelling = DB::table('sales_items')
+            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
+            ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
+            ->leftJoin('categories', 'products.CategoryID', '=', 'categories.CategoryID')
+            ->whereDate('sales.SaleDate', $date)
+            ->select(
+                'products.ProductName',
+                DB::raw("COALESCE(categories.CategoryName, 'Uncategorized') as CategoryName"),
+                DB::raw('SUM(sales_items.Quantity) as total_quantity'),
+                DB::raw('SUM(sales_items.Quantity * sales_items.PriceAtSale) as total_sales')
+            )
+            ->groupBy('products.ProductName', 'categories.CategoryName')
+            ->orderByDesc('total_quantity')
+            ->get();
+
+        // Chart: one point per HOUR across the single day, since a day
+        // has no "days" to plot — this gives the owner a same-shape line
+        // chart showing how sales moved through that specific day.
+        $salesChart = Sale::whereDate('SaleDate', $date)
+            ->select(
+                DB::raw('HOUR(SaleDate) as hour'),
+                DB::raw('SUM(TotalAmount) as total')
+            )
+            ->groupBy('hour')
+            ->orderBy('hour')
+            ->get()
+            ->map(fn ($row) => [
+                'date'  => sprintf('%02d:00', $row->hour), // reuse the same "date" key the chart already plots
+                'total' => $row->total,
+            ]);
+
+        return response()->json([
+            'mode'              => 'day',
+            'selected_period'   => [
+                'date'  => $date->format('Y-m-d'),
+                'value' => $date->format('Y-m-d'),   // for <input type="date">
+                'label' => $date->format('F j, Y'),  // e.g. "June 14, 2026"
+            ],
+            'sales_activity'    => $salesActivity,
+            'inventory_summary' => $this->inventorySummary(),
+            'top_selling'       => $topSelling,
+            'monthly_sales'     => $salesChart,
+            'monthly_total'     => $totalSales,
+            'sales'             => $this->salesList(),
+        ], 200);
+    }
+
+    /**
+     * ============================================================
+     * INVENTORY SUMMARY
+     * ============================================================
+     * Point-in-time stock levels — not scoped to month or day in
+     * either mode, since "how much stock exists right now" doesn't
+     * change based on which sales period you're looking at.
+     *
+     * FIX: "Quantity to Receive" removed — it was hardcoded to 0 with
+     * no backing query (no purchase_orders / incoming-stock table
+     * referenced anywhere), so it could never reflect anything real.
+     */
+    private function inventorySummary(): array
+    {
+        $quantityInHand = Inventory::sum('QuantityOnHand');
+
+        $lowStock = DB::table('products')
+            ->join('inventories', 'products.ProductID', '=', 'inventories.ProductID')
+            ->whereColumn('inventories.QuantityOnHand', '<=', 'products.ReorderLevel')
+            ->count();
+
+        return [
+            ['label' => 'Quantity in Hand', 'value' => (int) $quantityInHand],
+            ['label' => 'Low Stock Items',  'value' => (int) $lowStock, 'isRed' => true],
+            ['label' => 'Total Items',      'value' => Product::count()],
+            [
+                'label' => 'Active Items',
+                'value' => Product::whereHas('inventory', fn ($q) =>
+                    $q->where('QuantityOnHand', '>', 0)
+                )->count(),
+            ],
+        ];
+    }
+
+    /**
+     * ============================================================
+     * SALES LIST (TRANSACTIONS PAGE)
+     * ============================================================
+     * Left unscoped to month/day — feeds a separate transactions
+     * page, not the Reports KPIs/chart above.
+     */
+    private function salesList()
+    {
+        return Sale::with(['customer', 'clerk'])
             ->orderBy('SaleDate', 'desc')
             ->get()
             ->map(function ($sale) {
@@ -169,18 +294,5 @@ $salesActivity = [
                     'ClerkName'     => $sale->clerk->name ?? 'Unknown',
                 ];
             });
-
-        /* ============================================================
-         * RETURN JSON (MATCHES VUE 1:1)
-         * ========================================================== */
-
-        return response()->json([
-            'sales_activity'    => $salesActivity,
-            'inventory_summary' => $inventorySummary,
-            'top_selling'       => $topSelling,
-            'monthly_sales'     => $monthlySales,
-            'monthly_total'     => $monthlyTotal,
-            'sales'             => $salesList,
-        ], 200);
     }
 }
