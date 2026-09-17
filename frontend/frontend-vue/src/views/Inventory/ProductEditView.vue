@@ -386,7 +386,9 @@ async function updateProduct() {
     }
     if (newImageFile.value) fd.append('Product_Image', newImageFile.value)
     fd.append('_method', 'PUT')
-    await api.post(`/api/products/${productId}`, fd)
+    await api.post(`/api/products/${productId}`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
     success.value = 'Product updated successfully!'
     setTimeout(() => router.push('/products'), 800)
   } catch {
@@ -395,6 +397,8 @@ async function updateProduct() {
     loading.value = false
   }
 }
+
+onMounted(loadData)
 
 onMounted(loadData)
 </script>
@@ -469,7 +473,6 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 .skeleton-line   { height: 12px; border-radius: 6px; background: var(--p-border); animation: shimmer 1.4s infinite; }
 .skeleton-line--wide   { width: 160px; }
 .skeleton-line--narrow { width: 100px; }
-.skeleton-body { }
 .skeleton-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .skeleton-field { height: 42px; border-radius: 10px; background: var(--p-border); animation: shimmer 1.4s infinite; }
 @keyframes shimmer { 0%,100%{opacity:.6} 50%{opacity:.3} }

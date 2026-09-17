@@ -8,6 +8,7 @@ import LoginView from '@/views/LoginView.vue'
 import HomeView from '@/views/HomeView.vue'
 import AboutView from '@/views/AboutView.vue'
 import NotFound from '@/views/NotFound.vue'
+import SetPasswordView from '@/views/SetPasswordView.vue'
 
 /* ---------------------------------------------------------
    ⚙️ SETTINGS
@@ -70,6 +71,11 @@ const routes = [
   /* 🏠 MAIN (Protected) */
   { path: '/home', name: 'home', component: HomeView, meta: { requiresAuth: true } },
   { path: '/about', name: 'about', component: AboutView, meta: { requiresAuth: true } },
+
+  /* 🔑 FORCED PASSWORD CHANGE — reached automatically by the guard below
+     when auth.user.must_change_password is true; not linked from anywhere
+     in the UI. */
+  { path: '/set-password', name: 'set-password', component: SetPasswordView, meta: { requiresAuth: true } },
 
   /* ⚙️ SETTINGS */
   { path: '/settings', name: 'settings', component: SettingsView, meta: { requiresAuth: true } },
@@ -193,6 +199,21 @@ router.beforeEach(async (to, from, next) => {
       if (!auth.authenticated) {
         await auth.fetchUser()
       }
+
+      // Unskippable gate: as long as this is true, every protected route
+      // bounces here instead — typing /home, /products, whatever, in the
+      // address bar doesn't get around it. auth.user needs to actually
+      // carry must_change_password for this to work; see AuthController's
+      // login()/user() responses.
+      if (auth.user?.must_change_password && to.path !== '/set-password') {
+        return next('/set-password')
+      }
+      // Once it's cleared, don't let them sit on a screen that no longer
+      // applies to them.
+      if (!auth.user?.must_change_password && to.path === '/set-password') {
+        return next('/home')
+      }
+
       return next()
     } catch (error) {
       auth.user = null

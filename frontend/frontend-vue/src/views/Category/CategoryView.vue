@@ -341,11 +341,16 @@ async function confirmDelete() {
 .empty-state i { font-size: 36px; }
 .empty-state p { font-size: 14px; font-weight: 600; color: var(--c-text-muted-local); margin: 0; }
 
-/* MODAL */
+/* MODAL — solid, opaque overlay; color adapts to theme rather than a
+   translucent black wash, so it never blends into a dark-mode page.
+   No blur, alpha is effectively 1. */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(0,0,0,.48); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, .70); /* light mode: solid dark slate overlay */
   display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+html[data-theme="dark"] .modal-backdrop {
+  background: rgba(0, 0, 0, .82); /* dark mode: solid near-black overlay */
 }
 .modal-fade-enter-active { transition: opacity .22s ease, transform .22s ease; }
 .modal-fade-leave-active { transition: opacity .18s ease, transform .18s ease; }
@@ -353,10 +358,14 @@ async function confirmDelete() {
 
 .del-modal {
   width: 100%; max-width: 400px;
-  background: var(--c-surface-local); border: 1px solid var(--c-border-local);
-  border-radius: 22px; box-shadow: var(--c-shadow-xl); overflow: hidden;
+  background: #FFFFFF; border: 1px solid #E5E7EB;
+  border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.35); overflow: hidden;
   display: flex; flex-direction: column;
   transition: background-color .22s, border-color .22s;
+}
+html[data-theme="dark"] .del-modal {
+  background: #1E2130; border-color: #2A2D3E;
+  box-shadow: 0 24px 64px rgba(0,0,0,.6);
 }
 .del-modal::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, #f43f5e, #fb7185); }
 .del-modal-icon-ring { display: flex; align-items: center; justify-content: center; padding: 28px 0 0; }

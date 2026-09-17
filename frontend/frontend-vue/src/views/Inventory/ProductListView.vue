@@ -9,6 +9,26 @@
           <h1 class="page-title">Product List</h1>
         </div>
         <div class="header-actions">
+          <!-- STOCK FILTER TOGGLE -->
+          <div class="stock-filter-toggle">
+            <button
+              class="sf-btn"
+              :class="{ 'sf-btn--active': stockFilter === 'all' }"
+              @click="stockFilter = 'all'"
+            >
+              All Products
+            </button>
+            <button
+              class="sf-btn sf-btn--danger"
+              :class="{ 'sf-btn--active': stockFilter === 'low' }"
+              @click="stockFilter = 'low'"
+            >
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              Low Stock
+              <span v-if="lowStockCount > 0" class="sf-count">{{ lowStockCount }}</span>
+            </button>
+          </div>
+
           <div class="select-wrap">
             <i class="fa-solid fa-layer-group input-icon"></i>
             <select v-model="selectedCategory" @change="handleCategoryChange" class="form-select">
@@ -49,7 +69,12 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="product in filteredProducts" :key="product.ProductID">
+              <tr
+                v-for="product in filteredProducts"
+                :key="product.ProductID"
+                :data-product-row="product.ProductID"
+                :class="{ 'row-highlight': highlightedProductId === product.ProductID }"
+              >
 
                 <!-- Product name + avatar -->
                 <td>
@@ -99,9 +124,9 @@
               <tr v-if="filteredProducts.length === 0">
                 <td colspan="6" class="td-empty">
                   <div class="empty-state">
-                    <i class="fa-solid fa-box-open"></i>
-                    <p>No products found</p>
-                    <RouterLink to="/products/create" class="btn btn--primary btn--sm">
+                    <i :class="stockFilter === 'low' ? 'fa-solid fa-circle-check' : 'fa-solid fa-box-open'"></i>
+                    <p>{{ stockFilter === 'low' ? 'No low-stock products right now.' : 'No products found' }}</p>
+                    <RouterLink v-if="stockFilter !== 'low'" to="/products/create" class="btn btn--primary btn--sm">
                       <i class="fa-solid fa-plus"></i> Add Product
                     </RouterLink>
                   </div>
@@ -250,6 +275,17 @@ const selectedCategory = ref('')
 const successMessage  = ref('')
 const searchQuery     = ref('')
 
+/* stock filter — 'all' | 'low' */
+const stockFilter = ref('all')
+
+/* row highlight — set from a notification click, either:
+   - ?highlightId=<ProductID>  (product_created notifications — direct ID match)
+   - ?highlight=<ProductName>  (low_stock/out_of_stock notifications — name match)
+   cleared automatically after a few seconds so it reads as a "flash",
+   not a permanent state. */
+const highlightedProductId = ref(null)
+let highlightTimer = null
+
 /* restock */
 const modalVisible  = ref(false)
 const modalProduct  = ref(null)
@@ -270,20 +306,87 @@ const deleting         = ref(false)
 const setMenuButtonRef = id => el => { if (el) menuButtonRefs.set(id, el); else menuButtonRefs.delete(id) }
 const imagePath   = path => `http://127.0.0.1:8000/storage/${path}`
 const formatPrice = v => Number(v||0).toLocaleString(undefined, { minimumFractionDigits:2 })
-const stockClass  = p => {
-  const qty = p.inventory?.QuantityOnHand ?? 0
-  if (qty <= 0)  return 'stock-badge--oos'
-  if (qty < 5)   return 'stock-badge--low'
+
+// "Low stock" is now per-product, driven by each product's own
+// ReorderLevel (set on the product itself) rather than one fixed number
+// for the whole catalog — a box of nails and a roofing sheet can have
+// very different reorder points. Both formatProduct() paths on the
+// backend (productList + findByBarcode) already return ReorderLevel
+// inside `inventory`, so no API change was needed for this.
+const stockClass = p => {
+  const qty     = p.inventory?.QuantityOnHand ?? 0
+  const reorder = p.inventory?.ReorderLevel ?? 0
+  if (qty <= 0)        return 'stock-badge--oos'
+  if (qty <= reorder)  return 'stock-badge--low'
   return 'stock-badge--ok'
+}
+// Anything at or below its own reorder level — including out-of-stock —
+// needs restocking attention, so the "Low Stock" filter groups both together.
+const isLowStock = p => {
+  const qty     = p.inventory?.QuantityOnHand ?? 0
+  const reorder = p.inventory?.ReorderLevel ?? 0
+  return qty <= reorder
 }
 
 async function loadProducts()   { const r = await api.get('/api/product-list'); products.value = r.data }
 async function loadCategories() { const r = await api.get('/api/categories');   categories.value = r.data.categories }
 
-onMounted(() => {
-  loadProducts(); loadCategories()
+/** Called once products are loaded, when the page was opened from a
+ *  notification click. Handles two arrival paths:
+ *
+ *  - product_created notifications carry ?highlightId=<ProductID> —
+ *    notifiable_id is populated on these (see ProductController@store),
+ *    so we match directly against ProductID. This is the preferred,
+ *    unambiguous path.
+ *
+ *  - low_stock/out_of_stock notifications carry ?highlight=<ProductName>
+ *    instead (they predate notifiable_id being populated), so we fall
+ *    back to a case-insensitive name match extracted from the
+ *    notification's description text.
+ *
+ *  highlightId is checked first; if present and it matches, we don't
+ *  bother with the name fallback. Silently does nothing if no match is
+ *  found (e.g. the product was renamed or deleted since the alert fired). */
+function applyHighlightFromQuery() {
+  const idParam   = route.query.highlightId
+  const nameParam = route.query.highlight
+
+  let match = null
+  if (idParam) {
+    match = products.value.find(p => String(p.ProductID) === String(idParam))
+  }
+  if (!match && nameParam) {
+    match = products.value.find(
+      p => p.ProductName?.toLowerCase() === String(nameParam).toLowerCase()
+    )
+  }
+  if (!match) return
+
+  highlightedProductId.value = match.ProductID
+
+  nextTick(() => {
+    const el = document.querySelector(`[data-product-row="${match.ProductID}"]`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+
+  if (highlightTimer) clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => { highlightedProductId.value = null }, 3000)
+}
+
+onMounted(async () => {
+  // Coming from a low-stock notification: force the Low Stock filter on
+  // before the list even renders, so the row we're about to highlight
+  // is guaranteed to be visible.
+  if (route.query.stockFilter === 'low') stockFilter.value = 'low'
   if (route.query.category) selectedCategory.value = String(route.query.category)
+
+  await loadProducts()
+  loadCategories()
+
+  applyHighlightFromQuery()
 })
+
+onBeforeUnmount(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 
 watch(() => route.query.search, v => { searchQuery.value = (v || '').toLowerCase() }, { immediate: true })
 watch(selectedCategory, nc => { router.replace({ query: { ...route.query, category: nc || undefined } }) })
@@ -293,9 +396,15 @@ const filteredProducts = computed(() =>
   products.value.filter(p => {
     const ms = !searchQuery.value || [p.ProductName, p.SKU, p.category?.CategoryName].join(' ').toLowerCase().includes(searchQuery.value)
     const mc = !selectedCategory.value || String(p.CategoryID) === selectedCategory.value
-    return ms && mc
+    const mf = stockFilter.value !== 'low' || isLowStock(p)
+    return ms && mc && mf
   })
 )
+
+// Computed off the full product list (not filteredProducts), so the
+// count badge on the "Low Stock" button doesn't shrink to itself once
+// that filter is active — it always reflects the true total needing attention.
+const lowStockCount = computed(() => products.value.filter(isLowStock).length)
 
 function toggleMenu(id) {
   if (openMenuId.value === id) { closeMenu(); return }
@@ -386,6 +495,32 @@ async function confirmDelete() {
 .page-title   { font-size: 26px; font-weight: 800; color: var(--pl-text-primary); letter-spacing: -.03em; margin: 0; transition: color .22s; }
 .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
+/* STOCK FILTER TOGGLE */
+.stock-filter-toggle {
+  display: flex; align-items: center;
+  border: 1.5px solid var(--pl-border-strong); border-radius: 10px;
+  overflow: hidden; height: 40px; flex-shrink: 0;
+}
+.sf-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 100%; padding: 0 14px;
+  border: none; background: var(--pl-surface); color: var(--pl-text-muted);
+  font-size: 12.5px; font-weight: 600; font-family: inherit; cursor: pointer;
+  transition: background-color .15s, color .15s;
+  white-space: nowrap;
+}
+.sf-btn:first-child { border-right: 1.5px solid var(--pl-border-strong); }
+.sf-btn:hover { background: var(--pl-surface-raised); color: var(--pl-text-primary); }
+.sf-btn--active { background: var(--pl-accent-soft); color: var(--pl-accent); }
+.sf-btn--danger.sf-btn--active { background: rgba(244,63,94,.12); color: var(--pl-red); }
+html[data-theme="dark"] .sf-btn--danger.sf-btn--active { background: rgba(244,63,94,.18); color: #F87171; }
+.sf-count {
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 20px; font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--pl-red); color: #fff;
+}
+
 /* CATEGORY SELECT */
 .select-wrap { position: relative; display: flex; align-items: center; }
 .input-icon  { position: absolute; left: 11px; font-size: 11px; color: var(--pl-text-faint); pointer-events: none; z-index: 1; }
@@ -448,6 +583,23 @@ html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); colo
 .data-table tbody tr:hover td { background: var(--pl-surface-raised); }
 .data-table tbody tr:last-child td { border-bottom: none; }
 
+/* ROW HIGHLIGHT — flashed briefly when arriving from a low-stock or
+   product-created notification click, so the exact product the alert
+   referred to is unmistakable in the (possibly long) filtered list.
+   Green rather than red — the highlight just means "here's the row the
+   notification pointed to," not a warning, so it shouldn't read as an
+   alert color even when it was triggered by a low-stock notification. */
+.row-highlight td {
+  background: rgba(16,185,129,.12) !important;
+  animation: row-pulse 1.6s ease-in-out 1;
+}
+@keyframes row-pulse {
+  0%   { background: rgba(16,185,129,.12); }
+  50%  { background: rgba(16,185,129,.24); }
+  100% { background: rgba(16,185,129,.12); }
+}
+html[data-theme="dark"] .row-highlight td { background: rgba(16,185,129,.16) !important; }
+
 /* PRODUCT CELL */
 .cell-product { display: flex; align-items: center; gap: 12px; }
 .product-avatar {
@@ -466,17 +618,20 @@ html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); colo
 .cell-mono        { font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .cell-price       { font-weight: 700; color: var(--pl-text-primary); font-variant-numeric: tabular-nums; transition: color .22s; }
 
-/* STOCK BADGE */
+/* STOCK BADGE — low stock is RED (not amber) so it reads as a clear
+   warning next to green "In Stock" instead of a softer, easy-to-miss
+   amber. Out-of-stock stays a deeper/bolder red so the two remain
+   visually distinct at a glance despite both being "red family." */
 .stock-badge {
   display: inline-flex; align-items: center;
   font-size: 12px; font-weight: 700; border-radius: 20px; padding: 3px 10px;
 }
 .stock-badge--ok  { background: rgba(16,185,129,.12); color: var(--pl-green); }
-.stock-badge--low { background: rgba(245,158,11,.12);  color: var(--pl-amber); }
-.stock-badge--oos { background: rgba(244,63,94,.12);   color: var(--pl-red);   }
+.stock-badge--low { background: rgba(244,63,94,.10);  color: var(--pl-red); border: 1px solid rgba(244,63,94,.22); }
+.stock-badge--oos { background: rgba(244,63,94,.16);  color: var(--pl-red); font-weight: 800; }
 html[data-theme="dark"] .stock-badge--ok  { background: rgba(16,185,129,.18); color: #4ADE80; }
-html[data-theme="dark"] .stock-badge--low { background: rgba(245,158,11,.18); color: #FCD34D; }
-html[data-theme="dark"] .stock-badge--oos { background: rgba(244,63,94,.18);  color: #F87171; }
+html[data-theme="dark"] .stock-badge--low { background: rgba(244,63,94,.14);  color: #F87171; border-color: rgba(244,63,94,.30); }
+html[data-theme="dark"] .stock-badge--oos { background: rgba(244,63,94,.22);  color: #F87171; }
 
 /* ACTIONS */
 .td-actions { text-align: right; }
@@ -506,11 +661,16 @@ html[data-theme="dark"] .restock-btn { background: rgba(16,185,129,.18); }
 .empty-state i { font-size: 36px; }
 .empty-state p { font-size: 14px; font-weight: 600; color: var(--pl-text-muted); margin: 0; }
 
-/* MODAL SHARED */
+/* MODAL SHARED — solid, opaque overlay; color adapts to theme rather
+   than a translucent black wash, so it never blends into a dark-mode
+   page. No blur, alpha is effectively 1. */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(0,0,0,.48); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, .70); /* light mode: solid dark slate overlay */
   display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+html[data-theme="dark"] .modal-backdrop {
+  background: rgba(0, 0, 0, .82); /* dark mode: solid near-black overlay */
 }
 .modal-fade-enter-active { transition: opacity .22s ease, transform .22s ease; }
 .modal-fade-leave-active { transition: opacity .18s ease, transform .18s ease; }
@@ -519,9 +679,13 @@ html[data-theme="dark"] .restock-btn { background: rgba(16,185,129,.18); }
 /* RESTOCK MODAL */
 .restock-modal {
   width: 100%; max-width: 420px;
-  background: var(--pl-surface); border: 1px solid var(--pl-border);
-  border-radius: 22px; box-shadow: var(--c-shadow-xl); overflow: hidden;
+  background: #FFFFFF; border: 1px solid #E5E7EB;
+  border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.35); overflow: hidden;
   transition: background-color .22s, border-color .22s;
+}
+html[data-theme="dark"] .restock-modal {
+  background: #1E2130; border-color: #2A2D3E;
+  box-shadow: 0 24px 64px rgba(0,0,0,.6);
 }
 .restock-modal::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, var(--pl-green), #34d399); }
 
@@ -595,10 +759,14 @@ html[data-theme="dark"] .restock-modal-icon { background: rgba(16,185,129,.18); 
 /* DELETE MODAL (same as Suppliers pattern) */
 .del-modal {
   width: 100%; max-width: 400px;
-  background: var(--pl-surface); border: 1px solid var(--pl-border);
-  border-radius: 22px; box-shadow: var(--c-shadow-xl); overflow: hidden;
+  background: #FFFFFF; border: 1px solid #E5E7EB;
+  border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.35); overflow: hidden;
   display: flex; flex-direction: column;
   transition: background-color .22s, border-color .22s;
+}
+html[data-theme="dark"] .del-modal {
+  background: #1E2130; border-color: #2A2D3E;
+  box-shadow: 0 24px 64px rgba(0,0,0,.6);
 }
 .del-modal::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, #f43f5e, #fb7185); }
 .del-modal-icon-ring { display: flex; align-items: center; justify-content: center; padding: 28px 0 0; }
@@ -645,6 +813,8 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
 @media (max-width: 700px) {
   .prod-list-page { padding: 16px 16px 48px; }
   .header-actions { flex-direction: column; align-items: stretch; }
+  .stock-filter-toggle { width: 100%; }
+  .sf-btn { flex: 1; justify-content: center; }
   .form-select    { width: 100%; }
 }
 </style>

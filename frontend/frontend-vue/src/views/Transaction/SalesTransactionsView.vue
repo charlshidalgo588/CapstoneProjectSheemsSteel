@@ -65,7 +65,12 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="sale in filteredSales" :key="sale.SaleID" :class="{ 'row--selected': selectedSales.includes(sale.SaleID) }">
+              <tr
+                v-for="sale in filteredSales"
+                :key="sale.SaleID"
+                :data-sale-row="sale.SaleID"
+                :class="{ 'row--selected': selectedSales.includes(sale.SaleID), 'row-highlight': highlightedSaleId === sale.SaleID }"
+              >
                 <td class="th-checkbox">
                   <label class="checkbox-wrap">
                     <input type="checkbox" :value="sale.SaleID" v-model="selectedSales" />
@@ -147,14 +152,56 @@
         </div>
       </div>
     </transition>
+
+    <!-- ── SUCCESS CONFIRMATION MODAL ── -->
+    <!-- Shows after deletion completes — more prominent and intentional
+         than a banner, so the owner can't miss that the action succeeded. -->
+    <transition name="modal-fade">
+      <div v-if="successModal" class="modal-backdrop" @click.self="closeSuccessModal">
+        <div class="success-modal">
+          <div class="success-modal-icon-ring">
+            <div class="success-modal-icon">
+              <i class="fa-solid fa-circle-check"></i>
+            </div>
+          </div>
+          <div class="success-modal-body">
+            <h3 class="success-modal-title">Successfully Deleted</h3>
+            <p class="success-modal-desc">
+              <strong>{{ deletedCount }}</strong>
+              sale receipt{{ deletedCount !== 1 ? 's have' : ' has' }} been permanently deleted.
+              This action cannot be undone.
+            </p>
+
+            <!-- Summary chip listing what was deleted -->
+            <div class="success-summary-chip">
+              <div class="success-summary-icon">
+                <i class="fa-solid fa-trash-can"></i>
+              </div>
+              <div class="success-summary-info">
+                <p class="success-summary-label">Deleted Receipts</p>
+                <p class="success-summary-val">{{ deletedCount }} record{{ deletedCount !== 1 ? 's' : '' }} removed</p>
+              </div>
+              <span class="success-summary-badge">Done</span>
+            </div>
+          </div>
+          <div class="success-modal-footer">
+            <button class="success-modal-btn" @click="closeSuccessModal">
+              <i class="fa-solid fa-check"></i> Got it
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </Layout>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import Layout from '@/components/Layout.vue'
 import api from '@/api/axios'
+
+const route = useRoute()
 
 const sales = ref([])
 
@@ -171,7 +218,6 @@ async function loadSales() {
     console.error('Failed to load sales:', err)
   }
 }
-onMounted(loadSales)
 
 const periods = [
   { key: 'today',   label: 'Today' },
@@ -190,8 +236,62 @@ function setPeriod(p) { selectedPeriod.value = p; periodDropdown.value = false }
 function handleClickOutside(e) {
   if (!e.target.closest('.period-dropdown')) periodDropdown.value = false
 }
-onMounted(() => document.addEventListener('click', handleClickOutside))
-onUnmounted(() => document.removeEventListener('click', handleClickOutside))
+
+/* row highlight — set when arriving from a "New Sale" notification
+   click (?highlightSale=<SaleID>). Cleared automatically after a few
+   seconds so it reads as a "flash", not a permanent state. */
+const highlightedSaleId = ref(null)
+let highlightTimer = null
+
+// If arriving from a "New Sale" notification, the sale might not fall
+// inside the currently-selected period (default is "This Month"). Bump
+// the period up to whichever bucket actually contains the sale's date,
+// so the row we're about to highlight is guaranteed to be visible.
+function periodContaining(date) {
+  const now = new Date()
+  if (date.toDateString() === now.toDateString()) return 'today'
+  const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0)
+  if (date >= weekStart) return 'week'
+  if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) return 'month'
+  if (Math.floor(date.getMonth()/3) === Math.floor(now.getMonth()/3) && date.getFullYear() === now.getFullYear()) return 'quarter'
+  if (date.getFullYear() === now.getFullYear()) return 'year'
+  return 'year' // fallback — oldest bucket we have
+}
+
+/** Called once sales are loaded, when the page was opened from a "New
+ *  Sale" notification click carrying ?highlightSale=<SaleID>.
+ *  notifiable_id is populated on sale notifications, so this matches
+ *  directly against SaleID — no name-based guessing needed. Silently
+ *  does nothing if no match is found (e.g. the sale was deleted since
+ *  the notification fired). */
+function applyHighlightFromQuery() {
+  const saleId = route.query.highlightSale
+  if (!saleId) return
+
+  const match = sales.value.find(s => String(s.SaleID) === String(saleId))
+  if (!match) return
+
+  selectedPeriod.value = periodContaining(new Date(match.SaleDate))
+  highlightedSaleId.value = match.SaleID
+
+  nextTick(() => {
+    const el = document.querySelector(`[data-sale-row="${match.SaleID}"]`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+
+  if (highlightTimer) clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => { highlightedSaleId.value = null }, 3000)
+}
+
+onMounted(async () => {
+  document.addEventListener('click', handleClickOutside)
+  await loadSales()
+  applyHighlightFromQuery()
+})
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+  if (highlightTimer) clearTimeout(highlightTimer)
+})
 
 const filteredSales = computed(() => {
   const now = new Date()
@@ -219,6 +319,12 @@ const showPw         = ref(false)
 const deleting        = ref(false)
 const deleteError     = ref('')
 
+// Success confirmation modal — shown after deletion completes.
+// deletedCount captures how many were deleted before selectedSales
+// is cleared, so the message stays accurate.
+const successModal = ref(false)
+const deletedCount = ref(0)
+
 function openPasswordModal() {
   if (!selectedSales.value.length) { alert('Select a sale.'); return }
   deleteError.value = ''
@@ -231,17 +337,41 @@ function closePasswordModal() {
   showPw.value = false
   deleteError.value = ''
 }
+function closeSuccessModal() { successModal.value = false }
 
 async function confirmDelete() {
   if (!adminPassword.value || deleting.value) return
   deleting.value = true
   deleteError.value = ''
   try {
-    await api.post('/api/sales/bulk-delete', { saleIds: selectedSales.value, admin_password: adminPassword.value })
-    await loadSales()
+    const count = selectedSales.value.length
+    await api.post('/api/sales/bulk-delete', {
+      saleIds: selectedSales.value,
+      admin_password: adminPassword.value
+    })
+
+    // Step 1: capture count and close the password modal FIRST,
+    // before clearing selectedSales — otherwise Vue re-renders the
+    // still-open modal with "0 sale receipts" before it closes,
+    // which is exactly the confusing flash the user was seeing.
+    deletedCount.value = count
+    passwordModal.value = false
+    adminPassword.value = ''
+    showPw.value = false
+    deleteError.value = ''
+
+    // Step 2: wait for Vue to finish closing the password modal
+    // before we clear selection, reload, and open the success modal.
+    await nextTick()
+
     selectedSales.value = []
     selectAll.value = false
-    closePasswordModal()
+    await loadSales()
+
+    // Step 3: now open the success modal — password modal is already
+    // gone, so there's no overlap and no "0 receipts" flash.
+    successModal.value = true
+
   } catch (err) {
     deleteError.value = err?.response?.data?.message || 'Incorrect password or request failed.'
   } finally {
@@ -309,6 +439,111 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
   border-radius: 20px; padding: 1px 7px; margin-left: 2px;
 }
 
+/* SUCCESS CONFIRMATION MODAL */
+.success-modal {
+  width: 100%; max-width: 420px;
+  background: #FFFFFF; border: 1px solid #E5E7EB;
+  border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.35); overflow: hidden;
+  display: flex; flex-direction: column;
+  transition: background-color .22s, border-color .22s;
+}
+html[data-theme="dark"] .success-modal {
+  background: #1E2130; border-color: #2A2D3E;
+  box-shadow: 0 24px 64px rgba(0,0,0,.6);
+}
+.success-modal::before {
+  content: ''; display: block; height: 4px;
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+.success-modal-icon-ring {
+  display: flex; align-items: center; justify-content: center;
+  padding: 28px 0 0;
+}
+.success-modal-icon {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: rgba(16,185,129,.12); border: 2px solid rgba(16,185,129,.30);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; color: #10b981;
+  box-shadow: 0 0 0 10px rgba(16,185,129,.06);
+  animation: success-pop .4s cubic-bezier(.34,1.56,.64,1) both;
+}
+html[data-theme="dark"] .success-modal-icon {
+  background: rgba(16,185,129,.16); color: #4ADE80;
+  box-shadow: 0 0 0 10px rgba(16,185,129,.08);
+}
+@keyframes success-pop {
+  from { transform: scale(0.5); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+.success-modal-body {
+  padding: 18px 26px 22px;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 10px; text-align: center;
+}
+.success-modal-title {
+  font-size: 19px; font-weight: 800;
+  color: var(--sp-text-primary); letter-spacing: -.02em; margin: 0;
+  transition: color .22s;
+}
+.success-modal-desc {
+  font-size: 13.5px; line-height: 1.65;
+  color: var(--sp-text-muted); margin: 0;
+}
+.success-modal-desc strong { color: var(--sp-text-primary); }
+
+/* Summary chip — shows what was just deleted */
+.success-summary-chip {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.20);
+  border-radius: 12px; padding: 12px 14px; margin-top: 6px; text-align: left;
+  transition: background .22s, border-color .22s;
+}
+html[data-theme="dark"] .success-summary-chip {
+  background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25);
+}
+.success-summary-icon {
+  width: 36px; height: 36px; border-radius: 9px; flex-shrink: 0;
+  background: rgba(16,185,129,.15); color: #10b981;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+html[data-theme="dark"] .success-summary-icon { color: #4ADE80; background: rgba(16,185,129,.20); }
+.success-summary-info { flex: 1; min-width: 0; }
+.success-summary-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: #10b981; margin: 0 0 2px;
+}
+html[data-theme="dark"] .success-summary-label { color: #4ADE80; }
+.success-summary-val {
+  font-size: 13.5px; font-weight: 700;
+  color: var(--sp-text-primary); margin: 0;
+  transition: color .22s;
+}
+.success-summary-badge {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  background: rgba(16,185,129,.15); color: #10b981;
+  border-radius: 20px; padding: 3px 10px; flex-shrink: 0;
+}
+html[data-theme="dark"] .success-summary-badge { background: rgba(16,185,129,.22); color: #4ADE80; }
+
+.success-modal-footer { padding: 0 26px 26px; }
+.success-modal-btn {
+  width: 100%; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 14px; font-weight: 700; font-family: 'Inter', system-ui, sans-serif;
+  border-radius: 11px; cursor: pointer; border: none;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff; box-shadow: 0 2px 12px rgba(16,185,129,.30);
+  transition: filter .18s, transform .15s, box-shadow .18s;
+}
+.success-modal-btn:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(16,185,129,.40);
+}
+.success-modal-btn:active { transform: scale(.97); }
+
 /* PERIOD DROPDOWN */
 .period-dropdown-wrap { position: relative; display: inline-block; align-self: flex-start; }
 .period-trigger {
@@ -363,6 +598,23 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 .data-table tbody td { padding: 13px 16px; border-bottom: 1px solid var(--sp-border); white-space: nowrap; transition: background-color .15s, border-color .22s; }
 .data-table tbody tr:last-child td { border-bottom: none; }
 
+/* ROW HIGHLIGHT — flashed briefly when arriving from a "New Sale"
+   notification click, so the exact receipt the alert referred to is
+   unmistakable in the (possibly long) filtered list. Uses the same
+   background as row--selected so it stays legible, layered with a
+   short pulse animation using the green "sale" accent to distinguish
+   it from a manual checkbox selection. */
+.row-highlight td {
+  background: var(--sp-accent-soft) !important;
+  animation: sale-row-pulse 1.6s ease-in-out 1;
+}
+@keyframes sale-row-pulse {
+  0%   { background: var(--sp-accent-soft); }
+  50%  { background: rgba(16,185,129,.18); }
+  100% { background: var(--sp-accent-soft); }
+}
+html[data-theme="dark"] .row-highlight td { background: rgba(16,185,129,.14) !important; }
+
 /* CHECKBOX */
 .checkbox-wrap { position: relative; display: inline-flex; cursor: pointer; }
 .checkbox-wrap input { position: absolute; opacity: 0; width: 18px; height: 18px; cursor: pointer; margin: 0; }
@@ -400,11 +652,16 @@ html[data-theme="dark"] .status-pill--void  { background: rgba(244,63,94,.18);  
 .empty-state i { font-size: 32px; }
 .empty-state p { font-size: 13.5px; font-weight: 600; color: var(--sp-text-muted); margin: 0; }
 
-/* MODAL */
+/* MODAL — solid, opaque overlay; color adapts to theme rather than a
+   translucent black wash, so it never blends into a dark-mode page.
+   No blur, alpha is effectively 1. */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(0,0,0,.48); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, .70); /* light mode: solid dark slate overlay */
   display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+html[data-theme="dark"] .modal-backdrop {
+  background: rgba(0, 0, 0, .82); /* dark mode: solid near-black overlay */
 }
 .modal-fade-enter-active { transition: opacity .22s ease, transform .22s ease; }
 .modal-fade-leave-active { transition: opacity .18s ease, transform .18s ease; }
@@ -412,10 +669,14 @@ html[data-theme="dark"] .status-pill--void  { background: rgba(244,63,94,.18);  
 
 .del-modal {
   width: 100%; max-width: 420px;
-  background: var(--sp-surface); border: 1px solid var(--sp-border);
-  border-radius: 22px; box-shadow: var(--c-shadow-xl); overflow: hidden;
+  background: #FFFFFF; border: 1px solid #E5E7EB;
+  border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.35); overflow: hidden;
   display: flex; flex-direction: column;
   transition: background-color .22s, border-color .22s;
+}
+html[data-theme="dark"] .del-modal {
+  background: #1E2130; border-color: #2A2D3E;
+  box-shadow: 0 24px 64px rgba(0,0,0,.6);
 }
 .del-modal::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, #f43f5e, #fb7185); }
 .del-modal-icon-ring { display: flex; align-items: center; justify-content: center; padding: 28px 0 0; }

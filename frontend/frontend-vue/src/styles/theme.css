@@ -17,6 +17,11 @@
   --c-accent-deep:    #C2410C;     /* gradient end */
   --c-accent-glow:    rgba(234, 88, 12, 0.24);
   --c-accent-soft:    #FFF7ED;     /* tinted bg */
+  --c-accent-soft-hover: #FEECD6;  /* visibly deeper than --c-accent-soft, used for hover
+                                       states over an already-tinted (e.g. unread) background.
+                                       Do NOT use filter:brightness() on --c-accent-soft for
+                                       this — it's already near-white in light mode, so
+                                       brightening it clips to pure white. */
   --c-accent-border:  #FDBA74;
   --c-accent-ring:    rgba(234, 88, 12, 0.10);
 
@@ -82,6 +87,7 @@ html[data-theme="dark"] {
   --c-accent-deep:    #EA580C;
   --c-accent-glow:    rgba(251, 146, 60, 0.30);
   --c-accent-soft:    rgba(251, 146, 60, 0.10);
+  --c-accent-soft-hover: rgba(251, 146, 60, 0.16); /* a bit stronger than --c-accent-soft */
   --c-accent-border:  rgba(251, 146, 60, 0.28);
   --c-accent-ring:    rgba(251, 146, 60, 0.12);
 

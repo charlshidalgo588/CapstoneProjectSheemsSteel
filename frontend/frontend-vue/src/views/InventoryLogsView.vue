@@ -5,12 +5,13 @@
       <!-- Print-only header -->
       <div class="print-only print-header">
         <div class="print-header-top">
-          <span class="print-header-date">{{ new Date().toLocaleString() }}</span>
+          <span class="print-header-date">{{ printGeneratedAt }}</span>
           <span class="print-header-company">Sheem Steel Construction Company</span>
         </div>
         <h1 class="print-header-brand">Sheem Steel Construction Company</h1>
         <p class="print-header-sub">Inventory Logs</p>
-        <p class="print-header-meta">Printed: {{ new Date().toLocaleString() }}</p>
+        <p class="print-header-meta">Printed: {{ printGeneratedAt }}</p>
+        <p class="print-header-meta">Filtered range: {{ filterLabel }}</p>
         <hr class="print-header-rule" />
       </div>
 
@@ -20,6 +21,68 @@
           <p class="page-eyebrow">Sales Intelligence</p>
           <h1 class="page-title">Inventory Logs</h1>
         </div>
+
+        <!-- Unified period control: matches Reports.vue's
+             By Month / Specific Date segmented toggle + picker exactly. -->
+        <div class="period-control">
+          <div class="period-mode-toggle">
+            <button
+              type="button"
+              class="period-mode-seg"
+              :class="{ 'period-mode-seg--active': periodMode === 'month' }"
+              @click="setPeriodMode('month')"
+            >
+              By Month
+            </button>
+            <button
+              type="button"
+              class="period-mode-seg"
+              :class="{ 'period-mode-seg--active': periodMode === 'date' }"
+              @click="setPeriodMode('date')"
+            >
+              Specific Date
+            </button>
+          </div>
+
+          <div class="period-picker-wrap">
+            <input
+              v-if="periodMode === 'month'"
+              id="inv-month"
+              type="month"
+              class="period-picker-input"
+              v-model="selectedMonth"
+              @change="applyDateFilter"
+            />
+            <input
+              v-else
+              id="inv-date"
+              type="date"
+              class="period-picker-input"
+              v-model="selectedDate"
+              @change="applyDateFilter"
+            />
+          </div>
+
+          <span class="date-filter-loading" v-if="isFiltering">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+          </span>
+        </div>
+      </div>
+
+      <!-- REPORT ACTIONS — Copy / CSV / Print the whole report.
+           Same toolbar, same placement, same classes as Reports.vue,
+           so report actions live in one consistent spot app-wide. -->
+      <div class="report-toolbar">
+        <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying'">
+          <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
+          {{ copyState === 'copied' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy' }}
+        </button>
+        <button type="button" class="rt-btn" @click="exportCSV">
+          <i class="fa-solid fa-file-csv"></i>CSV
+        </button>
+        <button type="button" class="rt-btn rt-btn--primary" @click="printReport">
+          <i class="fa-solid fa-print"></i>Print
+        </button>
       </div>
 
       <!-- Summary Cards -->
@@ -37,7 +100,7 @@
               </div>
               <div class="kpi-body">
                 <p class="kpi-label">Total Adjustments</p>
-                <p class="kpi-value">{{ summary.total_adjustments }}</p>
+                <p class="kpi-value">{{ formatNumber(summaryDisplay.total_adjustments) }}</p>
               </div>
             </div>
             <div class="kpi-accent-bar kpi-accent-bar--orange"></div>
@@ -50,7 +113,7 @@
               </div>
               <div class="kpi-body">
                 <p class="kpi-label">Total Stock In</p>
-                <p class="kpi-value kpi-value--green">+{{ summary.total_stock_in }}</p>
+                <p class="kpi-value kpi-value--green">+{{ formatNumber(summaryDisplay.total_stock_in) }}</p>
               </div>
             </div>
             <div class="kpi-accent-bar kpi-accent-bar--green"></div>
@@ -63,7 +126,7 @@
               </div>
               <div class="kpi-body">
                 <p class="kpi-label">Total Stock Out</p>
-                <p class="kpi-value kpi-value--red">-{{ summary.total_stock_out }}</p>
+                <p class="kpi-value kpi-value--red">-{{ formatNumber(summaryDisplay.total_stock_out) }}</p>
               </div>
             </div>
             <div class="kpi-accent-bar kpi-accent-bar--red"></div>
@@ -76,7 +139,7 @@
               </div>
               <div class="kpi-body">
                 <p class="kpi-label">Manual Adjustments</p>
-                <p class="kpi-value kpi-value--violet">{{ summary.manual_adjustments }}</p>
+                <p class="kpi-value kpi-value--violet">{{ formatNumber(summaryDisplay.manual_adjustments) }}</p>
               </div>
             </div>
             <div class="kpi-accent-bar kpi-accent-bar--violet"></div>
@@ -119,9 +182,10 @@
                       }">
                       {{ item.type }}
                     </span>
+                    <span v-if="isNewProduct(item)" class="status-pill status-pill--new">New</span>
                   </td>
                   <td class="cell-muted">{{ item.quantity }}</td>
-                  <td class="cell-faint">{{ item.created_at }}</td>
+                  <td class="cell-faint" :title="item.created_at">{{ formatLocalDate(item.created_at) }}</td>
                   <td class="cell-muted">{{ item.notes }}</td>
                 </tr>
               </tbody>
@@ -204,9 +268,10 @@
                       }">
                       {{ item.type }}
                     </span>
+                    <span v-if="isNewProduct(item)" class="status-pill status-pill--new">New</span>
                   </td>
                   <td class="cell-muted">{{ item.quantity }}</td>
-                  <td class="cell-faint">{{ item.created_at }}</td>
+                  <td class="cell-faint" :title="item.created_at">{{ formatLocalDate(item.created_at) }}</td>
                   <td class="cell-muted">{{ item.notes }}</td>
                 </tr>
               </tbody>
@@ -226,7 +291,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, nextTick, onBeforeUnmount } from 'vue'
 import Layout from '@/components/Layout.vue'
 import api from '@/api/axios'
 
@@ -237,81 +302,427 @@ const summary = ref({
   manual_adjustments: 0,
 })
 
+// Animated copy of `summary` that drives the KPI cards on screen. Each
+// field eases from its previous value to the new one (same cubic
+// ease-out as Reports.vue/Home.vue) whenever a filter reload comes in,
+// so the cards themselves never move — only the digits count up/down.
+const summaryDisplay = ref({
+  total_adjustments: 0,
+  total_stock_in: 0,
+  total_stock_out: 0,
+  manual_adjustments: 0,
+})
+
 const recentActivity      = ref([])
 const topAdjustedProducts = ref([])
 const inventoryLogs       = ref([])
 
+// ── Period filter state ──
+const periodMode = ref('month')
+
+function currentMonthValue() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+function currentDateValue() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+const selectedMonth = ref(currentMonthValue())
+const selectedDate  = ref(currentDateValue())
+const isFiltering   = ref(false)
+
+const currentTopLimit = ref(10)
+
+// Report actions (Copy / CSV / Print): 'idle' | 'copying' | 'copied' | 'error'
+const copyState = ref('idle')
+
+// Timestamp shown in the print-only letterhead — stamped fresh each
+// time printReport() runs, same pattern as Reports.vue, so it reflects
+// when the report was actually generated rather than when the
+// component happened to last re-render.
+const printGeneratedAt = ref('')
+
+// Some API fields can arrive as strings — route every arithmetic
+// touchpoint through this first, same helper as Reports.vue.
+function num(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+function formatNumber(v) {
+  return Math.round(num(v)).toLocaleString()
+}
+
+// Eases every field in `summaryDisplay` from its current value to the
+// matching field in `target` over `duration` ms.
+function animateSummaryTo(target, duration = 750) {
+  const start = performance.now()
+  const from = { ...summaryDisplay.value }
+  const keys = Object.keys(target)
+  const tick = (now) => {
+    const progress = Math.min((now - start) / duration, 1)
+    const eased = 1 - Math.pow(1 - progress, 3)
+    keys.forEach((key) => {
+      const f = num(from[key])
+      const t = num(target[key])
+      summaryDisplay.value[key] = f + (t - f) * eased
+    })
+    if (progress < 1) {
+      requestAnimationFrame(tick)
+    } else {
+      keys.forEach((key) => { summaryDisplay.value[key] = num(target[key]) })
+    }
+  }
+  requestAnimationFrame(tick)
+}
+
+function computeRange() {
+  if (periodMode.value === 'month') {
+    const [year, month] = selectedMonth.value.split('-').map(Number)
+    const from = `${selectedMonth.value}-01`
+    const lastDay = new Date(year, month, 0).getDate()
+    const to = `${selectedMonth.value}-${String(lastDay).padStart(2, '0')}`
+    return { from, to }
+  }
+  return { from: selectedDate.value, to: selectedDate.value }
+}
+
+const filterLabel = computed(() => {
+  if (periodMode.value === 'month') {
+    if (!selectedMonth.value) return 'All Time'
+    const [year, month] = selectedMonth.value.split('-').map(Number)
+    return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  }
+  if (!selectedDate.value) return 'All Time'
+  return selectedDate.value
+})
+
+// ── DataTables instances ──
 let dtRecent = null
 let dtTop    = null
 let dtLogs   = null
 
 import 'https://code.jquery.com/jquery-3.5.1.min.js'
 import 'https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js'
-import 'https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js'
-import 'https://cdn.datatables.net/buttons/2.2.2/js/buttons.html5.min.js'
-import 'https://cdn.datatables.net/buttons/2.2.2/js/buttons.print.min.js'
 
-async function loadInventoryLogs(topLimit = 10) {
+// A row logged from ProductController@store() (opening stock at
+// creation time) always carries this exact notes value — used to
+// render a distinct "New" badge alongside the normal stock-in pill,
+// so a newly added product is visually distinguishable from a routine
+// restock or a POS-driven stock movement at a glance.
+function isNewProduct(item) {
+  return item?.notes === 'New product added'
+}
+
+function formatLocalDate(raw) {
+  if (!raw) return ''
+  // Backend sends naive local (Asia/Manila) datetime strings like
+  // "2026-07-29 06:45:27" — NOT UTC. Parse the components directly
+  // instead of letting `Date` reinterpret them with a timezone.
+  const match = raw.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/)
+  if (!match) return raw
+
+  const [, year, month, day, hour, minute, second] = match.map(Number)
+  const d = new Date(year, month - 1, day, hour, minute, second)
+
+  return d.toLocaleString('en-US', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+  })
+}
+
+async function loadInventoryLogs({ topLimit = 10, dateFromVal = null, dateToVal = null } = {}) {
   try {
-    const res = await api.get('/api/inventory/logs', { params: { top_limit: topLimit } })
+    const res = await api.get('/api/inventory/logs', {
+      params: {
+        top_limit: topLimit,
+        date_from: dateFromVal || undefined,
+        date_to:   dateToVal   || undefined,
+      },
+    })
     summary.value             = res.data.summary
     recentActivity.value      = res.data.recent_activity
     topAdjustedProducts.value = res.data.top_adjusted_products
     inventoryLogs.value       = res.data.inventory_logs
+
+    animateSummaryTo(summary.value)
   } catch (err) {
     console.error('Inventory logs API error:', err)
   }
 }
 
-function printNow() { window.print() }
+/* ── report actions: Copy / CSV / Print — same shape as Reports.vue,
+   covering the WHOLE report (summary + all three tables) from one
+   place instead of each table carrying its own export buttons. ── */
+function buildReportText() {
+  const lines = []
+  lines.push(`Inventory Logs — ${filterLabel.value}`)
+  lines.push('')
 
-onMounted(async () => {
-  await loadInventoryLogs()
+  lines.push('Inventory Activity Summary')
+  lines.push(`  Total Adjustments: ${summary.value.total_adjustments}`)
+  lines.push(`  Total Stock In: +${summary.value.total_stock_in}`)
+  lines.push(`  Total Stock Out: -${summary.value.total_stock_out}`)
+  lines.push(`  Manual Adjustments: ${summary.value.manual_adjustments}`)
+  lines.push('')
+
+  lines.push('Recent Activity')
+  if (recentActivity.value.length) {
+    recentActivity.value.forEach((item) => {
+      lines.push(
+        `  ${item.ProductName} (${item.SKU}) — ${item.type}${isNewProduct(item) ? ' [New]' : ''}, qty ${item.quantity}, ${formatLocalDate(item.created_at)}${item.notes ? ` — ${item.notes}` : ''}`
+      )
+    })
+  } else {
+    lines.push('  No recent activity recorded.')
+  }
+  lines.push('')
+
+  lines.push('Top Adjusted Products')
+  if (topAdjustedProducts.value.length) {
+    topAdjustedProducts.value.forEach((item) => {
+      lines.push(
+        `  ${item.ProductName} (${item.SKU}) — ${item.adjustment_count} adjustments, +${item.total_stock_in} in / -${item.total_stock_out} out`
+      )
+    })
+  } else {
+    lines.push('  No adjustment data recorded.')
+  }
+  lines.push('')
+
+  lines.push('Full Inventory Logs')
+  if (inventoryLogs.value.length) {
+    inventoryLogs.value.forEach((item) => {
+      lines.push(
+        `  ${item.ProductName} (${item.SKU}) — ${item.CategoryName}, ${item.type}${isNewProduct(item) ? ' [New]' : ''}, qty ${item.quantity}, ${formatLocalDate(item.created_at)}${item.notes ? ` — ${item.notes}` : ''}`
+      )
+    })
+  } else {
+    lines.push('  No logs recorded.')
+  }
+
+  return lines.join('\n')
+}
+
+function csvEscape(value) {
+  const s = String(value ?? '')
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+function buildReportCSV() {
+  const rows = []
+  rows.push(['Inventory Logs', filterLabel.value])
+  rows.push([])
+
+  rows.push(['Inventory Activity Summary'])
+  rows.push(['Total Adjustments', summary.value.total_adjustments])
+  rows.push(['Total Stock In', summary.value.total_stock_in])
+  rows.push(['Total Stock Out', summary.value.total_stock_out])
+  rows.push(['Manual Adjustments', summary.value.manual_adjustments])
+  rows.push([])
+
+  rows.push(['Recent Activity'])
+  rows.push(['Product', 'SKU', 'Type', 'New', 'Quantity', 'Date', 'Notes'])
+  recentActivity.value.forEach((item) => {
+    rows.push([item.ProductName, item.SKU, item.type, isNewProduct(item) ? 'Yes' : '', item.quantity, formatLocalDate(item.created_at), item.notes || ''])
+  })
+  rows.push([])
+
+  rows.push(['Top Adjusted Products'])
+  rows.push(['Product', 'SKU', 'Adjustments', 'Total Stock In', 'Total Stock Out'])
+  topAdjustedProducts.value.forEach((item) => {
+    rows.push([item.ProductName, item.SKU, item.adjustment_count, item.total_stock_in, item.total_stock_out])
+  })
+  rows.push([])
+
+  rows.push(['Full Inventory Logs'])
+  rows.push(['Product', 'SKU', 'Category', 'Type', 'New', 'Quantity', 'Date', 'Notes'])
+  inventoryLogs.value.forEach((item) => {
+    rows.push([item.ProductName, item.SKU, item.CategoryName, item.type, isNewProduct(item) ? 'Yes' : '', item.quantity, formatLocalDate(item.created_at), item.notes || ''])
+  })
+
+  return rows.map((r) => r.map(csvEscape).join(',')).join('\n')
+}
+
+function reportFileSlug() {
+  const base = filterLabel.value || (periodMode.value === 'month' ? selectedMonth.value : selectedDate.value)
+  return `inventory-logs-${String(base).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+}
+
+async function copyReport() {
+  if (copyState.value === 'copying') return
+  copyState.value = 'copying'
+  try {
+    const text = buildReportText()
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      // Fallback for browsers/contexts without the async Clipboard API
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    copyState.value = 'copied'
+  } catch (err) {
+    console.error('Copy report failed:', err)
+    copyState.value = 'error'
+  } finally {
+    setTimeout(() => { copyState.value = 'idle' }, 1800)
+  }
+}
+
+function exportCSV() {
+  try {
+    const csv = buildReportCSV()
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${reportFileSlug()}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    console.error('CSV export failed:', err)
+  }
+}
+
+function printReport() {
+  printGeneratedAt.value = new Date().toLocaleString('en-PH', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+  nextTick(() => window.print())
+}
+
+/* ────────────────────────────────────────────────────────────
+   FIX: DataTables + Vue reactivity conflict.
+   Previously, `refreshAllTables()` called dt.clear()/rows.add()/draw()
+   against whatever <tr> elements happened to be in the DOM at that
+   moment. Because Vue's keyed v-for can replace/remove/reorder <tr>
+   nodes when the underlying refs change, DataTables' internal row
+   cache would end up holding references to detached/stale nodes,
+   causing "Cannot set properties of undefined (setting '_DT_CellIndex')"
+   when it tried to re-index them.
+
+   Fix: never patch a live DataTable against Vue-rendered rows.
+   Instead: destroy the DataTable instance BEFORE the data changes,
+   let Vue fully re-render the tbody, wait a tick, then create a
+   brand new DataTable instance on the fresh DOM.
+──────────────────────────────────────────────────────────── */
+
+function initRecentTable() {
+  // Export (copy/CSV/print) now lives in the page-level report
+  // toolbar above, same as Reports.vue — this table only needs its
+  // own length + search controls, not its own export buttons.
+  dtRecent = $('#recentActivityTable').DataTable({
+    dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
+    order: [],
+    pageLength: 25,
+  })
+}
+
+function initTopTable() {
+  dtTop = $('#topAdjustedTable').DataTable({
+    dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
+    order: [],
+    pageLength: 25,
+  })
+
+  // "Show N entries" changes need a fresh server fetch (top_limit param),
+  // so this also has to destroy/reload/reinit rather than patch in place.
+  dtTop.on('length.dt', async (e, settings, len) => {
+    currentTopLimit.value = len
+    const { from, to } = computeRange()
+
+    dtTop.destroy()
+    dtTop = null
+
+    await loadInventoryLogs({
+      topLimit:    len,
+      dateFromVal: from,
+      dateToVal:   to,
+    })
+    await nextTick()
+    initTopTable()
+  })
+}
+
+function initLogsTable() {
+  dtLogs = $('#inventoryLogsTable').DataTable({
+    dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
+    pageLength: 25,
+    order: [],
+  })
+}
+
+function initAllTables() {
+  initRecentTable()
+  initTopTable()
+  initLogsTable()
+}
+
+function destroyAllTables() {
+  if (dtRecent) { dtRecent.destroy(); dtRecent = null }
+  if (dtTop)    { dtTop.destroy();    dtTop = null }
+  if (dtLogs)   { dtLogs.destroy();   dtLogs = null }
+}
+
+async function applyDateFilter() {
+  isFiltering.value = true
+
+  // Release DataTables' hold on the current DOM BEFORE Vue swaps rows.
+  destroyAllTables()
+
+  const { from, to } = computeRange()
+  await loadInventoryLogs({
+    topLimit:    currentTopLimit.value,
+    dateFromVal: from,
+    dateToVal:   to,
+  })
+
+  // Let Vue finish rendering the new <tr> elements first.
   await nextTick()
 
+  // Fresh DataTable instances on fresh DOM — no stale node references.
+  initAllTables()
+
+  isFiltering.value = false
+}
+
+function setPeriodMode(mode) {
+  if (periodMode.value === mode) return
+  periodMode.value = mode
+  applyDateFilter()
+}
+
+onMounted(async () => {
+  const { from, to } = computeRange()
+  await loadInventoryLogs({ dateFromVal: from, dateToVal: to })
+  await nextTick()
+
+  // Small delay to ensure jQuery/DataTables scripts (loaded via import
+  // above) have finished attaching to window before first init.
   setTimeout(() => {
-    dtRecent = $('#recentActivityTable').DataTable({
-      dom: '<"inv-dt-toolbar"<"inv-dt-toolbar-left"B><"inv-dt-toolbar-right"lf>>rtip',
-      buttons: [
-        { extend: 'copy', text: 'Copy',  className: 'dt-button' },
-        { extend: 'csv',  text: 'CSV',   className: 'dt-button' },
-        { text: 'Print',  className: 'dt-button dt-button--print', action: () => printNow() },
-      ],
-      order: [[4, 'desc']],
-      pageLength: 25,
-    })
-
-    dtTop = $('#topAdjustedTable').DataTable({
-      dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
-      pageLength: 25,
-    })
-
-    dtTop.on('length.dt', async (e, settings, len) => {
-      await loadInventoryLogs(len)
-      await nextTick()
-      dtTop.clear()
-      dtTop.rows.add($('#topAdjustedTable tbody tr').toArray())
-      dtTop.draw()
-    })
-
-    dtLogs = $('#inventoryLogsTable').DataTable({
-      dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
-      pageLength: 25,
-    })
+    initAllTables()
   }, 200)
 })
 
 onBeforeUnmount(() => {
-  if (dtRecent) dtRecent.destroy()
-  if (dtTop)    dtTop.destroy()
-  if (dtLogs)   dtLogs.destroy()
+  destroyAllTables()
 })
 </script>
 
 <!-- ─── SCOPED: page layout & component styles ──────────── -->
 <style scoped>
 @import url('https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css');
-@import url('https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css');
 
 /* ── ROOT — all colors via global theme tokens ── */
 .inv-logs {
@@ -364,7 +775,7 @@ html[data-theme="dark"] .inv-logs {
 }
 
 /* ── PAGE HEADER ── */
-.page-header { display: flex; align-items: flex-end; justify-content: space-between; }
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
 .page-eyebrow {
   font-size: 11px; font-weight: 700; letter-spacing: .12em;
   color: var(--il-accent); text-transform: uppercase; margin: 0 0 5px;
@@ -374,6 +785,132 @@ html[data-theme="dark"] .inv-logs {
   color: var(--il-text-primary);
   letter-spacing: -.03em; margin: 0;
   transition: color 0.22s ease;
+}
+
+/* ── REPORT ACTIONS — Copy / CSV / Print toolbar.
+   Identical markup/classes/placement to Reports.vue's toolbar so the
+   whole app has one consistent spot for report-level actions. ── */
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rt-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--il-border-strong);
+  background: var(--il-surface-sunken);
+  color: var(--il-text-secondary);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .12s ease, box-shadow .16s ease;
+}
+.rt-btn i { font-size: 12px; }
+.rt-btn:hover:not(:disabled) {
+  background: var(--il-surface-raised);
+  border-color: var(--il-accent-border);
+  color: var(--il-text-primary);
+  transform: translateY(-1px);
+}
+.rt-btn:disabled { opacity: .65; cursor: default; }
+.rt-btn--primary {
+  background: var(--il-accent);
+  border-color: var(--il-accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(234,88,12,0.28);
+}
+.rt-btn--primary:hover {
+  background: #FB923C;
+  border-color: #FB923C;
+  color: #fff;
+}
+
+/* ── PERIOD CONTROL — matches Reports.vue's picker UI exactly:
+   a segmented "By Month / Specific Date" pill toggle, followed by a
+   single bordered rounded input for whichever mode is active. ── */
+.period-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.period-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--il-surface-sunken);
+  border: 1px solid var(--il-border);
+  border-radius: 12px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.period-mode-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--il-text-muted);
+  padding: 8px 16px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background-color .18s ease, color .18s ease;
+  white-space: nowrap;
+}
+.period-mode-seg:hover { color: var(--il-text-secondary); }
+.period-mode-seg--active {
+  background: var(--il-accent);
+  color: #fff;
+}
+.period-mode-seg--active:hover { color: #fff; }
+
+.period-picker-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.period-picker-input {
+  border: 1.5px solid var(--il-border-strong);
+  background: var(--il-surface);
+  border-radius: 11px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--il-text-primary);
+  outline: none;
+  cursor: pointer;
+  padding: 8px 12px;
+  box-shadow: var(--il-shadow);
+  transition: border-color .15s ease;
+}
+.period-picker-input:hover,
+.period-picker-input:focus { border-color: var(--il-accent-border); }
+.period-picker-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px;
+}
+html[data-theme="dark"] .period-picker-input::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.6);
+}
+
+.date-filter-loading {
+  font-size: 12px;
+  color: var(--il-accent);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ── SECTION ── */
@@ -518,10 +1055,22 @@ html[data-theme="dark"] .kpi-card--alert {
 .status-pill--out     { background: #FFE4E6; color: #BE123C; }
 .status-pill--neutral { background: #FEF3C7; color: #92400E; }
 
+/* "New" badge — shown alongside the type pill for a row logged at
+   product-creation time (see isNewProduct()). Kept visually distinct
+   from the existing pill palette (amber/gold) so it reads as a status
+   flag rather than another movement type. */
+.status-pill--new {
+  background: #FEF3C7;
+  color: #92400E;
+  margin-left: 6px;
+  text-transform: none;
+}
+
 /* Dark mode pills — softer backgrounds */
 html[data-theme="dark"] .status-pill--in      { background: rgba(16,185,129,0.16); color: #4ADE80; }
 html[data-theme="dark"] .status-pill--out     { background: rgba(244,63,94,0.16);  color: #F87171; }
 html[data-theme="dark"] .status-pill--neutral { background: rgba(245,158,11,0.16); color: #FCD34D; }
+html[data-theme="dark"] .status-pill--new     { background: rgba(245,158,11,0.18); color: #FCD34D; }
 
 .category-pill {
   display: inline-flex;
@@ -539,7 +1088,18 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 .print-footer { display: none; }
 
 @media (max-width: 1100px) { .kpi-strip { grid-template-columns: repeat(2,1fr); } }
-@media (max-width: 700px)  { .inv-logs  { padding: 16px 16px 40px; } .kpi-strip { grid-template-columns: 1fr; } }
+@media (max-width: 700px)  {
+  .inv-logs  { padding: 16px 16px 40px; }
+  .kpi-strip { grid-template-columns: 1fr; }
+  .page-header { flex-direction: column; align-items: stretch; }
+  .period-control { flex-direction: column; align-items: stretch; }
+  .period-mode-toggle { justify-content: stretch; }
+  .period-mode-seg { flex: 1; text-align: center; justify-content: center; }
+  .period-picker-wrap { justify-content: stretch; }
+  .period-picker-input { width: 100%; }
+  .report-toolbar { justify-content: stretch; }
+  .rt-btn { flex: 1; justify-content: center; }
+}
 
 /* ════════════════════════════════════════════════════════════
    PRINT MODE
@@ -557,6 +1117,10 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
     gap: 18px !important;
     font-family: 'Inter', Arial, sans-serif !important;
   }
+
+  /* Filter + report-action controls are for on-screen use only */
+  .period-control,
+  .report-toolbar { display: none !important; }
 
   /* ---- print-only header block ---- */
   .print-header {
@@ -586,8 +1150,9 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .print-header-meta {
     font-size: 11px;
     color: #A8A29E;
-    margin: 0 0 14px;
+    margin: 0 0 4px;
   }
+  .print-header-meta:last-of-type { margin: 0 0 14px; }
   .print-header-rule {
     border: none;
     border-top: 2px solid #EA580C;
@@ -711,6 +1276,11 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .status-pill--in      { background: #D1FAE5 !important; color: #047857 !important; }
   .status-pill--out     { background: #FFE4E6 !important; color: #BE123C !important; }
   .status-pill--neutral { background: #FEF3C7 !important; color: #92400E !important; }
+  .status-pill--new {
+    background: #FEF3C7 !important;
+    color: #92400E !important;
+    margin-left: 4px !important;
+  }
 
   .category-pill {
     font-size: 9px !important;
@@ -833,60 +1403,6 @@ html[data-theme="dark"] .inv-logs table.dataTable tbody tr:hover td {
 .inv-logs .inv-dt-toolbar-left  { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .inv-logs .inv-dt-toolbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
-/* ── Buttons ── */
-.inv-logs .dt-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-
-.inv-logs .dt-button {
-  background:    #FAFAF9 !important;
-  color:         #44403C !important;
-  border:        1.5px solid #E7E0D8 !important;
-  padding:       7px 14px !important;
-  border-radius: 10px !important;
-  font-size:     12.5px !important;
-  font-weight:   600 !important;
-  font-family:   'Inter', system-ui, sans-serif !important;
-  margin-right:  0 !important;
-  cursor:        pointer;
-  transition:    border-color .18s, color .18s, background .18s;
-  box-shadow:    none !important;
-  line-height:   1.4 !important;
-}
-.inv-logs .dt-button:hover {
-  border-color: #FDBA74 !important;
-  color:        #EA580C !important;
-  background:   #FFF7ED !important;
-}
-.inv-logs .dt-button.dt-button--print {
-  background:   #EA580C !important;
-  border-color: #EA580C !important;
-  color:        #fff !important;
-}
-.inv-logs .dt-button.dt-button--print:hover {
-  background:   #C2410C !important;
-  border-color: #C2410C !important;
-}
-
-/* Dark buttons */
-html[data-theme="dark"] .inv-logs .dt-button {
-  background:   #222535 !important;
-  color:        #C4C8D6 !important;
-  border-color: #2A2D3E !important;
-}
-html[data-theme="dark"] .inv-logs .dt-button:hover {
-  border-color: rgba(251,146,60,0.40) !important;
-  color:        #FB923C !important;
-  background:   rgba(251,146,60,0.10) !important;
-}
-html[data-theme="dark"] .inv-logs .dt-button.dt-button--print {
-  background:   #FB923C !important;
-  border-color: #FB923C !important;
-  color:        #0F1117 !important;
-}
-html[data-theme="dark"] .inv-logs .dt-button.dt-button--print:hover {
-  background:   #EA580C !important;
-  border-color: #EA580C !important;
-}
-
 /* ── Length + Search ── */
 .inv-logs .dataTables_filter,
 .inv-logs .dataTables_length { display: flex; align-items: center; }
@@ -1003,7 +1519,7 @@ html[data-theme="dark"] .inv-logs .dataTables_paginate .paginate_button.current 
     width: 100%; padding: 14px 18px 50px; background: #fff;
   }
   .print-only { display: block !important; }
-  .dt-buttons, .dataTables_filter, .dataTables_length,
+  .dataTables_filter, .dataTables_length,
   .dataTables_paginate, .dataTables_info { display: none !important; }
   thead { display: table-header-group !important; }
   tr, td, th { page-break-inside: avoid !important; }

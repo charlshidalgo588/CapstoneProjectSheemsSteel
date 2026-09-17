@@ -1,9 +1,12 @@
 <template>
   <div class="dropdown-wrap">
     <button
+      ref="triggerRef"
       class="dropdown-trigger"
       :class="{ 'is-open': open, 'is-collapsed': collapsed }"
-      @click="$emit('toggle')"
+      @click="handleClick"
+      @mouseenter="handleMouseEnter"
+      @mouseleave="handleMouseLeave"
       :title="collapsed ? label : undefined"
     >
       <span class="nav-icon-wrap" :class="{ 'icon-open': open }">
@@ -13,27 +16,99 @@
         <span class="dropdown-label">{{ label }}</span>
         <i class="fa-solid fa-chevron-down dropdown-caret" :class="{ rotated: open }"></i>
       </template>
-      <span v-if="collapsed" class="nav-tooltip">{{ label }}</span>
     </button>
 
+    <!-- Inline submenu (expanded sidebar) -->
     <transition name="submenu">
       <ul v-if="open && !collapsed" class="submenu">
         <slot />
       </ul>
     </transition>
+
+    <!-- Flyout submenu (collapsed sidebar) — teleported so sidebar-nav's
+         overflow:hidden / overflow-x:hidden can't clip it -->
+    <Teleport to="body">
+      <transition name="flyout-fade">
+        <div
+          v-if="collapsed && flyoutVisible"
+          class="flyout"
+          :style="flyoutStyle"
+          @mouseenter="handleMouseEnter"
+          @mouseleave="handleMouseLeave"
+        >
+          <div class="flyout-label">{{ label }}</div>
+          <ul class="flyout-submenu">
+            <slot />
+          </ul>
+        </div>
+      </transition>
+    </Teleport>
   </div>
 </template>
 
-<script>
-export default {
-  props: {
-    label:     { type: String,  required: true },
-    icon:      { type: String,  required: true },
-    open:      { type: Boolean, default: false },
-    collapsed: { type: Boolean, default: false },
-  },
-  emits: ['toggle'],
+<script setup>
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
+
+const props = defineProps({
+  label:     { type: String,  required: true },
+  icon:      { type: String,  required: true },
+  open:      { type: Boolean, default: false },
+  collapsed: { type: Boolean, default: false },
+})
+const emit = defineEmits(['toggle'])
+
+const triggerRef    = ref(null)
+const hoverVisible   = ref(false)
+const coords        = ref({ top: 0, left: 0 })
+
+// Flyout shows either while hovering, or while `open` is true (so a click
+// keeps it pinned even if the mouse moves away from the trigger).
+const flyoutVisible = computed(() => hoverVisible.value || props.open)
+
+const flyoutStyle = computed(() => ({
+  top:  coords.value.top + 'px',
+  left: coords.value.left + 'px',
+}))
+
+function measure() {
+  const el = triggerRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  coords.value = {
+    top:  rect.top,
+    left: rect.right + 14, // matches the 14px gap used elsewhere
+  }
 }
+
+function handleClick() {
+  measure()
+  emit('toggle')
+}
+
+function handleMouseEnter() {
+  if (!props.collapsed) return
+  measure()
+  hoverVisible.value = true
+}
+
+function handleMouseLeave() {
+  hoverVisible.value = false
+}
+
+// Re-measure if the trigger moves (e.g. sidebar items reordering) while open
+watch(() => props.open, async (val) => {
+  if (val) { await nextTick(); measure() }
+})
+
+function onScrollOrResize() {
+  if (flyoutVisible.value) measure()
+}
+window.addEventListener('scroll', onScrollOrResize, true)
+window.addEventListener('resize', onScrollOrResize)
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', onScrollOrResize, true)
+  window.removeEventListener('resize', onScrollOrResize)
+})
 </script>
 
 <style scoped>
@@ -69,7 +144,6 @@ export default {
 }
 .dropdown-trigger.is-collapsed { justify-content: center; padding: 9px; }
 
-/* Icon wrap */
 .nav-icon-wrap {
   width: 30px;
   height: 30px;
@@ -88,7 +162,6 @@ export default {
 
 .nav-icon { font-size: 12.5px; }
 
-/* Label & caret */
 .dropdown-label { flex: 1; }
 .dropdown-caret {
   font-size: 9px;
@@ -98,7 +171,7 @@ export default {
 }
 .dropdown-caret.rotated { transform: rotate(180deg); }
 
-/* Submenu */
+/* Inline submenu (expanded sidebar) */
 .submenu {
   list-style: none;
   margin: 2px 0 2px 0;
@@ -119,37 +192,6 @@ export default {
   border-radius: 2px;
 }
 
-/* Tooltip */
-.nav-tooltip {
-  position: absolute;
-  left: calc(100% + 14px);
-  top: 50%;
-  transform: translateY(-50%);
-  background: var(--c-text-primary);
-  color: var(--c-bg);
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 10px;
-  border-radius: 7px;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .15s ease;
-  box-shadow: var(--c-shadow-lg);
-  z-index: 999;
-}
-.nav-tooltip::before {
-  content: '';
-  position: absolute;
-  right: 100%;
-  top: 50%;
-  transform: translateY(-50%);
-  border: 5px solid transparent;
-  border-right-color: var(--c-text-primary);
-}
-.dropdown-trigger.is-collapsed:hover .nav-tooltip { opacity: 1; }
-
-/* Transition */
 .submenu-enter-active {
   transition: opacity .18s ease, max-height .22s ease;
   max-height: 300px;
@@ -160,4 +202,43 @@ export default {
   overflow: hidden;
 }
 .submenu-enter-from, .submenu-leave-to { opacity: 0; max-height: 0; }
+</style>
+
+<style>
+/* Unscoped — this is teleported to <body>, outside this component's
+   scoped attribute, so scoped styles wouldn't apply to it anyway. */
+.flyout {
+  position: fixed;
+  min-width: 180px;
+  background: var(--c-surface-overlay, var(--c-bg));
+  border: 1px solid var(--c-accent-border);
+  border-radius: 10px;
+  box-shadow: var(--c-shadow-lg);
+  padding: 8px;
+  z-index: 9999;
+}
+.flyout-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-text-primary);
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--c-accent-soft);
+  margin-bottom: 4px;
+  white-space: nowrap;
+}
+.flyout-submenu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.flyout-fade-enter-active { transition: opacity .15s ease, transform .15s ease; }
+.flyout-fade-leave-active { transition: opacity .12s ease, transform .12s ease; }
+.flyout-fade-enter-from, .flyout-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-6px);
+}
 </style>

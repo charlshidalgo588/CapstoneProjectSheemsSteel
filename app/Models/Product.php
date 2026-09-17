@@ -33,6 +33,7 @@ class Product extends Model
         // PRODUCT DETAILS
         'Brand',
         'SKU',
+        'Barcode',
         'Description',
 
         // SPECIFICATIONS (✅ ADDED)

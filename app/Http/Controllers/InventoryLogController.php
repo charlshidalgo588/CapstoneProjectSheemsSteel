@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class InventoryLogController extends Controller
 {
@@ -16,16 +17,31 @@ class InventoryLogController extends Controller
         // by whatever the user picks, with a safe default + max cap.
         $topLimit = (int) $request->query('top_limit', 10);
         $topLimit = max(1, min($topLimit, 100)); // clamp between 1 and 100
+        $dateFrom = $request->query('date_from');
+        $dateTo   = $request->query('date_to');
+
+        $applyDateFilter = function ($query) use ($dateFrom, $dateTo) {
+          if ($dateFrom && $dateTo) {
+        $query->whereBetween('inventory_logs.created_at', [
+            Carbon::parse($dateFrom)->startOfDay(),
+            Carbon::parse($dateTo)->endOfDay(),
+        ]);
+    }
+
+    return $query;
+};
 
         // ✅ TRUE STOCK IN (from logs)
-        $totalStockIn = DB::table('inventory_logs')
-            ->where('type', 'stock_in')
-            ->sum('quantity');
+        $totalStockIn = $applyDateFilter(
+    DB::table('inventory_logs')
+        ->where('type', 'stock_in')
+)->sum('quantity');
 
         // ✅ TRUE STOCK OUT
-        $totalStockOut = DB::table('inventory_logs')
-            ->where('type', 'stock_out')
-            ->sum('quantity');
+       $totalStockOut = $applyDateFilter(
+    DB::table('inventory_logs')
+        ->where('type', 'stock_out')
+)->sum('quantity');
 
         // ✅ TOTAL ADJUSTMENTS
         // FIX: this used to be wired to the same value as Manual Adjustments,
@@ -34,21 +50,24 @@ class InventoryLogController extends Controller
         // (POS sales + manual actions combined) — this matches the sum of
         // the "Adjustments" column across every product in Top Adjusted
         // Products, which is what the user sees and expects this to equal.
-        $totalAdjustments = DB::table('inventory_logs')->count();
-
+$totalAdjustments = $applyDateFilter(
+    DB::table('inventory_logs')
+)->count();
         // ✅ MANUAL ADJUSTMENTS
         // There is no type = 'adjustment' value in this table — every row
         // is either 'stock_in' or 'stock_out'. Manual actions (restocks,
         // rollbacks, corrections) are only distinguishable by their notes
         // text ("Manual restock", "Rollback of sale #9"), while POS-driven
         // rows are always tagged "POS sale #N".
-        $manualAdjustments = DB::table('inventory_logs')
-            ->where('notes', 'not like', 'POS sale%')
-            ->count();
+        $manualAdjustments = $applyDateFilter(
+    DB::table('inventory_logs')
+        ->where('notes', 'not like', 'POS sale%')
+)->count();
 
         // FULL LOGS (sorted newest first)
-        $inventoryLogs = DB::table('inventory_logs')
-            ->join('products', 'inventory_logs.ProductID', '=', 'products.ProductID')
+$inventoryLogs = $applyDateFilter(
+    DB::table('inventory_logs')
+)            ->join('products', 'inventory_logs.ProductID', '=', 'products.ProductID')
             ->join('categories', 'products.CategoryID', '=', 'categories.CategoryID')
             ->select(
                 'inventory_logs.*',
@@ -77,7 +96,9 @@ class InventoryLogController extends Controller
             // is what handles "recent" paging on the frontend.
             'recent_activity' => $inventoryLogs->values(),
 
-            'top_adjusted_products' => DB::table('inventory_logs')
+            'top_adjusted_products' => $applyDateFilter(
+    DB::table('inventory_logs')
+)
                 ->join('products', 'inventory_logs.ProductID', '=', 'products.ProductID')
                 ->select(
                     'products.ProductID',

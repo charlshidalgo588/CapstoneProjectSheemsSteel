@@ -38,6 +38,21 @@ class AuthController extends Controller
             ], 401);
         }
 
+        // Auth::attempt already logged them in and started a session at
+        // this point — a disabled account still has the right password,
+        // so this has to be checked after attempt(), not instead of it.
+        // Tear the session back down immediately rather than leaving a
+        // valid-but-unwanted session sitting around.
+        if (Auth::user()->status === 'disabled') {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return response()->json([
+                'message' => 'This account has been disabled. Contact an administrator.',
+            ], 403);
+        }
+
         // Important for Sanctum SPA
         $request->session()->regenerate();
 
@@ -148,5 +163,25 @@ class AuthController extends Controller
         return response()->json([
             'message' => 'Logged out successfully',
         ]);
+    }
+
+    /**
+     * Lets a user (typically one who just logged in with a
+     * temp password) set their own password and clears the
+     * must_change_password flag so the frontend guard stops
+     * redirecting them here.
+     */
+    public function setInitialPassword(Request $request)
+    {
+        $data = $request->validate([
+            'password' => ['required', 'confirmed', 'min:8'],
+        ]);
+ 
+        $request->user()->update([
+            'password'             => Hash::make($data['password']),
+            'must_change_password' => false,
+        ]);
+ 
+        return response()->json(['message' => 'Password updated.']);
     }
 }

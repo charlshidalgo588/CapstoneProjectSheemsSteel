@@ -11,6 +11,10 @@ use App\Http\Controllers\ReportsController;
 use App\Http\Controllers\InventoryLogController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\UserController;
+use App\Http\Middleware\UpdateLastActive;
+use App\Http\Middleware\EnsureUserIsActive;
 
 /*
 |--------------------------------------------------------------------------
@@ -33,6 +37,7 @@ Route::get('/suppliers', [SupplierController::class, 'apiIndex']);
 Route::get('/suppliers/{id}', [SupplierController::class, 'apiShow']);
 
 // 🟦 Product Public JSON
+Route::get('/products/barcode/{barcode}', [ProductController::class, 'findByBarcode']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 Route::get('/products/{id}/stock', [ProductController::class, 'getStock']);
 
@@ -64,14 +69,20 @@ Route::get('/inventory/logs', [InventoryLogController::class, 'index']);
 */
 
 // 🔐 Get authenticated user (used by Layout, Settings, Profile restore)
-Route::middleware('auth:sanctum')->get('/user', [AuthController::class, 'user']);
+// EnsureUserIsActive runs first so a disabled user gets rejected/logged
+// out before anything else happens; UpdateLastActive tags along after
+// it — this is the single most frequent authenticated hit (fired by
+// Layout.vue on every page load), so it's the fastest place a disabled
+// user gets caught, and the best signal for "last active" of anything
+// in this file.
+Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::class])->get('/user', [AuthController::class, 'user']);
 
 /*
 |--------------------------------------------------------------------------
 | PROTECTED ROUTES (REQUIRE LOGIN)
 |--------------------------------------------------------------------------
 */
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::class])->group(function () {
 
     // 🧪 API Health Check
     Route::get('/test', fn () => response()->json('Laravel API Connected Successfully!'));
@@ -87,6 +98,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ✅ Update password
     Route::put('/user/password', [AuthController::class, 'updatePassword']);
+
+    Route::put('/user/set-initial-password', [AuthController::class, 'setInitialPassword']);
 
     /*
     |--------------------------------------------------------------------------
@@ -140,4 +153,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/suppliers/{id}', [SupplierController::class, 'apiUpdate']);
     Route::patch('/suppliers/{id}', [SupplierController::class, 'apiUpdate']);
     Route::delete('/suppliers/{id}', [SupplierController::class, 'apiDestroy']);
+
+    /*
+    |--------------------------------------------------------------------------
+    | NOTIFICATIONS
+    |--------------------------------------------------------------------------
+    */
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
+    
+
+        /*
+    |--------------------------------------------------------------------------
+    | TEAM / USER MANAGEMENT
+    |--------------------------------------------------------------------------
+    */
+    Route::get   ('/users',                       [UserController::class, 'index']);
+    Route::post  ('/users',                       [UserController::class, 'store']);
+    Route::patch ('/users/{user}',                [UserController::class, 'update']);
+    Route::post  ('/users/{user}/reset-password', [UserController::class, 'resetPassword']);
 });

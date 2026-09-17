@@ -27,16 +27,23 @@ class HomeController extends Controller
             ->sum('sales_items.Quantity');
 
         $transactionsToday = Sale::whereDate('SaleDate', $today)->count();
-        $voidTransactionsToday = 0;
 
         // --- INVENTORY SUMMARY -----------------------------------------------
         $inventorySummary = [
             'quantity_in_hand'   => Inventory::sum('QuantityOnHand'),
             'quantity_to_receive'=> 0,
+
+            // FIX: "low stock" should mean current stock has dropped to/below
+            // the product's own ReorderLevel — not half of its OpeningStock.
+            // OpeningStock is a one-time snapshot from when the product was
+            // created; comparing against it makes fast-selling products
+            // (large OpeningStock, since sold down) get flagged even when
+            // they're still well above their actual reorder threshold.
             'low_stock_items'    => DB::table('products')
                 ->join('inventories', 'products.ProductID', '=', 'inventories.ProductID')
-                ->whereRaw('inventories.QuantityOnHand <= (products.OpeningStock/2 - 1)')
+                ->whereColumn('inventories.QuantityOnHand', '<=', 'inventories.ReorderLevel')
                 ->count(),
+
             'total_items'        => Product::count(),
             'active_items'       => Product::whereHas('inventory', function ($q) {
                 $q->where('QuantityOnHand', '>', 0);
@@ -133,7 +140,6 @@ class HomeController extends Controller
             'todaySales'        => $todaySales,
             'itemsSoldToday'    => $itemsSoldToday,
             'transactionsToday' => $transactionsToday,
-            'voidTransactionsToday' => $voidTransactionsToday,
 
             'inventorySummary'  => $inventorySummary,
             'topSellingItems'   => $topSellingItems,
