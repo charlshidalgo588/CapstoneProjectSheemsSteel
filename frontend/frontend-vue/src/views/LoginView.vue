@@ -556,6 +556,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDarkMode } from '@/composables/useDarkMode'
@@ -872,8 +873,8 @@ const rowScroll = ref(
   Array.from({ length: SHOP_ROWS }, () => ({ canPrev: false, canNext: false }))
 )
 
-function setShopGridEl(el: Element | null, rowIndex: number) {
-  shopGridEls.value[rowIndex] = el as HTMLElement | null
+function setShopGridEl(el: Element | ComponentPublicInstance | null, rowIndex: number) {
+  shopGridEls.value[rowIndex] = (el as HTMLElement) ?? null
 }
 
 function updateShopScrollState(rowIndex: number) {
