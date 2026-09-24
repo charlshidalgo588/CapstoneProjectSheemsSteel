@@ -6,10 +6,8 @@
         { "step": "packages:mise" },
         { "local": true, "include": ["."] }
       ],
-      "commands": ["cd frontend/frontend-vue && npm install && npm run build"]
-    },
-    "build": {
-      "inputs": [{ "step": "buildFrontend" }]
+      "commands": ["cd frontend/frontend-vue && npm install && npm run build"],
+      "deployOutputs": ["public/app"]
     }
   }
 }
