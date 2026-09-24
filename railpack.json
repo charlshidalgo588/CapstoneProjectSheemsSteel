@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "steps": {
+    "buildFrontend": {
+      "commands": ["cd frontend/frontend-vue && npm install && npm run build"]
+    },
+    "build": {
+      "inputs": [{ "step": "buildFrontend" }]
+    }
+  }
+}

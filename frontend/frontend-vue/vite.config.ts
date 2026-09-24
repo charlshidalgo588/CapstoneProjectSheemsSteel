@@ -5,16 +5,25 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 export default defineConfig({
   plugins: [vue(), vueDevTools()],
-
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
-
   server: {
     host: 'localhost',
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
   },
+  build: {
+    outDir: '../../public/app',
+    emptyOutDir: true,
+  },
+  base: '/app/',
 })

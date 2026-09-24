@@ -16,6 +16,12 @@ use App\Http\Controllers\UserController;
 use App\Http\Middleware\UpdateLastActive;
 use App\Http\Middleware\EnsureUserIsActive;
 
+
+
+// 🔑 Token-based login (Sanctum personal access tokens)
+Route::post('/login', [AuthController::class, 'login'])
+    ->middleware('throttle:5,1'); // 5 attempts per 1 minute, per IP
+
 /*
 |--------------------------------------------------------------------------
 | PUBLIC API ROUTES (NO AUTH REQUIRED)
@@ -86,6 +92,8 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::
 
     // 🧪 API Health Check
     Route::get('/test', fn () => response()->json('Laravel API Connected Successfully!'));
+
+    Route::post('/logout', [AuthController::class, 'logout']);
 
     /*
     |--------------------------------------------------------------------------
