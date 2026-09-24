@@ -7,7 +7,9 @@
         { "local": true, "include": ["."] }
       ],
       "commands": ["cd frontend/frontend-vue && npm install && npm run build"],
-      "deployOutputs": ["public/app"]
+      "deployOutputs": [
+        { "include": ["public/app"] }
+      ]
     }
   }
 }
