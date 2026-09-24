@@ -2,6 +2,10 @@
   "$schema": "https://schema.railpack.com",
   "steps": {
     "buildFrontend": {
+      "inputs": [
+        { "step": "packages:mise" },
+        { "local": true, "include": ["."] }
+      ],
       "commands": ["cd frontend/frontend-vue && npm install && npm run build"]
     },
     "build": {
