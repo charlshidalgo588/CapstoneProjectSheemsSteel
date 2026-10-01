@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -12,7 +12,7 @@ class AuthController extends Controller
 {
     /**
      * ----------------------------------------------------------
-     * SPA LOGIN (Laravel + Sanctum + Vue)
+     * API LOGIN (Laravel + Sanctum tokens + Vue)
      * ----------------------------------------------------------
      */
     public function login(Request $request)
@@ -30,55 +30,35 @@ class AuthController extends Controller
             ], 422);
         }
 
-        $remember = $request->remember ? true : false;
+        $user = User::where('email', $request->email)->first();
 
-        if (!Auth::attempt($request->only('email', 'password'), $remember)) {
+        if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
                 'message' => 'Invalid email or password.',
             ], 401);
         }
 
-        // Auth::attempt already logged them in and started a session at
-        // this point — a disabled account still has the right password,
-        // so this has to be checked after attempt(), not instead of it.
-        // Tear the session back down immediately rather than leaving a
-        // valid-but-unwanted session sitting around.
-        if (Auth::user()->status === 'disabled') {
-            Auth::guard('web')->logout();
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
-
+        if ($user->status === 'disabled') {
             return response()->json([
                 'message' => 'This account has been disabled. Contact an administrator.',
             ], 403);
         }
 
-        // Important for Sanctum SPA
-        $request->session()->regenerate();
+        $expiresAt = $request->remember ? now()->addDays(30) : now()->addHours(12);
+        $token = $user->createToken('auth-token', ['*'], $expiresAt)->plainTextToken;
 
         return response()->json([
             'message' => 'Login successful',
-            'user'    => Auth::user(),
+            'user'    => $user,
+            'token'   => $token,
         ]);
     }
 
-    /**
-     * ----------------------------------------------------------
-     * GET AUTHENTICATED USER
-     * Used by Vue Layout / Settings / Restore Session
-     * ----------------------------------------------------------
-     */
     public function user(Request $request)
     {
         return response()->json($request->user());
     }
 
-    /**
-     * ----------------------------------------------------------
-     * UPDATE USER PROFILE (NAME & EMAIL)
-     * Route: PUT /api/user
-     * ----------------------------------------------------------
-     */
     public function update(Request $request)
     {
         $user = $request->user();
@@ -110,12 +90,6 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * ----------------------------------------------------------
-     * UPDATE USER PASSWORD
-     * Route: PUT /api/user/password
-     * ----------------------------------------------------------
-     */
     public function updatePassword(Request $request)
     {
         $user = $request->user();
@@ -132,7 +106,6 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Check current password
         if (!Hash::check($request->current_password, $user->password)) {
             return response()->json([
                 'message' => 'Current password is incorrect.',
@@ -150,38 +123,29 @@ class AuthController extends Controller
 
     /**
      * ----------------------------------------------------------
-     * LOGOUT (Sanctum SPA)
+     * LOGOUT — revoke only the current token
      * ----------------------------------------------------------
      */
     public function logout(Request $request)
     {
-        Auth::guard('web')->logout();
-
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+        $request->user()->currentAccessToken()->delete();
 
         return response()->json([
             'message' => 'Logged out successfully',
         ]);
     }
 
-    /**
-     * Lets a user (typically one who just logged in with a
-     * temp password) set their own password and clears the
-     * must_change_password flag so the frontend guard stops
-     * redirecting them here.
-     */
     public function setInitialPassword(Request $request)
     {
         $data = $request->validate([
             'password' => ['required', 'confirmed', 'min:8'],
         ]);
- 
+
         $request->user()->update([
             'password'             => Hash::make($data['password']),
             'must_change_password' => false,
         ]);
- 
+
         return response()->json(['message' => 'Password updated.']);
     }
 }
