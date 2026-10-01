@@ -27,11 +27,13 @@ return [
     |--------------------------------------------------------------------------
     |
     | Your frontend runs at http://localhost:5173
+    | Also allow the VS Code dev tunnel URL used for testing on other devices.
     |
     */
 
     'allowed_origins' => [
         'http://localhost:5173',
+        'http://127.0.0.1:5173',
     ],
 
     /*
@@ -58,7 +60,9 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#^https://.*\.asse\.devtunnels\.ms$#',
+    ],
 
     'exposed_headers' => [],
 
