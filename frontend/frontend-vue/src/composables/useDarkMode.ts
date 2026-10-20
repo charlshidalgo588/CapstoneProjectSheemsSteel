@@ -12,6 +12,7 @@ const themeMode: Ref<ThemeMode> = ref('system')  // what the user picked
 const darkMode: Ref<boolean> = ref(false)        // resolved boolean actually applied to the DOM
 
 let mql: MediaQueryList | null = null
+let unfreezeRaf = 0 // guards against rapid toggles removing the freeze class too early
 
 function systemPrefersDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -23,8 +24,29 @@ function resolveDark(mode: ThemeMode): boolean {
   return systemPrefersDark()
 }
 
+/**
+ * Applies the theme in a single paint. Transitions are frozen while the
+ * data-theme attribute flips, so every element changes at the same moment
+ * instead of some fading over .22s and others snapping instantly (which is
+ * what made the switch look delayed). They are re-enabled two frames later,
+ * so hover effects, dropdowns, etc. animate normally afterwards.
+ */
 function applyTheme(isDark: boolean): void {
-  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
+  const root = document.documentElement
+  const next = isDark ? 'dark' : 'light'
+  if (root.getAttribute('data-theme') === next) return // nothing to change
+
+  cancelAnimationFrame(unfreezeRaf)
+  root.classList.add('theme-switching')
+  root.setAttribute('data-theme', next)
+
+  void root.offsetHeight // force a reflow so the new styles apply with transitions off
+
+  unfreezeRaf = requestAnimationFrame(() => {
+    unfreezeRaf = requestAnimationFrame(() => {
+      root.classList.remove('theme-switching')
+    })
+  })
 }
 
 function sync(): void {

@@ -229,19 +229,93 @@
               </button>
             </div>
           </div>
+
+          <!-- Customer name (required) with suggestions from saved customers -->
           <div class="customer-row">
-            <div class="customer-field">
+            <div class="customer-field" ref="customerFieldRef" @focusout="onCustomerFocusOut">
               <i class="fa-regular fa-user customer-icon"></i>
               <input
                 v-model="customerName"
                 type="text"
                 placeholder="Customer name (required)"
                 class="customer-input"
+                autocomplete="off"
+                @input="onCustomerInput"
+                @focus="onCustomerFocus"
+                @keydown.esc="showSuggestions = false"
               />
+
+              <ul
+                v-if="showSuggestions && customerSuggestions.length"
+                class="customer-suggest"
+                @mousedown="onSuggestMouseDown"
+              >
+                <li v-if="suggestionsTitle" class="customer-suggest-head">{{ suggestionsTitle }}</li>
+
+                <!-- Search box: only shown in "Repeat buyers" mode -->
+                <li v-if="suggestionsTitle" class="customer-suggest-search">
+                  <i class="fa-solid fa-magnifying-glass"></i>
+                  <input
+                    ref="repeatSearchInput"
+                    v-model="repeatSearch"
+                    type="text"
+                    placeholder="Search by name or phone…"
+                    autocomplete="off"
+                    @keydown.esc.prevent="showSuggestions = false"
+                    @keydown.enter.prevent="pickFirstVisible"
+                  />
+                  <button
+                    v-if="repeatSearch"
+                    type="button"
+                    class="customer-suggest-search-clear"
+                    aria-label="Clear search"
+                    @click="repeatSearch = ''; repeatSearchInput?.focus()"
+                  >
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </li>
+
+                <li
+                  v-for="c in visibleSuggestions"
+                  :key="c.CustomerID"
+                  @mousedown.prevent="pickCustomer(c)"
+                >
+                  <span class="customer-suggest-name">
+                    {{ c.CustomerName }}
+                    <em v-if="c.is_repeat" class="customer-suggest-tag">Repeat</em>
+                    <em v-else class="customer-suggest-tag customer-suggest-tag--plain">{{ c.visits }} of {{ c.repeat_min }}</em>
+                  </span>
+                  <small>{{ c.ContactNumber || 'no phone' }} · {{ c.visits }} visit{{ c.visits === 1 ? '' : 's' }}</small>
+                </li>
+
+                <li v-if="!visibleSuggestions.length" class="customer-suggest-empty">
+                  No customers match "{{ repeatSearch }}"
+                </li>
+              </ul>
             </div>
-            <button @click="generateCustomerName" class="customer-gen-btn" title="Auto-generate">
+            <button
+              @mousedown.prevent
+              @click="toggleCustomerList"
+              class="customer-gen-btn"
+              title="Show repeat buyers"
+            >
+              <i class="fa-solid fa-users"></i>
+            </button>
+            <button @click="generateCustomerName" class="customer-gen-btn" title="Walk-in name (not tracked)">
               <i class="fa-solid fa-wand-magic-sparkles"></i>
             </button>
+          </div>
+
+          <!-- Shows which registered customer is picked, and how close they are to "repeat buyer" -->
+          <div v-if="selectedCustomer" class="customer-row customer-row--status">
+            <span class="customer-repeat-badge" :class="{ 'customer-repeat-badge--plain': !selectedCustomer.is_repeat }">
+              {{ customerStatusLabel }}
+            </span>
+          </div>
+          <div v-else-if="trackedNewName" class="customer-row customer-row--status">
+            <span class="customer-repeat-badge customer-repeat-badge--plain">
+              New customer · tracked by name
+            </span>
           </div>
         </div>
 
@@ -647,6 +721,18 @@ const cart         = ref([])          // unique-keyed, already-merged cart lines
 const customerName = ref('')
 const cashierName  = ref(localStorage.getItem('cashier_name') || 'Cashier')
 
+// ── Customer tracking (optional): lets the system recognise repeat buyers ──
+const selectedCustomer    = ref(null)   // existing customer picked from suggestions
+const customerSuggestions = ref([])
+const showSuggestions     = ref(false)
+const suggestionsTitle    = ref('')     // "Repeat buyers" when the list is not a text search
+let customerSearchSeq     = 0           // ignores out-of-date responses
+let customerSearchTimer   = null
+const repeatBuyersCache   = ref([])     // last repeat-buyer list, so the dropdown can open instantly
+const repeatSearch        = ref('')     // search text inside the repeat-buyers dropdown
+const repeatSearchInput   = ref(null)   // the search <input> inside the dropdown
+const customerFieldRef    = ref(null)   // wrapper around name input + dropdown
+
 const showQtyModal  = ref(false)
 const showCashModal = ref(false)
 const isProcessing  = ref(false)
@@ -746,6 +832,7 @@ async function loadCatalog() {
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('resize', onPosResize)
+  loadRepeatBuyers() // preload so the customer dropdown opens instantly
   await loadCatalog()
   nextTick(() => searchInput.value?.focus())
 })
@@ -757,6 +844,7 @@ onUnmounted(() => {
   clearTimeout(scanFeedbackTimer)
   clearTimeout(cameraFlashTimer)
   clearTimeout(cameraHintTimer)
+  clearTimeout(customerSearchTimer)
   stopCamera()
 })
 
@@ -1282,7 +1370,157 @@ const quickAmounts = computed(() => {
   return Array.from(candidates).sort((a, b) => a - b).slice(0, 4)
 })
 
+/* ────────────────────────────────────────────────────────────
+   CUSTOMER (optional tracking for repeat buyers)
+   - Typing a name searches saved customers and offers suggestions.
+   - Picking one links the sale to that customer.
+   - The dropdown lists the client's repeat buyers; typing also finds customers still being tracked.
+   - A typed name is tracked automatically (matched by name) until it qualifies;
+     "Walk-in ..." names are never tracked. Repeat buyers from the client's own list
+     are added on the Customers page.
+   - The repeat-buyers dropdown has its own search box (name or phone).
+──────────────────────────────────────────────────────────── */
+/* Customer requests pass skipLoading so they never trigger the slim top
+   progress bar in Layout.vue; the dropdown should feel instant, not "busy". */
+async function fetchCustomers(q, { silent = false } = {}) {
+  const seq = ++customerSearchSeq
+  try {
+    const { data } = await api.get('/api/customers', {
+      params: { search: q || undefined },
+      skipLoading: true,
+    })
+    if (!q) repeatBuyersCache.value = data              // keep the instant list fresh
+    if (seq !== customerSearchSeq) return               // a newer search already replaced this one
+    if (silent && !showSuggestions.value) return        // background refresh: don't reopen a closed list
+    customerSuggestions.value = data
+    suggestionsTitle.value = q ? '' : 'Repeat buyers'
+    showSuggestions.value = data.length > 0
+  } catch (e) {
+    console.error('customer search error:', e)
+  }
+}
+
+// Loaded once when the POS opens (and again after each sale), so the first
+// click on the name box already has something to show.
+async function loadRepeatBuyers() {
+  try {
+    const { data } = await api.get('/api/customers', { skipLoading: true })
+    repeatBuyersCache.value = data
+  } catch (e) {
+    console.error('repeat buyers preload error:', e)
+  }
+}
+
+// Filters the repeat-buyer list by name or phone. Only applies in
+// "Repeat buyers" mode; normal typed-name results are already filtered
+// by the API, so they pass through untouched.
+const visibleSuggestions = computed(() => {
+  if (!suggestionsTitle.value) return customerSuggestions.value
+  const q = repeatSearch.value.trim().toLowerCase()
+  if (!q) return customerSuggestions.value
+  const qDigits = q.replace(/\D/g, '')
+  return customerSuggestions.value.filter(c => {
+    const name = (c.CustomerName || '').toLowerCase()
+    const phone = (c.ContactNumber || '').toLowerCase()
+    const phoneDigits = phone.replace(/\D/g, '')
+    return name.includes(q) || phone.includes(q) || (qDigits && phoneDigits.includes(qDigits))
+  })
+})
+
+// Enter in the search box picks the top match.
+function pickFirstVisible() {
+  const first = visibleSuggestions.value[0]
+  if (first) pickCustomer(first)
+}
+
+// Close the dropdown only when focus leaves the whole customer field
+// (name input + dropdown). Moving focus from the name input into the
+// search box keeps it open.
+function onCustomerFocusOut(e) {
+  const next = e.relatedTarget
+  if (next && customerFieldRef.value?.contains(next)) return
+  showSuggestions.value = false
+}
+
+// Keep clicks inside the dropdown from blurring the field, except when
+// the click is on the search input/clear button, which need real focus.
+function onSuggestMouseDown(e) {
+  if (e.target.closest('.customer-suggest-search')) return
+  e.preventDefault()
+}
+
+// Reset the search text whenever the dropdown closes, so it opens fresh.
+watch(showSuggestions, (open) => {
+  if (!open) repeatSearch.value = ''
+})
+
+// Opens the repeat-buyer list immediately from the cache, then refreshes it
+// in the background so the purchase counts are never stale.
+function showRepeatBuyers() {
+  repeatSearch.value = ''
+  if (repeatBuyersCache.value.length) {
+    customerSuggestions.value = repeatBuyersCache.value
+    suggestionsTitle.value = 'Repeat buyers'
+    showSuggestions.value = true
+    fetchCustomers('', { silent: true })
+  } else {
+    fetchCustomers('')
+  }
+}
+
+function onCustomerInput() {
+  selectedCustomer.value = null // typing again means it is no longer the picked record
+  clearTimeout(customerSearchTimer)
+  const q = customerName.value.trim()
+  if (!q) { showRepeatBuyers(); return }
+  customerSearchTimer = setTimeout(() => fetchCustomers(q), 150)
+}
+
+// Clicking into the name box shows repeat buyers immediately (or matches
+// for whatever is already typed), so a returning customer is one tap away.
+function onCustomerFocus() {
+  if (selectedCustomer.value) return
+  const q = customerName.value.trim()
+  if (!q || /^walk-in\b/i.test(q)) showRepeatBuyers()
+  else fetchCustomers(q)
+}
+
+// The people button next to the name box: lists repeat buyers and puts
+// the cursor straight into the search box.
+function toggleCustomerList() {
+  if (showSuggestions.value) { showSuggestions.value = false; return }
+  showRepeatBuyers()
+  nextTick(() => repeatSearchInput.value?.focus())
+}
+
+function pickCustomer(c) {
+  selectedCustomer.value = c
+  customerName.value = c.CustomerName
+  customerSuggestions.value = []
+  showSuggestions.value = false
+}
+
+// A typed name that was not picked from the dropdown is tracked automatically
+// (matched by name) on the backend. Auto-generated "Walk-in ..." names are not.
+const trackedNewName = computed(() => {
+  const n = customerName.value.trim()
+  return n.length >= 2 && !/^walk-in\b/i.test(n) && !selectedCustomer.value
+})
+
+// Status line under the name box for a picked customer. The threshold
+// (repeat_min) comes from the API, so it is only defined in one place.
+const customerStatusLabel = computed(() => {
+  const c = selectedCustomer.value
+  if (!c) return ''
+  const n = Number(c.visits) || 0
+  const need = Number(c.repeat_min) || 10
+  return c.is_repeat
+    ? `Repeat buyer · ${n} purchases`
+    : `Tracking · ${n} of ${need} purchases`
+})
+
 function generateCustomerName() {
+  selectedCustomer.value = null
   const ts = new Date()
   customerName.value = `Walk-in ${ts.getMonth() + 1}/${ts.getDate()} ${String(ts.getHours()).padStart(2, '0')}${String(ts.getMinutes()).padStart(2, '0')}`
 }
@@ -1360,6 +1598,7 @@ async function completePayment() {
       amount_paid: amountReceivedNum.value,
       change_amount: change.value,
       customer_name: customerName.value.trim(),
+      customer_id: selectedCustomer.value?.CustomerID ?? null,
       idempotency_key: checkoutIdempotencyKey.value,
       items: cart.value.map(i => ({
         product_id: i.id,
@@ -1391,6 +1630,8 @@ async function completePayment() {
 
     cart.value = []
     customerName.value = ''
+    selectedCustomer.value = null
+    customerSuggestions.value = []
     amountReceived.value = 0
     discountValue.value = 0
     checkoutIdempotencyKey.value = ''
@@ -1398,6 +1639,7 @@ async function completePayment() {
     cartOpen.value = false // sale's done — collapse the mobile drawer back to the summary bar
 
     await loadCatalog() // refresh stock after a successful sale
+    loadRepeatBuyers() // refresh purchase counts for the dropdown
 
     // Tell Layout.vue to re-fetch notifications right now instead of
     // waiting for its 30s poll — a checkout can just have pushed an item
@@ -1812,6 +2054,90 @@ async function completePayment() {
   transition: border-color .18s, background-color .18s, color .18s;
 }
 .customer-gen-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); background: var(--p-accent-soft); }
+
+/* Phone row + customer suggestions + repeat badge */
+.customer-row--status { margin-top: 8px; }
+.customer-suggest {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+  margin: 0; padding: 4px; list-style: none;
+  max-height: 220px; overflow-y: auto;
+  background: var(--p-surface-raised);
+  border: 1px solid var(--p-border-strong);
+  border-radius: 10px; box-shadow: var(--p-shadow-md);
+}
+.customer-suggest li {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; border-radius: 7px; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; color: var(--p-text-primary);
+}
+.customer-suggest li:hover { background: var(--p-accent-soft); }
+.customer-suggest small { font-size: 11px; font-weight: 500; color: var(--p-text-faint); }
+.customer-suggest-head {
+  padding: 6px 10px 4px; cursor: default;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--p-text-faint);
+}
+.customer-suggest-head:hover { background: none; }
+
+/* Search box inside the repeat-buyers dropdown */
+.customer-suggest li.customer-suggest-search {
+  position: sticky; top: -4px; z-index: 1;
+  flex-direction: row; align-items: center; gap: 8px;
+  margin: 0 0 4px; padding: 4px 8px;
+  cursor: default;
+  background: var(--p-surface-raised);
+  border: 1.5px solid var(--p-border-strong);
+  border-radius: 8px;
+  transition: border-color .15s;
+}
+.customer-suggest li.customer-suggest-search:hover { background: var(--p-surface-raised); }
+.customer-suggest li.customer-suggest-search:focus-within {
+  border-color: var(--p-accent);
+  box-shadow: 0 0 0 3px var(--p-ring);
+}
+.customer-suggest-search > i { font-size: 11px; color: var(--p-text-faint); flex-shrink: 0; }
+.customer-suggest-search input {
+  flex: 1; min-width: 0; height: 26px;
+  border: none; outline: none; background: transparent;
+  font-size: 12.5px; font-family: inherit; font-weight: 500;
+  color: var(--p-text-primary);
+}
+.customer-suggest-search input::placeholder { color: var(--p-text-faint); }
+.customer-suggest-search-clear {
+  border: none; background: none; padding: 2px 4px;
+  color: var(--p-text-faint); cursor: pointer; font-size: 11px;
+  transition: color .15s;
+}
+.customer-suggest-search-clear:hover { color: var(--p-text-muted); }
+
+.customer-suggest li.customer-suggest-empty {
+  cursor: default; align-items: center;
+  padding: 14px 10px; font-size: 12px; font-weight: 500;
+  color: var(--p-text-faint);
+}
+.customer-suggest li.customer-suggest-empty:hover { background: none; }
+
+.customer-suggest-name { display: flex; align-items: center; gap: 6px; }
+.customer-suggest-tag {
+  font-style: normal; font-size: 9.5px; font-weight: 700;
+  padding: 1px 7px; border-radius: 20px;
+  background: var(--p-accent-soft); color: var(--p-accent);
+  border: 1px solid var(--p-accent-border);
+}
+.customer-suggest-tag--plain {
+  background: var(--p-surface-sunken); color: var(--p-text-muted);
+  border-color: var(--p-border-strong);
+}
+.customer-repeat-badge {
+  font-size: 11px; font-weight: 700; white-space: nowrap;
+  padding: 4px 10px; border-radius: 20px;
+  background: var(--p-accent-soft); color: var(--p-accent);
+  border: 1px solid var(--p-accent-border);
+}
+.customer-repeat-badge--plain {
+  background: var(--p-surface-sunken); color: var(--p-text-muted);
+  border-color: var(--p-border-strong);
+}
 
 /* Cart items */
 .cart-items {

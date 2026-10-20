@@ -116,15 +116,156 @@
         </div>
       </section>
 
-      <!-- PRODUCT CATALOG -->
-      <section class="lw-shop">
+      <!-- QUICK INFO STRIP — answers "is this a real, open shop?" right away -->
+      <div class="lw-strip">
+        <div class="lw-strip-inner">
+          <span v-if="openNow !== null" class="lw-strip-item">
+            <span class="lw-open-dot" :class="openNow ? 'lw-open-dot--open' : 'lw-open-dot--closed'"></span>
+            <strong>{{ openNow ? 'Open now' : 'Closed now' }}</strong>
+            <span class="lw-strip-muted">Mon – Sat, 7:00 AM – 5:00 PM</span>
+          </span>
+          <span class="lw-strip-item">
+            <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+            Butuan City, Agusan del Norte
+          </span>
+          <span v-if="shopProducts.length" class="lw-strip-item">
+            <i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i>
+            {{ shopProducts.length }} products in stock list
+          </span>
+          <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-strip-item lw-strip-link">
+            <i class="fa-solid fa-phone" aria-hidden="true"></i>
+            Call to order: {{ SHOP_PHONE }}
+          </a>
+        </div>
+      </div>
 
-        <div class="lw-shop-head">
-          <div class="lw-shop-head-text">
-            <h2 class="lw-shop-title"><span class="lw-title-bar"></span>Our Products</h2>
-            <p class="lw-shop-sub">Check our latest prices and availability.</p>
+      <!-- LOAD / ERROR STATES -->
+      <section v-if="shopError || shopLoading" class="lw-block">
+        <div v-if="shopError" class="lw-shop-state lw-shop-state--error">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <p>{{ shopError }}</p>
+          <button @click="loadShopCatalog" class="lw-shop-retry">Retry</button>
+        </div>
+        <div v-else class="lw-shop-state">
+          <i class="fa-solid fa-spinner fa-spin"></i>
+          <p>Loading products…</p>
+        </div>
+      </section>
+
+      <!-- BEST SELLERS — one highlighted row. Hidden while the visitor is
+           searching/filtering so results aren't buried under it. -->
+      <section
+        v-if="!shopLoading && !shopError && !isFiltering && displayedBestSellers.length"
+        class="lw-block lw-block--tight"
+      >
+        <div class="lw-sec-head">
+          <h2 class="lw-shop-title">
+            <span class="lw-title-bar"></span>{{ bestSellersAreReal ? 'Best Sellers' : 'Featured Products' }}
+          </h2>
+          <p class="lw-shop-sub">
+            {{ bestSellersAreReal ? 'The materials our customers buy the most.' : 'Handpicked from what we have in stock right now.' }}
+          </p>
+        </div>
+
+        <div class="lw-shop-carousel">
+          <button
+            type="button"
+            class="lw-shop-nav lw-shop-nav--prev"
+            :class="{ 'lw-shop-nav--hidden': !bsScroll.canPrev }"
+            :disabled="!bsScroll.canPrev"
+            @click="scrollBestSellers(-1)"
+            aria-label="Scroll to previous products"
+          >
+            <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+          </button>
+
+          <div ref="bsEl" class="lw-shop-grid lw-shop-grid--slider" @scroll="updateBsScroll">
+            <div
+              v-for="(product, i) in displayedBestSellers"
+              :key="product.id"
+              class="lw-shop-card"
+            >
+              <div class="lw-shop-card-img" :class="{ 'lw-shop-card-img--photo': product.image }">
+                <span class="lw-shop-stock-pill">
+                  <span class="lw-shop-dot" :class="`lw-shop-dot--${shopStockStatus(product)}`"></span>
+                  {{ shopStockLabel(product) }}
+                </span>
+                <span v-if="bestSellersAreReal" class="lw-shop-rank">#{{ i + 1 }}</span>
+                <img v-if="product.image" :src="product.image" :alt="product.name" @error="onShopImgError(product)" />
+                <div v-else class="lw-shop-card-img-placeholder"><i :class="categoryIcon(shopCategoryName(product))"></i></div>
+              </div>
+              <div class="lw-shop-card-body">
+                <p v-if="shopCategoryName(product)" class="lw-shop-card-cat">{{ shopCategoryName(product) }}</p>
+                <p class="lw-shop-card-name" :title="product.name">{{ product.name }}</p>
+                <p class="lw-shop-card-sku"><i class="fa-solid fa-barcode" aria-hidden="true"></i>{{ product.id }}</p>
+                <p class="lw-shop-card-price">
+                  <span class="lw-shop-price-currency">₱</span>{{ product.price.toFixed(2) }}
+                  <span class="lw-shop-price-unit">{{ priceUnit(product) }}</span>
+                </p>
+              </div>
+            </div>
           </div>
 
+          <button
+            type="button"
+            class="lw-shop-nav lw-shop-nav--next"
+            :class="{ 'lw-shop-nav--hidden': !bsScroll.canNext }"
+            :disabled="!bsScroll.canNext"
+            @click="scrollBestSellers(1)"
+            aria-label="Scroll to next products"
+          >
+            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- SHOP BY CATEGORY -->
+      <section
+        v-if="!shopLoading && !shopError && categoryChips.length"
+        class="lw-block lw-block--tight"
+      >
+        <div class="lw-sec-head">
+          <h2 class="lw-shop-title"><span class="lw-title-bar"></span>Shop by Category</h2>
+          <p class="lw-shop-sub">Jump straight to what you need.</p>
+        </div>
+        <div class="lw-chips">
+          <button
+            type="button"
+            class="lw-chip"
+            :class="{ 'lw-chip--active': shopCategory === '' }"
+            @click="selectCategory('')"
+          >
+            <i class="fa-solid fa-table-cells-large" aria-hidden="true"></i>
+            All
+            <span class="lw-chip-count">{{ shopProducts.length }}</span>
+          </button>
+          <button
+            v-for="cat in categoryChips"
+            :key="cat.CategoryID"
+            type="button"
+            class="lw-chip"
+            :class="{ 'lw-chip--active': String(shopCategory) === String(cat.CategoryID) }"
+            @click="selectCategory(cat.CategoryID)"
+          >
+            <i :class="categoryIcon(cat.CategoryName)" aria-hidden="true"></i>
+            {{ cat.CategoryName }}
+            <span class="lw-chip-count">{{ cat.count }}</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ALL PRODUCTS — grouped by category, with a sticky search bar -->
+      <section
+        v-if="!shopLoading && !shopError"
+        ref="catalogEl"
+        class="lw-block lw-catalog"
+      >
+        <div class="lw-sec-head">
+          <h2 class="lw-shop-title"><span class="lw-title-bar"></span>All Products</h2>
+          <p class="lw-shop-sub">Prices are subject to change — please call to confirm availability.</p>
+        </div>
+
+        <div class="lw-catalog-bar">
           <div class="lw-shop-toolbar">
             <div class="lw-shop-search">
               <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
@@ -139,103 +280,94 @@
               </select>
               <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
             </div>
+            <button v-if="isFiltering" type="button" class="lw-clear-btn" @click="clearFilters">
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i> Clear
+            </button>
           </div>
-
-          <p v-if="!shopLoading && !shopError" class="lw-shop-count">
+          <p class="lw-shop-count">
             {{ filteredShopProducts.length }} product{{ filteredShopProducts.length === 1 ? '' : 's' }} found
           </p>
         </div>
 
-        <div v-if="shopError" class="lw-shop-state lw-shop-state--error">
-          <i class="fa-solid fa-triangle-exclamation"></i>
-          <p>{{ shopError }}</p>
-          <button @click="loadShopCatalog" class="lw-shop-retry">Retry</button>
-        </div>
-
-        <div v-else-if="shopLoading" class="lw-shop-state">
-          <i class="fa-solid fa-spinner fa-spin"></i>
-          <p>Loading products…</p>
-        </div>
-
-        <div v-else-if="filteredShopProducts.length === 0" class="lw-shop-empty">
+        <div v-if="filteredShopProducts.length === 0" class="lw-shop-empty">
           <i class="fa-solid fa-box-open"></i>
           <p>No products found</p>
+          <button v-if="isFiltering" type="button" class="lw-shop-retry" @click="clearFilters">Clear filters</button>
         </div>
 
-        <!-- ROWS OF SLIDERS: preview products are split into 3 independently
-             scrolling rows. Each row has its own prev/next nav buttons that
-             are visible at all times (not just on hover) and hide themselves
-             automatically once there's nothing left to scroll toward on that
-             side. The "View all products" tile sits at the end of the last
-             row only. -->
-        <div v-else class="lw-shop-rows">
-          <div
-            v-for="(row, rowIndex) in productRows"
-            :key="rowIndex"
-            class="lw-shop-carousel"
-          >
+        <div v-for="group in groupedProducts" :key="group.key" class="lw-group">
+          <div class="lw-group-head">
+            <h3 class="lw-group-title">
+              <span class="lw-group-icon"><i :class="categoryIcon(group.name)" aria-hidden="true"></i></span>
+              {{ group.name }}
+              <span class="lw-group-count">{{ group.items.length }}</span>
+            </h3>
             <button
+              v-if="group.items.length > GROUP_PREVIEW && !isFiltering"
               type="button"
-              class="lw-shop-nav lw-shop-nav--prev"
-              :class="{ 'lw-shop-nav--hidden': !rowScroll[rowIndex]?.canPrev }"
-              :disabled="!rowScroll[rowIndex]?.canPrev"
-              @click="scrollShopGrid(-1, rowIndex)"
-              aria-label="Scroll to previous products"
+              class="lw-group-more"
+              @click="toggleGroup(group.key)"
             >
-              <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+              {{ expandedGroups.has(group.key) ? 'Show less' : `Show all ${group.items.length}` }}
+              <i class="fa-solid" :class="expandedGroups.has(group.key) ? 'fa-chevron-up' : 'fa-chevron-down'" aria-hidden="true"></i>
             </button>
+          </div>
 
+          <div class="lw-shop-grid lw-shop-grid--groups">
             <div
-              class="lw-shop-grid lw-shop-grid--slider"
-              :ref="el => setShopGridEl(el, rowIndex)"
-              @scroll="updateShopScrollState(rowIndex)"
+              v-for="product in visibleItems(group)"
+              :key="product.id"
+              class="lw-shop-card"
+              :class="{ 'lw-shop-card--oos': shopStockStatus(product) === 'oos' }"
             >
-              <div v-for="product in row" :key="product.id" class="lw-shop-card">
-                <div class="lw-shop-card-img">
-                  <span class="lw-shop-stock-pill" :class="`lw-shop-stock-pill--${shopStockStatus(product)}`">
-                    <span class="lw-shop-dot" :class="`lw-shop-dot--${shopStockStatus(product)}`"></span>
-                    {{ shopStockLabel(product) }}
-                  </span>
-                  <img v-if="product.image" :src="product.image" :alt="product.name" @error="onShopImgError(product)" />
-                  <div v-else class="lw-shop-card-img-placeholder"><i class="fa-solid fa-cube"></i></div>
-                </div>
-                <div class="lw-shop-card-body">
-                  <p v-if="shopCategoryName(product)" class="lw-shop-card-cat">{{ shopCategoryName(product) }}</p>
-                  <p class="lw-shop-card-name" :title="product.name">{{ product.name }}</p>
-                  <p class="lw-shop-card-sku"><i class="fa-solid fa-barcode" aria-hidden="true"></i>{{ product.id }}</p>
-                  <p class="lw-shop-card-price">
-                    <span class="lw-shop-price-currency">₱</span>{{ product.price.toFixed(2) }}
-                    <span v-if="product.pricingType === 'sqm'" class="lw-shop-price-unit">/ sqm</span>
-                  </p>
-                </div>
-              </div>
-
-              <!-- Opens the full catalog in a larger modal, same data underneath.
-                   Only rendered at the tail of the last row. -->
-              <button
-                v-if="hasMoreProducts && rowIndex === productRows.length - 1"
-                type="button"
-                class="lw-shop-viewall"
-                @click="showAllProducts = true"
-              >
-                <span class="lw-shop-viewall-icon">
-                  <i class="fa-solid fa-grip" aria-hidden="true"></i>
+              <div class="lw-shop-card-img" :class="{ 'lw-shop-card-img--photo': product.image }">
+                <span class="lw-shop-stock-pill">
+                  <span class="lw-shop-dot" :class="`lw-shop-dot--${shopStockStatus(product)}`"></span>
+                  {{ shopStockLabel(product) }}
                 </span>
-                <span class="lw-shop-viewall-title">View all products</span>
-                <span class="lw-shop-viewall-sub">Browse our complete product catalog</span>
-              </button>
+                <img v-if="product.image" :src="product.image" :alt="product.name" @error="onShopImgError(product)" />
+                <div v-else class="lw-shop-card-img-placeholder"><i :class="categoryIcon(group.name)"></i></div>
+              </div>
+              <div class="lw-shop-card-body">
+                <p class="lw-shop-card-name" :title="product.name">{{ product.name }}</p>
+                <p class="lw-shop-card-sku"><i class="fa-solid fa-barcode" aria-hidden="true"></i>{{ product.id }}</p>
+                <p class="lw-shop-card-price">
+                  <span class="lw-shop-price-currency">₱</span>{{ product.price.toFixed(2) }}
+                  <span class="lw-shop-price-unit">{{ priceUnit(product) }}</span>
+                </p>
+              </div>
             </div>
+          </div>
+        </div>
+      </section>
 
-            <button
-              type="button"
-              class="lw-shop-nav lw-shop-nav--next"
-              :class="{ 'lw-shop-nav--hidden': !rowScroll[rowIndex]?.canNext }"
-              :disabled="!rowScroll[rowIndex]?.canNext"
-              @click="scrollShopGrid(1, rowIndex)"
-              aria-label="Scroll to next products"
-            >
-              <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-            </button>
+      <!-- HOW TO ORDER -->
+      <section v-if="!shopLoading && !shopError" class="lw-block lw-block--tight">
+        <div class="lw-sec-head">
+          <h2 class="lw-shop-title"><span class="lw-title-bar"></span>How to Order</h2>
+          <p class="lw-shop-sub">Three simple steps.</p>
+        </div>
+        <div class="lw-steps">
+          <div class="lw-step">
+            <span class="lw-step-num">1</span>
+            <div>
+              <p class="lw-step-title">Browse &amp; note your items</p>
+              <p class="lw-step-text">Pick the materials and quantities you need from the list.</p>
+            </div>
+          </div>
+          <div class="lw-step">
+            <span class="lw-step-num">2</span>
+            <div>
+              <p class="lw-step-title">Confirm price &amp; stock</p>
+              <p class="lw-step-text">Call or email us to confirm availability before you come.</p>
+            </div>
+          </div>
+          <div class="lw-step">
+            <span class="lw-step-num">3</span>
+            <div>
+              <p class="lw-step-title">Visit our store</p>
+              <p class="lw-step-text">Drop by our shop in Butuan City — directions below.</p>
+            </div>
           </div>
         </div>
       </section>
@@ -272,7 +404,7 @@
               <span class="lw-visit-icon"><i class="fa-solid fa-phone" aria-hidden="true"></i></span>
               <div>
                 <p class="lw-visit-label">Phone</p>
-                <p class="lw-visit-value">+63 912 345 6789</p>
+                <p class="lw-visit-value">{{ SHOP_PHONE }}</p>
               </div>
             </div>
             <div class="lw-visit-row">
@@ -318,82 +450,9 @@
       <div class="lw-footer-right">
         <span>support@sheems.example</span>
         <span class="lw-sep" aria-hidden="true">·</span>
-        <span>+63 912 345 6789</span>
+        <span>{{ SHOP_PHONE }}</span>
       </div>
     </footer>
-
-    <!-- ALL PRODUCTS MODAL — same catalog data/search/filter as the grid
-         above, just presented full-size with every result visible. -->
-    <Teleport to="body">
-      <transition name="fade">
-        <div
-          v-if="showAllProducts"
-          class="lw-modal-backdrop lw-modal-backdrop--products"
-          @click.self="showAllProducts = false"
-          @keydown.esc="showAllProducts = false"
-          tabindex="-1"
-        >
-          <div class="lw-products-modal" role="dialog" aria-modal="true" aria-labelledby="lw-products-title">
-            <div class="lw-products-modal-head">
-              <div>
-                <h2 id="lw-products-title" class="lw-products-modal-title">All Products</h2>
-                <p class="lw-products-modal-sub">
-                  {{ filteredShopProducts.length }} product{{ filteredShopProducts.length === 1 ? '' : 's' }} found
-                </p>
-              </div>
-              <button type="button" class="lw-login-modal-close" @click="showAllProducts = false" aria-label="Close">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
-            </div>
-
-            <div class="lw-products-modal-toolbar">
-              <div class="lw-shop-search">
-                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                <input v-model="shopSearch" type="text" placeholder="Search products, SKU, or barcode…" />
-              </div>
-              <div class="lw-shop-filter">
-                <select v-model="shopCategory">
-                  <option value="">All Categories</option>
-                  <option v-for="cat in shopCategories" :key="cat.CategoryID" :value="cat.CategoryID">
-                    {{ cat.CategoryName }}
-                  </option>
-                </select>
-                <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
-              </div>
-            </div>
-
-            <div class="lw-products-modal-body">
-              <div class="lw-shop-grid lw-shop-grid--modal">
-                <div v-for="product in filteredShopProducts" :key="product.id" class="lw-shop-card">
-                  <div class="lw-shop-card-img">
-                    <span class="lw-shop-stock-pill" :class="`lw-shop-stock-pill--${shopStockStatus(product)}`">
-                      <span class="lw-shop-dot" :class="`lw-shop-dot--${shopStockStatus(product)}`"></span>
-                      {{ shopStockLabel(product) }}
-                    </span>
-                    <img v-if="product.image" :src="product.image" :alt="product.name" @error="onShopImgError(product)" />
-                    <div v-else class="lw-shop-card-img-placeholder"><i class="fa-solid fa-cube"></i></div>
-                  </div>
-                  <div class="lw-shop-card-body">
-                    <p v-if="shopCategoryName(product)" class="lw-shop-card-cat">{{ shopCategoryName(product) }}</p>
-                    <p class="lw-shop-card-name" :title="product.name">{{ product.name }}</p>
-                    <p class="lw-shop-card-sku"><i class="fa-solid fa-barcode" aria-hidden="true"></i>{{ product.id }}</p>
-                    <p class="lw-shop-card-price">
-                      <span class="lw-shop-price-currency">₱</span>{{ product.price.toFixed(2) }}
-                      <span v-if="product.pricingType === 'sqm'" class="lw-shop-price-unit">/ sqm</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div v-if="filteredShopProducts.length === 0" class="lw-shop-empty">
-                  <i class="fa-solid fa-box-open"></i>
-                  <p>No products found</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </transition>
-    </Teleport>
 
     <!-- LOGIN MODAL — original card, form, and all validation / error-handling
          logic is unchanged; it lives behind the "Login" button. -->
@@ -541,9 +600,9 @@
               <i class="fa-solid fa-envelope" aria-hidden="true"></i>
               support@sheems.example
             </a>
-            <a href="tel:+639123456789" class="lw-modal-contact-row">
+            <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-modal-contact-row">
               <i class="fa-solid fa-phone" aria-hidden="true"></i>
-              +63 912 345 6789
+              {{ SHOP_PHONE }}
             </a>
           </div>
           <button type="button" class="lw-modal-close" @click="showForgotHelp = false">Got it</button>
@@ -556,7 +615,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import type { ComponentPublicInstance } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDarkMode } from '@/composables/useDarkMode'
@@ -616,7 +674,6 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (showForgotHelp.value) { showForgotHelp.value = false; return }
   if (showLoginModal.value) { closeLoginModal(); return }
-  if (showAllProducts.value) { showAllProducts.value = false; return }
 }
 onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
@@ -744,6 +801,22 @@ function applyLoginError(err: any) {
   }
 }
 
+/* ─── SHOP CONTACT / HOURS ───────────────────────────────── */
+const SHOP_PHONE     = '+63 912 345 6789'
+const SHOP_PHONE_TEL = '+639123456789'
+
+// "Open now" is computed in the shop's own timezone (Philippines), not the
+// visitor's, so it's correct for someone browsing from abroad too.
+// Mon–Sat, 7:00 AM – 5:00 PM; Sunday closed.
+const openNow = ref<boolean | null>(null)
+function computeOpenNow() {
+  const manila = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }))
+  const day  = manila.getDay()
+  const mins = manila.getHours() * 60 + manila.getMinutes()
+  openNow.value = day !== 0 && mins >= 7 * 60 && mins < 17 * 60
+}
+onMounted(computeOpenNow)
+
 /* ─── PUBLIC PRODUCT CATALOG ─────────────────────────────────
  * Uses the SAME `api` axios instance as POS.vue (baseURL already
  * points at the Laravel API host, e.g. :8000, instead of the Vue dev
@@ -763,6 +836,7 @@ interface ShopProduct {
   image: string | null
   category: number | string | null
   pricingType: 'sqm' | 'piece'
+  featured: boolean
 }
 interface ShopCategory {
   CategoryID: number | string
@@ -770,12 +844,15 @@ interface ShopCategory {
   [key: string]: unknown
 }
 
+const GROUP_PREVIEW     = 8  // products shown per category before "Show all"
+const BEST_SELLER_COUNT = 6
+
 const shopProducts   = ref<ShopProduct[]>([])
 const shopCategories = ref<ShopCategory[]>([])
 const shopLoading    = ref(false)
 const shopError      = ref('')
 const shopSearch     = ref('')
-const shopCategory   = ref('')
+const shopCategory   = ref<string | number>('')
 
 function normalizeShopProduct(p: any): ShopProduct {
   const pricingTypeRaw = (p.PricingType ?? p.pricing_type ?? 'piece').toString().toLowerCase()
@@ -787,6 +864,9 @@ function normalizeShopProduct(p: any): ShopProduct {
     image: p.ImageURL ?? p.image ?? null,
     category: p.CategoryID ?? p.category ?? null,
     pricingType: pricingTypeRaw === 'sqm' ? 'sqm' : 'piece',
+    // Optional manual flag: if the backend ever sends one, featured products
+    // are used as the fallback for the top row when there's no sales data.
+    featured: Boolean(p.IsFeatured ?? p.is_featured ?? p.featured ?? false),
   }
 }
 
@@ -805,111 +885,175 @@ async function loadShopCatalog() {
     console.error('loadShopCatalog error:', e)
   } finally {
     shopLoading.value = false
-    nextTick(updateAllShopScrollState)
   }
 }
 onMounted(loadShopCatalog)
 
 function onShopImgError(product: ShopProduct) { product.image = null }
 
-// Presentational only — resolves a product's category id to its display
-// name for the card's category chip. Falls back to nothing (chip hidden)
-// if categories haven't loaded yet or the id doesn't match.
+// Resolves a product's category id to its display name.
 function shopCategoryName(product: ShopProduct): string | null {
   const cat = shopCategories.value.find(c => String(c.CategoryID) === String(product.category))
   return cat ? cat.CategoryName : null
 }
 
-// Same ok/low/oos thresholds POS.vue uses for its stock badges, minus
-// exact counts — customers see a status, not a number, so the storefront
-// doesn't hand out precise inventory levels.
-function shopStockStatus(p: ShopProduct) {
+// Customers see a status, not an exact count, so the storefront doesn't hand
+// out precise inventory levels. "Low" is shown as "Few left" because
+// "Low Stock" is internal inventory language.
+function shopStockStatus(p: ShopProduct): 'ok' | 'low' | 'oos' {
   return p.stock <= 0 ? 'oos' : p.stock <= 5 ? 'low' : 'ok'
 }
 function shopStockLabel(p: ShopProduct) {
   const s = shopStockStatus(p)
-  return s === 'oos' ? 'Out of Stock' : s === 'low' ? 'Low Stock' : 'In Stock'
+  return s === 'oos' ? 'Out of Stock' : s === 'low' ? 'Few left' : 'In Stock'
+}
+function priceUnit(p: ShopProduct) {
+  return p.pricingType === 'sqm' ? '/ sqm' : '/ piece'
 }
 
+// Category icon, used for chips, group headings and image placeholders.
+// Matched by keyword so new categories still get something sensible.
+function categoryIcon(name: string | null): string {
+  const n = (name || '').toLowerCase()
+  if (n.includes('roof'))                                          return 'fa-solid fa-house-chimney'
+  if (n.includes('fasten') || n.includes('screw') || n.includes('nail')) return 'fa-solid fa-screwdriver-wrench'
+  if (n.includes('insul'))                                         return 'fa-solid fa-temperature-low'
+  if (n.includes('seal') || n.includes('adhes'))                   return 'fa-solid fa-fill-drip'
+  if (n.includes('struct') || n.includes('steel') || n.includes('purlin')) return 'fa-solid fa-industry'
+  if (n.includes('poly') || n.includes('panel'))                   return 'fa-solid fa-border-all'
+  return 'fa-solid fa-cube'
+}
+
+/* ─── SEARCH / FILTER ────────────────────────────────────── */
 const normalizedShopSearch = computed(() => shopSearch.value.trim().toLowerCase())
+const isFiltering = computed(() => !!normalizedShopSearch.value || shopCategory.value !== '')
+
 const filteredShopProducts = computed(() => {
   const q = normalizedShopSearch.value
   const cat = shopCategory.value
   return shopProducts.value.filter(p => {
-    if (cat && p.category != cat) return false
+    if (cat !== '' && String(p.category) !== String(cat)) return false
     if (!q) return true
-    return p.name.toLowerCase().includes(q)
+    return p.name.toLowerCase().includes(q) || String(p.id).toLowerCase().includes(q)
   })
 })
 
-/* ─── "View all products" modal ──────────────────────────────
- * The landing grid only teases a handful of results; the modal below
- * reuses the same `shopSearch` / `shopCategory` state and shows the
- * complete `filteredShopProducts` list, so filtering behaves identically
- * in both places.
- * ────────────────────────────────────────────────────────── */
-const SHOP_PREVIEW_COUNT = 21 // 7 per row across 3 rows
-const showAllProducts = ref(false)
-const previewProducts = computed(() => filteredShopProducts.value.slice(0, SHOP_PREVIEW_COUNT))
-const hasMoreProducts = computed(() => filteredShopProducts.value.length > SHOP_PREVIEW_COUNT)
-
-/* ─── PREVIEW SLIDERS (3 rows) ────────────────────────────────
- * The preview grid used to be a single horizontally-scrolling row; it's
- * now split into 3 rows, each scrolling independently. `productRows`
- * chunks `previewProducts` roughly evenly across `SHOP_ROWS` rows, and
- * `shopGridEls` / `rowScroll` track the scroll container and nav-arrow
- * visibility per row (indexed by row number) instead of as a single
- * shared ref/state pair.
- * ────────────────────────────────────────────────────────── */
-const SHOP_ROWS = 3
-const productRows = computed(() => {
-  const items = previewProducts.value
-  const size = Math.ceil(items.length / SHOP_ROWS) || 1
-  return Array.from({ length: SHOP_ROWS }, (_, i) => items.slice(i * size, i * size + size))
-})
-
-const shopGridEls = ref<(HTMLElement | null)[]>([null, null, null])
-const rowScroll = ref(
-  Array.from({ length: SHOP_ROWS }, () => ({ canPrev: false, canNext: false }))
-)
-
-function setShopGridEl(el: Element | ComponentPublicInstance | null, rowIndex: number) {
-  shopGridEls.value[rowIndex] = (el as HTMLElement) ?? null
+function clearFilters() {
+  shopSearch.value = ''
+  shopCategory.value = ''
 }
 
-function updateShopScrollState(rowIndex: number) {
-  const el = shopGridEls.value[rowIndex]
-  if (!el) {
-    rowScroll.value[rowIndex] = { canPrev: false, canNext: false }
-    return
+/* ─── CATEGORY CHIPS ─────────────────────────────────────── */
+const catalogEl = ref<HTMLElement | null>(null)
+
+const categoryChips = computed(() =>
+  shopCategories.value
+    .map(c => ({
+      ...c,
+      count: shopProducts.value.filter(p => String(p.category) === String(c.CategoryID)).length,
+    }))
+    .filter(c => c.count > 0)
+)
+
+function selectCategory(id: string | number) {
+  shopCategory.value = id
+  nextTick(() => catalogEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
+
+/* ─── GROUPED PRODUCT LIST ───────────────────────────────── */
+interface ProductGroup { key: string; name: string; items: ShopProduct[] }
+
+const stockRank = (p: ShopProduct) => ({ ok: 0, low: 1, oos: 2 }[shopStockStatus(p)])
+
+const groupedProducts = computed<ProductGroup[]>(() => {
+  const order = new Map(shopCategories.value.map((c, i) => [String(c.CategoryID), i]))
+  const map = new Map<string, ProductGroup>()
+  for (const p of filteredShopProducts.value) {
+    const key = p.category == null ? 'other' : String(p.category)
+    if (!map.has(key)) map.set(key, { key, name: shopCategoryName(p) ?? 'Other', items: [] })
+    map.get(key)!.items.push(p)
   }
-  rowScroll.value[rowIndex] = {
+  const groups = [...map.values()]
+  // Out-of-stock items sink to the end of each group (sort is stable).
+  groups.forEach(g => g.items.sort((a, b) => stockRank(a) - stockRank(b)))
+  groups.sort((a, b) => (order.get(a.key) ?? 999) - (order.get(b.key) ?? 999))
+  return groups
+})
+
+const expandedGroups = ref<Set<string>>(new Set())
+function toggleGroup(key: string) {
+  const next = new Set(expandedGroups.value)
+  next.has(key) ? next.delete(key) : next.add(key)
+  expandedGroups.value = next
+}
+// While searching/filtering every match is shown; otherwise each category
+// shows its first few items with a "Show all" toggle.
+function visibleItems(group: ProductGroup) {
+  if (isFiltering.value || expandedGroups.value.has(group.key)) return group.items
+  return group.items.slice(0, GROUP_PREVIEW)
+}
+
+/* ─── BEST SELLERS ───────────────────────────────────────────
+ * Preferred source: GET /api/public/best-sellers, returning an array of
+ * products (same shape as /api/product-list) ranked by quantity sold in
+ * the last 30–90 days. Until that endpoint exists (or if it returns fewer
+ * than 3 items) the top row falls back to products flagged as featured,
+ * and then to the newest in-stock products, and is labelled
+ * "Featured Products" instead of "Best Sellers" so it never claims
+ * sales data it doesn't have. Rank badges (#1, #2…) only show for real
+ * best sellers.
+ * ────────────────────────────────────────────────────────── */
+const bestSellersApi = ref<ShopProduct[]>([])
+
+async function loadBestSellers() {
+  try {
+    const { data } = await api.get('/api/public/best-sellers')
+    const list = Array.isArray(data) ? data : (data?.products ?? data?.data ?? [])
+    bestSellersApi.value = list
+      .map(normalizeShopProduct)
+      .filter((p: ShopProduct) => p.stock > 0)
+      .slice(0, BEST_SELLER_COUNT)
+  } catch {
+    bestSellersApi.value = [] // endpoint not available yet — use the fallback
+  }
+}
+onMounted(loadBestSellers)
+
+const bestSellersAreReal = computed(() => bestSellersApi.value.length >= 3)
+
+const displayedBestSellers = computed<ShopProduct[]>(() => {
+  if (bestSellersAreReal.value) return bestSellersApi.value
+  const inStock = shopProducts.value.filter(p => p.stock > 0)
+  const featured = inStock.filter(p => p.featured)
+  if (featured.length) return featured.slice(0, BEST_SELLER_COUNT)
+  return [...inStock]
+    .sort((a, b) => Number(b.id) - Number(a.id))
+    .slice(0, BEST_SELLER_COUNT)
+})
+
+/* Best-sellers carousel scrolling */
+const bsEl = ref<HTMLElement | null>(null)
+const bsScroll = ref({ canPrev: false, canNext: false })
+
+function updateBsScroll() {
+  const el = bsEl.value
+  if (!el) { bsScroll.value = { canPrev: false, canNext: false }; return }
+  bsScroll.value = {
     canPrev: el.scrollLeft > 4,
     canNext: el.scrollLeft < el.scrollWidth - el.clientWidth - 4,
   }
 }
-
-function updateAllShopScrollState() {
-  shopGridEls.value.forEach((_, i) => updateShopScrollState(i))
-}
-
-function scrollShopGrid(direction: number, rowIndex: number) {
-  const el = shopGridEls.value[rowIndex]
+function scrollBestSellers(direction: number) {
+  const el = bsEl.value
   if (!el) return
   el.scrollBy({ left: direction * el.clientWidth * 0.85, behavior: 'smooth' })
 }
-
-function onShopGridResize() {
-  updateAllShopScrollState()
-}
-
-watch(productRows, () => { nextTick(updateAllShopScrollState) })
-
+watch(displayedBestSellers, () => { nextTick(updateBsScroll) }, { flush: 'post' })
 onMounted(() => {
-  nextTick(updateAllShopScrollState)
-  window.addEventListener('resize', onShopGridResize)
+  nextTick(updateBsScroll)
+  window.addEventListener('resize', updateBsScroll)
 })
-onBeforeUnmount(() => window.removeEventListener('resize', onShopGridResize))
+onBeforeUnmount(() => window.removeEventListener('resize', updateBsScroll))
 
 /* ─── LOCATION / MAP ─────────────────────────────────────────
  * Shem Steel Construction Company — 849 Ochoa Ave, Butuan City,
@@ -925,7 +1069,7 @@ const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${SHOP
 </script>
 
 <!--
-  Modals (login, forgot-password, all-products) render via <Teleport to="body">,
+  Modals (login, forgot-password) render via <Teleport to="body">,
   which moves them OUTSIDE the .lw wrapper div at the DOM level. The color
   tokens below are defined as CSS custom properties scoped to .lw, so a
   teleported node can't see them — background: var(--lw-card-bg) resolves to
@@ -1314,13 +1458,39 @@ html[data-theme="dark"] .lw {
 }
 .lw-tagline { font-size: 14px; line-height: 1.75; color: var(--lw-text-secondary); max-width: 420px; }
 
-/* ─── PRODUCTS SECTION ───────────────────── */
-.lw-shop {
+/* ─── QUICK INFO STRIP ───────────────────── */
+.lw-strip {
+  background: var(--lw-card-bg);
+  border-bottom: 1px solid var(--lw-border);
+  transition: background-color 0.22s ease, border-color 0.22s ease;
+}
+.lw-strip-inner {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 18px 32px 8px;
+  padding: 11px 32px;
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px 28px;
+  font-size: 12px; color: var(--lw-text-secondary);
 }
-.lw-shop-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; margin-bottom: 18px; }
+.lw-strip-item { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.lw-strip-item i { color: var(--lw-accent); font-size: 11px; }
+.lw-strip-item strong { color: var(--lw-text-primary); font-weight: 700; }
+.lw-strip-muted { color: var(--lw-text-faint); }
+.lw-strip-link { text-decoration: none; font-weight: 600; color: var(--lw-text-primary); transition: color 0.15s; }
+.lw-strip-link:hover { color: var(--lw-accent); }
+.lw-open-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.lw-open-dot--open   { background: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2); }
+.lw-open-dot--closed { background: #f43f5e; box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.2); }
+
+/* ─── CONTENT BLOCKS ─────────────────────── */
+.lw-block {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 26px 32px 8px;
+}
+.lw-block--tight { padding-top: 22px; }
+
+.lw-sec-head { margin-bottom: 16px; }
 .lw-shop-title {
   display: flex; align-items: center; gap: 10px;
   font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
@@ -1329,7 +1499,42 @@ html[data-theme="dark"] .lw {
 }
 .lw-title-bar { display: inline-block; width: 4px; height: 18px; border-radius: 3px; background: var(--lw-accent); }
 .lw-shop-sub { font-size: 12.5px; color: var(--lw-text-secondary); padding-left: 14px; }
-.lw-shop-toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ─── CATEGORY CHIPS ─────────────────────── */
+.lw-chips { display: flex; flex-wrap: wrap; gap: 9px; }
+.lw-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 14px;
+  border: 1.5px solid var(--lw-input-border); border-radius: 999px;
+  background: var(--lw-card-bg); color: var(--lw-text-secondary);
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s, transform 0.15s;
+}
+.lw-chip i { font-size: 11px; color: var(--lw-accent); }
+.lw-chip:hover { border-color: var(--lw-accent); color: var(--lw-accent); transform: translateY(-1px); }
+.lw-chip-count {
+  font-size: 10.5px; font-weight: 700;
+  padding: 1px 7px; border-radius: 999px;
+  background: var(--lw-input-bg); color: var(--lw-text-faint);
+}
+.lw-chip--active { background: var(--lw-accent); border-color: var(--lw-accent); color: #fff; }
+.lw-chip--active i { color: #fff; }
+.lw-chip--active:hover { color: #fff; }
+.lw-chip--active .lw-chip-count { background: rgba(255, 255, 255, 0.24); color: #fff; }
+
+/* ─── CATALOG TOOLBAR (sticky) ───────────── */
+.lw-catalog-bar {
+  position: sticky; top: 0; z-index: 8;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 10px 16px;
+  padding: 10px 0;
+  margin-bottom: 18px;
+  background: var(--lw-bg);
+  border-bottom: 1px solid var(--lw-border-soft);
+  transition: background-color 0.22s ease, border-color 0.22s ease;
+}
+.lw-shop-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .lw-shop-search { position: relative; width: 300px; max-width: 100%; display: flex; align-items: center; }
 .lw-shop-search i { position: absolute; left: 12px; font-size: 11px; color: var(--lw-icon-muted); pointer-events: none; }
 .lw-shop-search input {
@@ -1352,7 +1557,16 @@ html[data-theme="dark"] .lw {
 }
 .lw-shop-filter select:focus { border-color: var(--lw-accent); }
 .lw-shop-filter i { position: absolute; right: 10px; font-size: 9px; color: var(--lw-icon-muted); pointer-events: none; }
-.lw-shop-count { width: 100%; font-size: 11.5px; color: var(--lw-text-faint); text-align: right; }
+.lw-clear-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 38px; padding: 0 13px;
+  border: 1.5px solid var(--lw-input-border); border-radius: 9px;
+  background: var(--lw-input-bg); color: var(--lw-text-secondary);
+  font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.lw-clear-btn:hover { border-color: var(--lw-accent); color: var(--lw-accent); }
+.lw-shop-count { font-size: 11.5px; color: var(--lw-text-faint); }
 
 .lw-shop-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 40px 0; color: var(--lw-text-faint); font-size: 12.5px; }
 .lw-shop-state i { font-size: 24px; }
@@ -1364,11 +1578,49 @@ html[data-theme="dark"] .lw {
 }
 .lw-shop-retry:hover { border-color: var(--lw-accent); color: var(--lw-accent); }
 
+/* ─── CATEGORY GROUPS ────────────────────── */
+.lw-group { margin-bottom: 30px; }
+.lw-group-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+}
+.lw-group-title {
+  display: flex; align-items: center; gap: 10px;
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  font-size: 16px; font-weight: 700; color: var(--lw-text-primary);
+  letter-spacing: -0.01em;
+}
+.lw-group-icon {
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(240, 112, 32, 0.12); color: var(--lw-accent); font-size: 12px;
+}
+.lw-group-count {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px;
+  background: var(--lw-card-bg); border: 1px solid var(--lw-border-soft);
+  color: var(--lw-text-faint);
+}
+.lw-group-more {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: none; border: none; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 700; color: var(--lw-accent);
+  padding: 6px 8px; border-radius: 8px; white-space: nowrap;
+  transition: background-color 0.15s;
+}
+.lw-group-more:hover { background: rgba(240, 112, 32, 0.10); }
+.lw-group-more i { font-size: 9px; }
+
+/* ─── PRODUCT CARDS ──────────────────────── */
 .lw-shop-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 16px;
-  margin-bottom: 32px;
+  margin-bottom: 0;
+}
+.lw-shop-grid.lw-shop-grid--groups {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }
 .lw-shop-card {
   position: relative;
@@ -1385,18 +1637,24 @@ html[data-theme="dark"] .lw {
   box-shadow: 0 10px 24px rgba(240, 112, 32, 0.16), 0 2px 8px rgba(20, 10, 5, 0.06);
   transform: translateY(-4px);
 }
+.lw-shop-card--oos { opacity: 0.62; }
+.lw-shop-card--oos:hover { transform: none; box-shadow: 0 1px 2px rgba(80, 40, 10, 0.03); border-color: var(--lw-feat-border); }
+
+/* One fixed image shape for every card, so rows line up whether or not a
+   product has a photo. Photos are contained (not cropped) on white. */
 .lw-shop-card-img {
   position: relative;
-  width: 100%; height: 136px;
+  width: 100%; aspect-ratio: 1 / 0.82;
   background: var(--lw-input-bg);
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; transition: background-color 0.22s;
 }
-.lw-shop-card-img img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.35s ease; }
-.lw-shop-card:hover .lw-shop-card-img img { transform: scale(1.07); }
-.lw-shop-card-img-placeholder { color: var(--lw-icon-muted); font-size: 26px; }
+.lw-shop-card-img--photo { background: #FFFFFF; }
+.lw-shop-card-img img { width: 100%; height: 100%; object-fit: contain; padding: 6px; transition: transform 0.35s ease; }
+.lw-shop-card:hover .lw-shop-card-img img { transform: scale(1.06); }
+.lw-shop-card-img-placeholder { color: var(--lw-icon-muted); font-size: 28px; opacity: 0.8; }
 
-/* Floating stock badge on the image, marketplace-listing style */
+/* Floating stock badge on the image */
 .lw-shop-stock-pill {
   position: absolute; top: 8px; left: 8px; z-index: 2;
   display: flex; align-items: center; gap: 5px;
@@ -1409,6 +1667,17 @@ html[data-theme="dark"] .lw {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
 }
 .lw-shop-stock-pill .lw-shop-dot { width: 6px; height: 6px; flex-shrink: 0; }
+
+/* Rank badge for real best sellers */
+.lw-shop-rank {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  min-width: 26px; height: 22px; padding: 0 7px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #F58330, #D9640F);
+  color: #fff; font-size: 10.5px; font-weight: 800;
+  box-shadow: 0 2px 8px rgba(240, 112, 32, 0.4);
+}
 
 .lw-shop-card-body { padding: 12px 13px 14px; display: flex; flex-direction: column; gap: 3px; }
 .lw-shop-card-cat {
@@ -1436,55 +1705,14 @@ html[data-theme="dark"] .lw {
 .lw-shop-dot--ok  { background: #10b981; }
 .lw-shop-dot--low { background: #f97316; }
 .lw-shop-dot--oos { background: #f43f5e; }
-.lw-shop-empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 0; gap: 8px; color: var(--lw-text-faint); font-size: 12.5px; }
+.lw-shop-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 0; gap: 10px; color: var(--lw-text-faint); font-size: 12.5px; }
 .lw-shop-empty i { font-size: 30px; }
 
-/* "View all products" tile — sits as the last cell of the final row */
-.lw-shop-viewall {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 8px; text-align: center;
-  min-height: 100%;
-  padding: 20px 14px;
-  border-radius: 14px;
-  border: 1.5px dashed var(--lw-feat-border-h);
-  background: linear-gradient(160deg, rgba(240,112,32,0.07), rgba(240,112,32,0.02));
-  color: var(--lw-accent);
-  font-family: inherit; cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s, transform 0.15s;
-}
-.lw-shop-viewall:hover { border-color: var(--lw-accent); background: rgba(240,112,32,0.11); transform: translateY(-2px); }
-.lw-shop-viewall-icon {
-  width: 34px; height: 34px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(240,112,32,0.14); color: var(--lw-accent); font-size: 14px;
-}
-.lw-shop-viewall-title { font-size: 12.5px; font-weight: 700; color: var(--lw-accent-dark); }
-html[data-theme="dark"] .lw-shop-viewall-title { color: var(--lw-accent-light); }
-.lw-shop-viewall-sub { font-size: 10.5px; color: var(--lw-text-muted); line-height: 1.4; }
-
-@media (max-width: 1180px) { .lw-shop-grid { grid-template-columns: repeat(5, 1fr); } }
-@media (max-width: 900px)  { .lw-shop-grid { grid-template-columns: repeat(4, 1fr); } }
-@media (max-width: 720px)  { .lw-shop-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 520px)  { .lw-shop-grid { grid-template-columns: repeat(2, 1fr); } }
-
-/* ─── PREVIEW SLIDER ROWS ────────────────── *
- * Three independently-scrolling rows, stacked with a consistent gap.
- * Each row keeps its own transparent, always-visible nav button on
- * each end. `.lw-shop-grid--slider` overrides the base grid's
- * `display: grid` with `display: flex` + `overflow-x: auto`, so this
- * only affects the preview rows — the "All Products" modal keeps its
- * normal wrapping grid via `.lw-shop-grid--modal` further down.
+/* ─── BEST SELLERS CAROUSEL ──────────────── *
+ * A single horizontally-scrolling row with an always-visible nav button
+ * on each end (each hides itself when there's nothing left to scroll to).
  * ─────────────────────────────────────────── */
-.lw-shop-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  margin-bottom: 32px;
-}
-.lw-shop-carousel {
-  position: relative;
-  margin-bottom: 0;
-}
+.lw-shop-carousel { position: relative; }
 .lw-shop-grid--slider {
   display: flex;
   flex-wrap: nowrap;
@@ -1493,15 +1721,13 @@ html[data-theme="dark"] .lw-shop-viewall-title { color: var(--lw-accent-light); 
   scroll-snap-type: x proximity;
   scroll-behavior: smooth;
   gap: 16px;
-  margin-bottom: 0;
   padding: 6px 4px 14px;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .lw-shop-grid--slider::-webkit-scrollbar { display: none; height: 0; }
-.lw-shop-grid--slider .lw-shop-card,
-.lw-shop-grid--slider .lw-shop-viewall {
-  flex: 0 0 158px;
+.lw-shop-grid--slider .lw-shop-card {
+  flex: 0 0 176px;
   scroll-snap-align: start;
 }
 
@@ -1551,59 +1777,31 @@ html[data-theme="dark"] .lw-shop-nav:hover:not(:disabled) {
   color: var(--lw-accent-light);
 }
 
-@media (max-width: 640px) {
-  .lw-shop-nav { width: 32px; height: 32px; font-size: 11px; }
-  .lw-shop-nav--prev { left: -2px; }
-  .lw-shop-nav--next { right: -2px; }
-  .lw-shop-grid--slider .lw-shop-card,
-  .lw-shop-grid--slider .lw-shop-viewall {
-    flex-basis: 132px;
-  }
-}
-
-/* ─── ALL PRODUCTS MODAL ─────────────────── */
-.lw-modal-backdrop--products { z-index: 220; align-items: flex-start; padding: 40px 16px; }
-.lw-products-modal {
-  width: 100%; max-width: 1040px;
-  max-height: calc(100vh - 80px);
+/* ─── HOW TO ORDER ───────────────────────── */
+.lw-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 8px; }
+.lw-step {
+  display: flex; align-items: flex-start; gap: 13px;
+  padding: 16px 16px 15px;
   background: var(--lw-card-bg);
   border: 1px solid var(--lw-card-border);
-  border-radius: 20px;
-  overflow: hidden;
-  display: flex; flex-direction: column;
-  box-shadow: 0 24px 64px rgba(20, 10, 5, 0.28);
+  border-radius: 14px;
   transition: background-color 0.22s ease, border-color 0.22s ease;
 }
-.lw-products-modal-head {
-  position: relative;
-  padding: 22px 56px 16px 24px;
-  border-bottom: 1px solid var(--lw-card-head-border);
-  background: linear-gradient(180deg, var(--lw-card-head-bg1), var(--lw-card-head-bg2));
-  flex-shrink: 0;
+.lw-step-num {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #F58330, #D9640F);
+  color: #fff; font-size: 13px; font-weight: 800;
+  box-shadow: 0 2px 8px rgba(240, 112, 32, 0.3);
 }
-.lw-products-modal-title {
-  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
-  font-size: 19px; font-weight: 700; color: var(--lw-text-primary); letter-spacing: -0.01em;
-}
-.lw-products-modal-sub { font-size: 12px; color: var(--lw-text-secondary); margin-top: 2px; }
-.lw-products-modal-head .lw-login-modal-close { top: 18px; right: 18px; }
-.lw-products-modal-toolbar {
-  display: flex; gap: 10px; flex-wrap: wrap;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--lw-border-soft);
-  flex-shrink: 0;
-}
-.lw-products-modal-toolbar .lw-shop-search { flex: 1; min-width: 200px; }
-.lw-products-modal-body { padding: 20px 24px 26px; overflow-y: auto; }
-.lw-shop-grid--modal { grid-template-columns: repeat(5, 1fr); margin-bottom: 0; }
-@media (max-width: 900px) { .lw-shop-grid--modal { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 560px) { .lw-shop-grid--modal { grid-template-columns: repeat(2, 1fr); } }
+.lw-step-title { font-size: 13px; font-weight: 700; color: var(--lw-text-strong); margin-bottom: 3px; }
+.lw-step-text  { font-size: 12px; line-height: 1.55; color: var(--lw-text-secondary); }
 
 /* ─── VISIT US ───────────────────────────── */
 .lw-visit {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 8px 32px 44px;
+  padding: 30px 32px 44px;
 }
 .lw-visit-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
 .lw-visit-head > i { font-size: 16px; color: var(--lw-accent); margin-top: 3px; }
@@ -1685,6 +1883,7 @@ html[data-theme="dark"] .lw-visit-icon { background: linear-gradient(145deg, rgb
 @media (max-width: 980px) {
   .lw-visit-grid { grid-template-columns: 1fr 1fr; }
   .lw-visit-photo { grid-column: 1 / -1; }
+  .lw-steps { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .lw-visit-grid { grid-template-columns: 1fr; }
@@ -1852,8 +2051,15 @@ html[data-theme="dark"] .lw-modal-icon { background: linear-gradient(145deg, rgb
   .lw-page { overflow: visible; }
   .lw-nav-hint { display: none; }
   .lw-hero-inner { padding: 28px 20px 22px; }
-  .lw-shop, .lw-visit { padding-left: 20px; padding-right: 20px; }
+  .lw-block, .lw-visit { padding-left: 20px; padding-right: 20px; }
+  .lw-strip-inner { padding-left: 20px; padding-right: 20px; }
   .lw-footer { flex-direction: column; height: auto; gap: 4px; padding: 10px 20px; text-align: center; }
+  .lw-shop-nav { width: 32px; height: 32px; font-size: 11px; }
+  .lw-shop-nav--prev { left: -2px; }
+  .lw-shop-nav--next { right: -2px; }
+  .lw-shop-grid--slider .lw-shop-card { flex-basis: 150px; }
+  .lw-shop-search { width: 100%; }
+  .lw-shop-toolbar { width: 100%; }
 }
 @media (max-width: 480px) {
   .lw-nav-inner { padding: 0 16px; gap: 8px; }
@@ -1863,6 +2069,5 @@ html[data-theme="dark"] .lw-modal-icon { background: linear-gradient(145deg, rgb
   .lw-signin-btn span { display: none; }
   .lw-signin-btn { width: 34px; height: 34px; padding: 0; justify-content: center; }
   .lw-card-head, .lw-card-body, .lw-card-foot, .lw-card-divider { padding-left: 16px; padding-right: 16px; }
-  .lw-shop-grid { grid-template-columns: repeat(2, 1fr); }
 }
 </style>

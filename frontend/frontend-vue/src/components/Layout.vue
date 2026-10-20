@@ -69,6 +69,7 @@
         <SidebarDropdown label="Sales" icon="fa-solid fa-cart-shopping" :open="salesOpen" :collapsed="!sidebarOpen" @toggle="salesOpen = !salesOpen">
           <NavLink to="/point-of-sale"     menu-item label="POS"         icon="fa-solid fa-cash-register" :collapsed="false" />
           <NavLink to="/sales-transaction" menu-item label="Transaction" icon="fa-solid fa-receipt"       :collapsed="false" />
+          <NavLink to="/customers"         menu-item label="Customers"   icon="fa-solid fa-users"         :collapsed="false" />
         </SidebarDropdown>
         <NavLink to="/suppliers"      label="Suppliers"      icon="fa-solid fa-truck-field"  :collapsed="!sidebarOpen" />
         <NavLink to="/reports"        label="Reports"        icon="fa-solid fa-chart-line"   :collapsed="!sidebarOpen" />

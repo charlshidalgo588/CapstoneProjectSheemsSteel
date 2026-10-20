@@ -106,20 +106,35 @@
             <div class="kpi-accent-bar kpi-accent-bar--orange"></div>
           </div>
 
-          <div class="kpi-card">
+          <div
+            class="kpi-card kpi-card--clickable"
+            role="button"
+            tabindex="0"
+            @click="openBreakdown('stock_in')"
+            @keydown.enter="openBreakdown('stock_in')"
+            @keydown.space.prevent="openBreakdown('stock_in')"
+          >
             <div class="kpi-card-inner">
               <div class="kpi-icon-wrap kpi-icon-wrap--green">
-                <i class="fa-solid fa-arrow-down-to-bracket"></i>
+                <i class="fa-solid fa-download"></i>
               </div>
               <div class="kpi-body">
                 <p class="kpi-label">Total Stock In</p>
                 <p class="kpi-value kpi-value--green">+{{ formatNumber(summaryDisplay.total_stock_in) }}</p>
+                <p class="kpi-hint">View breakdown</p>
               </div>
             </div>
             <div class="kpi-accent-bar kpi-accent-bar--green"></div>
           </div>
 
-          <div class="kpi-card kpi-card--alert">
+          <div
+            class="kpi-card kpi-card--alert kpi-card--clickable"
+            role="button"
+            tabindex="0"
+            @click="openBreakdown('stock_out')"
+            @keydown.enter="openBreakdown('stock_out')"
+            @keydown.space.prevent="openBreakdown('stock_out')"
+          >
             <div class="kpi-card-inner">
               <div class="kpi-icon-wrap kpi-icon-wrap--red">
                 <i class="fa-solid fa-arrow-up-from-bracket"></i>
@@ -127,6 +142,7 @@
               <div class="kpi-body">
                 <p class="kpi-label">Total Stock Out</p>
                 <p class="kpi-value kpi-value--red">-{{ formatNumber(summaryDisplay.total_stock_out) }}</p>
+                <p class="kpi-hint">View breakdown</p>
               </div>
             </div>
             <div class="kpi-accent-bar kpi-accent-bar--red"></div>
@@ -171,7 +187,10 @@
                 <tr v-for="item in recentActivity" :key="item.id">
                   <td>
                     <div class="cell-product">{{ item.ProductName }}</div>
-                    <div class="cell-sku">{{ item.SKU }}</div>
+                    <div class="cell-sku">
+                      {{ item.SKU }}
+                      <span v-if="item.Unit" class="unit-pill">{{ unitLabel(item.Unit) }}</span>
+                    </div>
                   </td>
                   <td>
                     <span class="status-pill"
@@ -184,7 +203,7 @@
                     </span>
                     <span v-if="isNewProduct(item)" class="status-pill status-pill--new">New</span>
                   </td>
-                  <td class="cell-muted">{{ item.quantity }}</td>
+                  <td class="cell-muted" :data-order="num(item.quantity)">{{ logQty(item) }}</td>
                   <td class="cell-faint" :title="item.created_at">{{ formatLocalDate(item.created_at) }}</td>
                   <td class="cell-muted">{{ item.notes }}</td>
                 </tr>
@@ -217,11 +236,14 @@
                 <tr v-for="item in topAdjustedProducts" :key="item.id">
                   <td>
                     <div class="cell-product">{{ item.ProductName }}</div>
-                    <div class="cell-sku">{{ item.SKU }}</div>
+                    <div class="cell-sku">
+                      {{ item.SKU }}
+                      <span v-if="item.Unit" class="unit-pill">{{ unitLabel(item.Unit) }}</span>
+                    </div>
                   </td>
                   <td class="cell-muted">{{ item.adjustment_count }}</td>
-                  <td class="cell-positive">+{{ item.total_stock_in }}</td>
-                  <td class="cell-negative">-{{ item.total_stock_out }}</td>
+                  <td class="cell-positive" :data-order="num(item.total_stock_in)">+{{ formatQty(item.total_stock_in, item.Unit) }}</td>
+                  <td class="cell-negative" :data-order="num(item.total_stock_out)">-{{ formatQty(item.total_stock_out, item.Unit) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -254,7 +276,10 @@
                 <tr v-for="item in inventoryLogs" :key="item.id">
                   <td>
                     <div class="cell-product">{{ item.ProductName }}</div>
-                    <div class="cell-sku">{{ item.SKU }}</div>
+                    <div class="cell-sku">
+                      {{ item.SKU }}
+                      <span v-if="item.Unit" class="unit-pill">{{ unitLabel(item.Unit) }}</span>
+                    </div>
                   </td>
                   <td>
                     <span class="category-pill">{{ item.CategoryName }}</span>
@@ -270,12 +295,61 @@
                     </span>
                     <span v-if="isNewProduct(item)" class="status-pill status-pill--new">New</span>
                   </td>
-                  <td class="cell-muted">{{ item.quantity }}</td>
+                  <td class="cell-muted" :data-order="num(item.quantity)">{{ logQty(item) }}</td>
                   <td class="cell-faint" :title="item.created_at">{{ formatLocalDate(item.created_at) }}</td>
                   <td class="cell-muted">{{ item.notes }}</td>
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Breakdown modal: opens from the Stock In / Stock Out cards -->
+      <div v-if="breakdown.open" class="il-modal-backdrop" @click.self="closeBreakdown">
+        <div class="il-modal" role="dialog" aria-modal="true" :aria-label="breakdownTitle">
+          <div class="il-modal-head">
+            <div>
+              <p class="card-eyebrow">{{ filterLabel }}</p>
+              <h3 class="il-modal-title">{{ breakdownTitle }}</h3>
+            </div>
+            <button type="button" class="il-modal-close" @click="closeBreakdown" aria-label="Close">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <div class="il-unit-chips" v-if="breakdownByUnit.length">
+            <span
+              v-for="u in breakdownByUnit"
+              :key="u.unit"
+              class="il-unit-chip"
+              :class="breakdown.type === 'stock_in' ? 'il-unit-chip--in' : 'il-unit-chip--out'"
+            >{{ formatQty(u.total, u.unit) }}</span>
+          </div>
+
+          <div class="il-modal-body">
+            <table class="il-break-table" v-if="breakdownRows.length">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Movements</th>
+                  <th>Quantity</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in breakdownRows" :key="r.key">
+                  <td>
+                    <div class="cell-product">{{ r.name }}</div>
+                    <div class="cell-sku">{{ r.sku }}</div>
+                  </td>
+                  <td class="cell-muted">{{ r.count }}</td>
+                  <td :class="breakdown.type === 'stock_in' ? 'cell-positive' : 'cell-negative'">
+                    {{ breakdown.type === 'stock_in' ? '+' : '-' }}{{ formatQty(r.total, r.unit) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-else class="il-empty">Nothing recorded for this period.</p>
           </div>
         </div>
       </div>
@@ -300,6 +374,11 @@ const summary = ref({
   total_stock_in: 0,
   total_stock_out: 0,
   manual_adjustments: 0,
+  // Optional, provided by the backend when available:
+  // stock_in_by_unit:  [{ unit: 'kg', total: 320 }, { unit: 'pcs', total: 930 }]
+  // stock_out_by_unit: [{ unit: 'kg', total: 80 }]
+  stock_in_by_unit: [],
+  stock_out_by_unit: [],
 })
 
 // Animated copy of `summary` that drives the KPI cards on screen. Each
@@ -354,12 +433,117 @@ function formatNumber(v) {
   return Math.round(num(v)).toLocaleString()
 }
 
+/* ── UNITS ─────────────────────────────────────────────────
+   Every quantity is shown with its product's unit (kg, pcs, m ...)
+   so "50" is never ambiguous. The API is expected to send `Unit`
+   on each row (joined from products.unit). Add your own spellings
+   to UNIT_LABELS — anything not listed is shown as stored.
+──────────────────────────────────────────────────────────── */
+const UNIT_LABELS = {
+  pc: 'pcs', pcs: 'pcs', piece: 'pcs', pieces: 'pcs',
+  kg: 'kg', kgs: 'kg', kilogram: 'kg', kilograms: 'kg',
+  g: 'g', gram: 'g', grams: 'g',
+  ton: 'ton', tons: 'ton', tonne: 'ton',
+  m: 'm', meter: 'm', meters: 'm', metre: 'm', metres: 'm',
+  cm: 'cm', mm: 'mm', ft: 'ft', feet: 'ft',
+  l: 'L', liter: 'L', liters: 'L', litre: 'L', litres: 'L',
+  box: 'box', boxes: 'box',
+  bag: 'bag', bags: 'bag',
+  roll: 'roll', rolls: 'roll',
+  set: 'set', sets: 'set',
+  sheet: 'sheet', sheets: 'sheet',
+  bundle: 'bundle', bundles: 'bundle',
+  pail: 'pail', pails: 'pail',
+  can: 'can', cans: 'can',
+}
+
+function unitLabel(raw, qty = 2) {
+  const key = String(raw ?? '').trim().toLowerCase()
+  if (!key) return ''
+  const label = UNIT_LABELS[key] ?? String(raw).trim()
+  // "1 pcs" -> "1 pc"
+  if (label === 'pcs' && Math.abs(num(qty)) === 1) return 'pc'
+  return label
+}
+
+// 1250 + 'kg' -> "1,250 kg"; 2.5 + 'kg' -> "2.5 kg"; no unit -> "1,250"
+function formatQty(value, unit, { signed = false, type = null } = {}) {
+  const n = num(value)
+  const text = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 3 })
+  let sign = ''
+  if (signed) {
+    if (type === 'stock_in') sign = '+'
+    else if (type === 'stock_out') sign = '-'
+    else sign = n < 0 ? '-' : ''
+  }
+  const u = unitLabel(unit, n)
+  return `${sign}${text}${u ? ' ' + u : ''}`
+}
+
+// Convenience wrapper for a single log row
+function logQty(item) {
+  return formatQty(item.quantity, item.Unit, { signed: true, type: item.type })
+}
+
+function hasUnitTotals(list) {
+  return Array.isArray(list) && list.length > 0
+}
+
+// Text for the Copy report: "+320 kg, +930 pcs" (or the plain total as fallback)
+function totalsText(list, fallbackTotal, sign) {
+  if (hasUnitTotals(list)) {
+    return list.map((u) => `${sign}${formatQty(u.total, u.unit)}`).join(', ')
+  }
+  return `${sign}${fallbackTotal}`
+}
+
+/* ── KPI BREAKDOWN (click Stock In / Stock Out) ──
+   Built from the logs already on the page, so it always matches the
+   selected period and needs no extra API call. */
+const breakdown = ref({ open: false, type: 'stock_in' })
+
+function openBreakdown(type) { breakdown.value = { open: true, type } }
+function closeBreakdown() { breakdown.value.open = false }
+function onEscKey(e) { if (e.key === 'Escape' && breakdown.value.open) closeBreakdown() }
+
+const breakdownTitle = computed(() =>
+  breakdown.value.type === 'stock_in' ? 'Stock In breakdown' : 'Stock Out breakdown'
+)
+
+// One row per product + unit, with how many movements and the total quantity
+const breakdownRows = computed(() => {
+  const map = new Map()
+  inventoryLogs.value
+    .filter((l) => l.type === breakdown.value.type)
+    .forEach((l) => {
+      const unit = unitLabel(l.Unit, 2)
+      const key = `${l.ProductID ?? l.ProductName}|${l.SKU}|${unit}`
+      if (!map.has(key)) {
+        map.set(key, { key, name: l.ProductName, sku: l.SKU, unit, count: 0, total: 0 })
+      }
+      const row = map.get(key)
+      row.count += 1
+      row.total += Math.abs(num(l.quantity))
+    })
+  return [...map.values()].sort((a, b) => b.total - a.total)
+})
+
+// Subtotals per unit, e.g. "22 box", "12 pack", "13 set"
+const breakdownByUnit = computed(() => {
+  const map = new Map()
+  breakdownRows.value.forEach((r) => {
+    map.set(r.unit, (map.get(r.unit) || 0) + r.total)
+  })
+  return [...map.entries()].map(([unit, total]) => ({ unit, total }))
+})
+
 // Eases every field in `summaryDisplay` from its current value to the
 // matching field in `target` over `duration` ms.
 function animateSummaryTo(target, duration = 750) {
   const start = performance.now()
   const from = { ...summaryDisplay.value }
-  const keys = Object.keys(target)
+  // Only animate the plain numeric fields (the per-unit arrays render directly)
+  const keys = Object.keys(summaryDisplay.value)
   const tick = (now) => {
     const progress = Math.min((now - start) / duration, 1)
     const eased = 1 - Math.pow(1 - progress, 3)
@@ -441,7 +625,11 @@ async function loadInventoryLogs({ topLimit = 10, dateFromVal = null, dateToVal 
         date_to:   dateToVal   || undefined,
       },
     })
-    summary.value             = res.data.summary
+    summary.value = {
+      stock_in_by_unit: [],
+      stock_out_by_unit: [],
+      ...res.data.summary,
+    }
     recentActivity.value      = res.data.recent_activity
     topAdjustedProducts.value = res.data.top_adjusted_products
     inventoryLogs.value       = res.data.inventory_logs
@@ -462,8 +650,8 @@ function buildReportText() {
 
   lines.push('Inventory Activity Summary')
   lines.push(`  Total Adjustments: ${summary.value.total_adjustments}`)
-  lines.push(`  Total Stock In: +${summary.value.total_stock_in}`)
-  lines.push(`  Total Stock Out: -${summary.value.total_stock_out}`)
+  lines.push(`  Total Stock In: ${totalsText(summary.value.stock_in_by_unit, summary.value.total_stock_in, '+')}`)
+  lines.push(`  Total Stock Out: ${totalsText(summary.value.stock_out_by_unit, summary.value.total_stock_out, '-')}`)
   lines.push(`  Manual Adjustments: ${summary.value.manual_adjustments}`)
   lines.push('')
 
@@ -471,7 +659,7 @@ function buildReportText() {
   if (recentActivity.value.length) {
     recentActivity.value.forEach((item) => {
       lines.push(
-        `  ${item.ProductName} (${item.SKU}) — ${item.type}${isNewProduct(item) ? ' [New]' : ''}, qty ${item.quantity}, ${formatLocalDate(item.created_at)}${item.notes ? ` — ${item.notes}` : ''}`
+        `  ${item.ProductName} (${item.SKU}) — ${item.type}${isNewProduct(item) ? ' [New]' : ''}, qty ${logQty(item)}, ${formatLocalDate(item.created_at)}${item.notes ? ` — ${item.notes}` : ''}`
       )
     })
   } else {
@@ -483,7 +671,7 @@ function buildReportText() {
   if (topAdjustedProducts.value.length) {
     topAdjustedProducts.value.forEach((item) => {
       lines.push(
-        `  ${item.ProductName} (${item.SKU}) — ${item.adjustment_count} adjustments, +${item.total_stock_in} in / -${item.total_stock_out} out`
+        `  ${item.ProductName} (${item.SKU}) — ${item.adjustment_count} adjustments, +${formatQty(item.total_stock_in, item.Unit)} in / -${formatQty(item.total_stock_out, item.Unit)} out`
       )
     })
   } else {
@@ -495,7 +683,7 @@ function buildReportText() {
   if (inventoryLogs.value.length) {
     inventoryLogs.value.forEach((item) => {
       lines.push(
-        `  ${item.ProductName} (${item.SKU}) — ${item.CategoryName}, ${item.type}${isNewProduct(item) ? ' [New]' : ''}, qty ${item.quantity}, ${formatLocalDate(item.created_at)}${item.notes ? ` — ${item.notes}` : ''}`
+        `  ${item.ProductName} (${item.SKU}) — ${item.CategoryName}, ${item.type}${isNewProduct(item) ? ' [New]' : ''}, qty ${logQty(item)}, ${formatLocalDate(item.created_at)}${item.notes ? ` — ${item.notes}` : ''}`
       )
     })
   } else {
@@ -515,31 +703,40 @@ function buildReportCSV() {
   rows.push(['Inventory Logs', filterLabel.value])
   rows.push([])
 
+  // Numbers and units stay in separate columns so Excel can still sort/sum.
   rows.push(['Inventory Activity Summary'])
   rows.push(['Total Adjustments', summary.value.total_adjustments])
-  rows.push(['Total Stock In', summary.value.total_stock_in])
-  rows.push(['Total Stock Out', summary.value.total_stock_out])
+  if (hasUnitTotals(summary.value.stock_in_by_unit)) {
+    summary.value.stock_in_by_unit.forEach((u) => rows.push(['Total Stock In', u.total, unitLabel(u.unit)]))
+  } else {
+    rows.push(['Total Stock In', summary.value.total_stock_in])
+  }
+  if (hasUnitTotals(summary.value.stock_out_by_unit)) {
+    summary.value.stock_out_by_unit.forEach((u) => rows.push(['Total Stock Out', u.total, unitLabel(u.unit)]))
+  } else {
+    rows.push(['Total Stock Out', summary.value.total_stock_out])
+  }
   rows.push(['Manual Adjustments', summary.value.manual_adjustments])
   rows.push([])
 
   rows.push(['Recent Activity'])
-  rows.push(['Product', 'SKU', 'Type', 'New', 'Quantity', 'Date', 'Notes'])
+  rows.push(['Product', 'SKU', 'Type', 'New', 'Quantity', 'Unit', 'Date', 'Notes'])
   recentActivity.value.forEach((item) => {
-    rows.push([item.ProductName, item.SKU, item.type, isNewProduct(item) ? 'Yes' : '', item.quantity, formatLocalDate(item.created_at), item.notes || ''])
+    rows.push([item.ProductName, item.SKU, item.type, isNewProduct(item) ? 'Yes' : '', item.quantity, unitLabel(item.Unit, item.quantity), formatLocalDate(item.created_at), item.notes || ''])
   })
   rows.push([])
 
   rows.push(['Top Adjusted Products'])
-  rows.push(['Product', 'SKU', 'Adjustments', 'Total Stock In', 'Total Stock Out'])
+  rows.push(['Product', 'SKU', 'Unit', 'Adjustments', 'Total Stock In', 'Total Stock Out'])
   topAdjustedProducts.value.forEach((item) => {
-    rows.push([item.ProductName, item.SKU, item.adjustment_count, item.total_stock_in, item.total_stock_out])
+    rows.push([item.ProductName, item.SKU, unitLabel(item.Unit), item.adjustment_count, item.total_stock_in, item.total_stock_out])
   })
   rows.push([])
 
   rows.push(['Full Inventory Logs'])
-  rows.push(['Product', 'SKU', 'Category', 'Type', 'New', 'Quantity', 'Date', 'Notes'])
+  rows.push(['Product', 'SKU', 'Category', 'Type', 'New', 'Quantity', 'Unit', 'Date', 'Notes'])
   inventoryLogs.value.forEach((item) => {
-    rows.push([item.ProductName, item.SKU, item.CategoryName, item.type, isNewProduct(item) ? 'Yes' : '', item.quantity, formatLocalDate(item.created_at), item.notes || ''])
+    rows.push([item.ProductName, item.SKU, item.CategoryName, item.type, isNewProduct(item) ? 'Yes' : '', item.quantity, unitLabel(item.Unit, item.quantity), formatLocalDate(item.created_at), item.notes || ''])
   })
 
   return rows.map((r) => r.map(csvEscape).join(',')).join('\n')
@@ -704,6 +901,7 @@ function setPeriodMode(mode) {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', onEscKey)
   const { from, to } = computeRange()
   await loadInventoryLogs({ dateFromVal: from, dateToVal: to })
   await nextTick()
@@ -716,6 +914,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onEscKey)
   destroyAllTables()
 })
 </script>
@@ -980,12 +1179,23 @@ html[data-theme="dark"] .kpi-card--alert {
   font-size: 23px; font-weight: 800;
   color: var(--il-text-primary);
   letter-spacing: -.04em; line-height: 1.1;
+  margin: 0;
   transition: color 0.22s ease;
 }
 .kpi-value--green  { color: var(--il-green); }
 .kpi-value--blue   { color: var(--il-blue); }
 .kpi-value--violet { color: var(--il-violet); }
 .kpi-value--red    { color: var(--il-red); }
+
+/* One line per unit inside a KPI card (e.g. "+320 kg" / "+930 pcs").
+   Smaller than the single-number style so several units fit comfortably. */
+.kpi-unit-line {
+  display: block;
+  font-size: 17px;
+  line-height: 1.3;
+  letter-spacing: -.02em;
+  white-space: nowrap;
+}
 
 .kpi-accent-bar {
   position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
@@ -996,6 +1206,69 @@ html[data-theme="dark"] .kpi-card--alert {
 .kpi-accent-bar--blue   { background: var(--il-blue); }
 .kpi-accent-bar--violet { background: var(--il-violet); }
 .kpi-accent-bar--red    { background: var(--il-red); }
+
+/* Clickable KPI cards (Stock In / Stock Out) */
+.kpi-card--clickable { cursor: pointer; }
+.kpi-card--clickable:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
+.kpi-hint {
+  margin: 2px 0 0;
+  font-size: 11px; font-weight: 600;
+  color: var(--il-text-faint);
+  transition: color .16s ease;
+}
+.kpi-card--clickable:hover .kpi-hint { color: var(--il-text-secondary); }
+
+/* ── BREAKDOWN MODAL ── */
+.il-modal-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(8,10,16,.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.il-modal {
+  width: min(640px, 100%);
+  max-height: min(80vh, 640px);
+  display: flex; flex-direction: column; gap: 14px;
+  background: var(--il-surface);
+  border: 1px solid var(--il-border);
+  border-radius: var(--radius);
+  box-shadow: var(--il-shadow-lg);
+  padding: 22px 24px 18px;
+}
+.il-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.il-modal-title {
+  margin: 0; font-size: 17px; font-weight: 700;
+  color: var(--il-text-primary); letter-spacing: -.01em;
+}
+.il-modal-close {
+  border: 1px solid var(--il-border-strong);
+  background: var(--il-surface-sunken);
+  color: var(--il-text-secondary);
+  width: 32px; height: 32px; border-radius: 9px;
+  cursor: pointer;
+}
+.il-modal-close:hover { color: var(--il-text-primary); border-color: var(--il-accent-border); }
+
+.il-unit-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.il-unit-chip {
+  font-size: 12.5px; font-weight: 700;
+  border-radius: 20px; padding: 4px 12px;
+}
+.il-unit-chip--in  { background: var(--il-green-icon); color: var(--il-green); }
+.il-unit-chip--out { background: var(--il-red-icon);   color: var(--il-red); }
+
+.il-modal-body { overflow-y: auto; min-height: 0; }
+.il-break-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.il-break-table th {
+  text-align: left; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--il-text-muted);
+  border-bottom: 1px solid var(--il-border);
+  position: sticky; top: 0; background: var(--il-surface);
+}
+.il-break-table td { padding: 10px 12px; border-bottom: 1px solid var(--il-border); }
+.il-break-table tbody tr:last-child td { border-bottom: none; }
+.il-empty { color: var(--il-text-muted); font-size: 13.5px; margin: 8px 0; }
 
 /* ── CARDS ── */
 .card {
@@ -1042,6 +1315,22 @@ html[data-theme="dark"] .kpi-card--alert {
 .cell-faint    { color: var(--il-text-muted); font-size: 12.5px; }
 .cell-positive { color: var(--il-green); font-weight: 700; }
 .cell-negative { color: var(--il-red);   font-weight: 700; }
+
+/* ── UNIT PILL — small tag next to the SKU (kg, pcs, m ...) ── */
+.unit-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  border-radius: 20px;
+  background: #F5F5F4;
+  color: #57534E;
+  vertical-align: 1px;
+}
+html[data-theme="dark"] .unit-pill { background: rgba(255,255,255,0.08); color: #C4C8D6; }
 
 /* ── STATUS PILLS ── */
 .status-pill {
@@ -1120,7 +1409,8 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 
   /* Filter + report-action controls are for on-screen use only */
   .period-control,
-  .report-toolbar { display: none !important; }
+  .report-toolbar,
+  .il-modal-backdrop { display: none !important; }
 
   /* ---- print-only header block ---- */
   .print-header {
@@ -1225,6 +1515,7 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .kpi-value--green  { color: #10B981 !important; }
   .kpi-value--violet { color: #6366F1 !important; }
   .kpi-value--red    { color: #F43F5E !important; }
+  .kpi-unit-line { font-size: 12.5px !important; }
   .kpi-accent-bar { height: 2px !important; }
   .kpi-accent-bar--orange { background: #EA580C !important; }
   .kpi-accent-bar--green  { background: #10B981 !important; }
@@ -1266,7 +1557,7 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .cell-positive { color: #10B981 !important; }
   .cell-negative { color: #F43F5E !important; }
 
-  /* ---- status + category pills: keep the real colored-pill look ---- */
+  /* ---- status + category + unit pills: keep the real colored-pill look ---- */
   .status-pill {
     font-size: 9px !important;
     padding: 2px 9px !important;
@@ -1280,6 +1571,15 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
     background: #FEF3C7 !important;
     color: #92400E !important;
     margin-left: 4px !important;
+  }
+
+  .unit-pill {
+    font-size: 8px !important;
+    padding: 1px 6px !important;
+    background: #F5F5F4 !important;
+    color: #57534E !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .category-pill {
