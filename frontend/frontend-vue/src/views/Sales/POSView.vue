@@ -13,7 +13,7 @@
               ref="searchInput"
               v-model="search"
               type="text"
-              placeholder="Search products, SKU, or barcode…"
+              placeholder="Search products, SKU, size, or barcode…"
               class="search-input"
             />
             <button v-if="search" @click="search = ''" class="search-clear">
@@ -140,7 +140,7 @@
                 </div>
                 <label class="scanner-autoadd">
                   <input type="checkbox" v-model="autoAddOnScan" />
-                  Auto-add single-unit products on scan
+                  Auto-add single-size products on scan
                 </label>
               </div>
             </div>
@@ -189,8 +189,9 @@
               <p class="pcard-name" :title="product.name || 'Unnamed product'">{{ product.name || 'Unnamed product' }}</p>
               <p class="pcard-sku">SKU: {{ product.sku || '—' }}</p>
               <p v-if="product.pricingType === 'sqm'" class="pcard-tag">Cut-to-size (sqm)</p>
+              <p v-else-if="product.variants.length > 1" class="pcard-tag">{{ product.variants.length }} sizes</p>
               <div class="pcard-footer">
-                <span class="pcard-price">₱{{ (product.price || 0).toFixed(2) }}</span>
+                <span class="pcard-price">{{ cardPrice(product) }}</span>
                 <span class="pcard-stock-count">{{ availableFor(product) }} left</span>
               </div>
             </div>
@@ -206,7 +207,7 @@
 
       <!-- ══ RIGHT — CART ══
            On desktop/tablet (>768px) this sits beside the product grid as
-           normal. Below 768px it becomes a bottom-sheet drawer (see
+           normal. Below 768px it becomes a bottom-sheet drawer (see the
            .pos-right media query): closed by default and hidden below the
            viewport, opened via the floating mobile-cart-bar, and closed via
            the handle/close button or the backdrop. -->
@@ -434,7 +435,20 @@
               </div>
               <div class="modal-product-info">
                 <p class="modal-product-name">{{ selectedProduct?.name }}</p>
-                <p class="modal-product-price">₱{{ selectedProduct?.price?.toFixed(2) }} <span>base price</span></p>
+                <p class="modal-product-price">₱{{ basePrice.toFixed(2) }} <span>{{ selectedVariant ? selectedVariant.label : 'base price' }}</span></p>
+              </div>
+            </div>
+
+            <!-- SIZE & PRICE DROPDOWN — built from the sizes entered in ProductCreate -->
+            <div v-if="selectedProduct?.variants?.length" class="modal-section">
+              <p class="modal-section-label">Size &amp; Price</p>
+              <div class="variant-select-wrap">
+                <select v-model="selectedVariantId" class="variant-select">
+                  <option v-for="v in selectedProduct.variants" :key="v.id" :value="v.id">
+                    {{ v.label }} — ₱{{ v.price.toFixed(2) }}
+                  </option>
+                </select>
+                <i class="fa-solid fa-chevron-down variant-select-caret"></i>
               </div>
             </div>
 
@@ -684,15 +698,27 @@ function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100
 }
 /** Normalizes product records coming from either the product-list endpoint
- *  or the barcode-lookup endpoint into a single consistent shape. */
+ *  or the barcode-lookup endpoint into a single consistent shape.
+ *
+ *  SIZES & PRICES: each product carries `variants` — the sizes entered in
+ *  ProductCreate (e.g. "8 ft × 3 ft × 0.40 mm") with their own selling
+ *  price. The POS shows these as a dropdown. Stock is still per PRODUCT,
+ *  so every size draws from the same stock count. */
 function normalizeProduct(p) {
   const pricingTypeRaw = (p.PricingType ?? p.pricing_type ?? 'piece').toString().toLowerCase()
+  const variants = (p.variants ?? p.Variants ?? []).map(v => ({
+    id: v.VariantID ?? v.id,
+    label: v.Label ?? v.label ?? 'Standard',
+    price: Number(v.SellingPrice ?? v.price ?? 0),
+  }))
   return {
     id: p.ProductID ?? p.id,
     name: p.ProductName ?? p.name ?? '',
     sku: p.SKU ?? p.sku ?? '',
     barcode: p.Barcode ?? p.barcode ?? p.SKU ?? p.sku ?? '',
-    price: Number(p.SellingPrice ?? p.price ?? 0),
+    variants,
+    // Fallback price for legacy products that have no variants yet.
+    price: Number(variants[0]?.price ?? p.SellingPrice ?? p.price ?? 0),
     stock: Number(p.inventory?.QuantityOnHand ?? p.Stock ?? p.stock ?? 0),
     image: p.ImageURL ?? p.image ?? null,
     category: p.CategoryID ?? p.category ?? null,
@@ -701,9 +727,19 @@ function normalizeProduct(p) {
     maxDimension: Number(p.MaxDimension ?? MAX_DIM),
   }
 }
-function buildKey(product, length, width) {
-  if (product.pricingType === 'sqm') return `${product.id}-${length}x${width}`
-  return `${product.id}-piece`
+/** Cart line key. Different sizes of the same product are separate lines. */
+function buildKey(product, length, width, variantId = null) {
+  const v = variantId != null ? `-v${variantId}` : ''
+  if (product.pricingType === 'sqm') return `${product.id}${v}-${length}x${width}`
+  return `${product.id}${v}-piece`
+}
+/** Price label for the product card: "From ₱X" when sizes differ in price. */
+function cardPrice(p) {
+  if (!p.variants?.length) return `₱${(p.price || 0).toFixed(2)}`
+  const prices = p.variants.map(v => v.price)
+  const min = Math.min(...prices)
+  const max = Math.max(...prices)
+  return min === max ? `₱${min.toFixed(2)}` : `From ₱${min.toFixed(2)}`
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -739,7 +775,8 @@ const isProcessing  = ref(false)
 const checkoutError = ref('')
 const modalError    = ref('')
 
-const selectedProduct = ref(null)
+const selectedProduct   = ref(null)
+const selectedVariantId = ref(null)   // the size chosen in the modal dropdown
 const qty        = ref(1)
 const cutLength   = ref(1)
 const cutWidth    = ref(1)
@@ -853,6 +890,7 @@ function onImgError(product) { product.image = null }
 // Precompute cart quantities per product once per cart mutation, instead of
 // re-scanning the whole cart array for every product card on every render
 // (availableFor/canAddProduct/stockBadge* were each doing an O(n) scan).
+// NOTE: this sums ALL sizes of a product, because stock is per product.
 const cartQtyByProduct = computed(() => {
   const m = new Map()
   cart.value.forEach(i => m.set(i.id, (m.get(i.id) || 0) + i.qty))
@@ -881,6 +919,7 @@ function stockBadgeLabel(p) {
    Grid order: In Stock products first, then Low Stock, then Out of
    Stock — using a stable sort so products within the same status keep
    their original relative order (alphabetical/catalog order, etc.).
+   Search also matches size labels (e.g. "8 ft").
 ──────────────────────────────────────────────────────────── */
 const normalizedSearch = computed(() => search.value.trim().toLowerCase())
 const filteredProducts = computed(() => {
@@ -894,7 +933,8 @@ const filteredProducts = computed(() => {
         return (
           p.name.toLowerCase().includes(q) ||
           p.sku.toLowerCase().includes(q) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q))
+          (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+          p.variants.some(v => v.label.toLowerCase().includes(q))
         )
       })
   return list.sort((a, b) => STOCK_SORT_PRIORITY[stockStatus(a)] - STOCK_SORT_PRIORITY[stockStatus(b)])
@@ -1093,7 +1133,10 @@ function handleFoundProduct(product) {
     return
   }
   showScanSuccess(product.name)
-  if (autoAddOnScan.value && product.pricingType !== 'sqm') {
+  // A product with several sizes is ambiguous — the cashier must pick the
+  // size, so only single-size products are eligible for one-tap auto-add.
+  const singleSize = (product.variants?.length ?? 0) <= 1
+  if (autoAddOnScan.value && product.pricingType !== 'sqm' && singleSize) {
     quickAddOne(product)
   } else {
     openQuantityModal(product)
@@ -1104,10 +1147,21 @@ function quickAddOne(product) {
     showScannerMessage(`Not enough stock for ${product.name}.`)
     return
   }
-  const key = buildKey(product, 1, 1)
+  const variant = product.variants?.[0] || null
+  const key = buildKey(product, 1, 1, variant?.id ?? null)
   const existing = cart.value.find(i => i.key === key)
   if (existing) existing.qty += 1
-  else cart.value.push({ key, id: product.id, name: product.name, price: product.price, qty: 1, cutLength: null, cutWidth: null, pricingType: product.pricingType })
+  else cart.value.push({
+    key,
+    id: product.id,
+    variantId: variant?.id ?? null,
+    name: variant ? `${product.name} – ${variant.label}` : product.name,
+    price: variant?.price ?? product.price,
+    qty: 1,
+    cutLength: null,
+    cutWidth: null,
+    pricingType: product.pricingType,
+  })
 }
 
 /* ── Camera scanning (html5-qrcode), reusing handleScannedCode ── */
@@ -1170,10 +1224,12 @@ async function stopCamera() {
 }
 
 /* ────────────────────────────────────────────────────────────
-   QUANTITY MODAL / CUT-SIZE PRICING
+   QUANTITY MODAL / SIZE DROPDOWN / CUT-SIZE PRICING
 ──────────────────────────────────────────────────────────── */
 function openQuantityModal(product) {
   selectedProduct.value = product
+  // Default to the first size; the cashier changes it from the dropdown.
+  selectedVariantId.value = product.variants?.[0]?.id ?? null
   editingKey.value = null
   modalError.value = ''
   qty.value = 1
@@ -1190,6 +1246,7 @@ function editCartItem(item) {
   const product = products.value.find(p => p.id === item.id) || {
     id: item.id,
     name: item.name,
+    variants: [],
     price: item.pricingType === 'sqm' && item.cutLength && item.cutWidth
       ? round2(item.price / (item.cutLength * item.cutWidth))
       : item.price,
@@ -1199,6 +1256,7 @@ function editCartItem(item) {
     maxDimension: MAX_DIM,
   }
   selectedProduct.value = product
+  selectedVariantId.value = item.variantId ?? null
   cutLength.value = item.cutLength || product.minDimension || 1
   cutWidth.value = item.cutWidth || product.minDimension || 1
   qty.value = item.qty
@@ -1214,12 +1272,19 @@ const cutArea = computed(() => {
   const max = selectedProduct.value.maxDimension ?? MAX_DIM
   return round2(clamp(cutLength.value, min, max) * clamp(cutWidth.value, min, max))
 })
+/** The size currently picked in the modal dropdown (null for legacy products). */
+const selectedVariant = computed(() =>
+  selectedProduct.value?.variants?.find(v => v.id === selectedVariantId.value) || null
+)
+/** Price of the picked size, falling back to the product's own price. */
+const basePrice = computed(() => selectedVariant.value?.price ?? selectedProduct.value?.price ?? 0)
 const unitPrice = computed(() => {
   if (!selectedProduct.value) return 0
-  return isSqm.value ? round2(selectedProduct.value.price * cutArea.value) : selectedProduct.value.price
+  return isSqm.value ? round2(basePrice.value * cutArea.value) : basePrice.value
 })
-/** Quantity of a product currently committed elsewhere in the cart,
- *  optionally excluding one line (used while editing that line). */
+/** Quantity of a product currently committed elsewhere in the cart
+ *  (across ALL its sizes), optionally excluding one line (used while
+ *  editing that line). */
 function inCart(id, excludeKey = null) {
   if (id == null) return 0
   return cart.value
@@ -1264,10 +1329,11 @@ function addToCart() {
     return
   }
 
-  const key = buildKey(selectedProduct.value, cutLength.value, cutWidth.value)
+  const key = buildKey(selectedProduct.value, cutLength.value, cutWidth.value, selectedVariantId.value)
   const dimensionLabel = isSqm.value ? ` (${cutLength.value}×${cutWidth.value}m)` : ''
+  const sizeLabel = selectedVariant.value ? ` – ${selectedVariant.value.label}` : ''
 
-  // If editing and the key changed (dimensions changed), remove the old line first.
+  // If editing and the key changed (size or dimensions changed), remove the old line first.
   if (editingKey.value && editingKey.value !== key) {
     cart.value = cart.value.filter(i => i.key !== editingKey.value)
   }
@@ -1275,7 +1341,7 @@ function addToCart() {
   const existing = cart.value.find(i => i.key === key)
   if (existing) {
     // Overwrite the quantity only when we're editing THIS SAME line.
-    // If we're editing a different line whose new dimensions happen to
+    // If we're editing a different line whose new size/dimensions happen to
     // match an already-existing line, we're merging into it — so add,
     // don't clobber the quantity that was already there.
     existing.qty = (editingKey.value === key) ? requestedQty : existing.qty + requestedQty
@@ -1284,7 +1350,8 @@ function addToCart() {
     cart.value.push({
       key,
       id: selectedProduct.value.id,
-      name: `${selectedProduct.value.name}${dimensionLabel}`,
+      variantId: selectedVariantId.value,
+      name: `${selectedProduct.value.name}${sizeLabel}${dimensionLabel}`,
       price: unitPrice.value,
       qty: requestedQty,
       cutLength: isSqm.value ? cutLength.value : null,
@@ -1602,6 +1669,7 @@ async function completePayment() {
       idempotency_key: checkoutIdempotencyKey.value,
       items: cart.value.map(i => ({
         product_id: i.id,
+        variant_id: i.variantId ?? null, // which size was sold (server re-checks its price)
         quantity: i.qty,
         price: i.price,
         subtotal: round2(i.qty * i.price),
@@ -1611,6 +1679,7 @@ async function completePayment() {
 
     // Snapshot everything the receipt needs BEFORE we clear state, so printing
     // never races against the cart/customer fields being reset.
+    // (item.name already includes the size label, e.g. "Roof Sheet – 8 ft × 3 ft".)
     receiptData.value = {
       receiptNumber: data?.receipt_number || data?.sale_id || `SSC-${Date.now().toString(36).toUpperCase()}`,
       date: new Date().toLocaleString(),
@@ -1665,27 +1734,14 @@ async function completePayment() {
    direct children of <body> in the ACTUAL DOM — CSS custom properties
    inherit through the real rendered tree, not the template's visual
    nesting, so none of the --p-* variables defined here reach anything
-   inside a teleported subtree. This was confirmed via devtools: on the
-   live modal, `background-color` computed to `rgba(0,0,0,0)` (the
-   browser's own default) and `border-style` computed to `none` — proof
-   that `var(--p-surface-overlay)` etc. resolved to nothing there, making
-   the whole declaration invalid rather than merely "too transparent."
-   Every rule scoped to `.modal-backdrop` / `.modal` and its descendants
-   therefore references `--c-*` tokens directly (with the same inline
-   fallback values) instead of the `--p-*` bridge, so it never depends on
-   `.pos-root` being an ancestor. See that block further down for the fix.
+   inside a teleported subtree. Every rule scoped to `.modal-backdrop` /
+   `.modal` and its descendants therefore references `--c-*` tokens
+   directly (with the same inline fallback values) instead of the `--p-*`
+   bridge, so it never depends on `.pos-root` being an ancestor.
 
-   NOTE ON .pcard-* TEXT COLORS: for a while, five rules below
-   (.pcard-name, .pcard-sku, .pcard-price, .pcard-stock-count, and
-   .product-img-placeholder) hardcoded literal dark-mode hex colors
-   (e.g. #f1f5f9, #94a3b8) instead of going through this --p-* bridge
-   like every other rule in this file. Since those literals were tuned
-   for a dark card background, they read fine in dark mode but had poor
-   contrast against the light-mode white card background. They've been
-   switched to the same --p-text-primary / --p-text-faint / --p-accent
-   bridge variables everything else here uses, so they now correctly
-   flip with the active theme instead of being stuck on dark-mode
-   values. */
+   NOTE ON .pcard-* TEXT COLORS: these use the --p-text-primary /
+   --p-text-faint / --p-accent bridge variables so they correctly flip
+   with the active theme instead of being stuck on dark-mode values. */
 .pos-root {
   --p-bg:             var(--c-bg, #0f172a);
   --p-surface:         var(--c-surface, #1e293b);
@@ -1949,16 +2005,9 @@ async function completePayment() {
   margin-bottom: 6px; transition: background-color .22s;
 }
 .product-img { width: 100%; height: 100%; object-fit: contain; }
-/* Was hardcoded #64748b (a dark-mode-only gray) — switched to the
-   --p-text-faint bridge so the placeholder icon color flips with the
-   active theme instead of staying fixed to the dark-mode value. */
 .product-img-placeholder { color: var(--p-text-faint); font-size: 22px; }
 
 .pcard-info    { flex: 1; min-height: 78px; display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; }
-/* Was hardcoded #f1f5f9 (near-white, tuned for dark cards) — this had
-   almost no contrast against a light-mode white card. Switched to
-   --p-text-primary so it resolves to the correct dark-on-light /
-   light-on-dark color depending on the active theme. */
 .pcard-name {
   font-size: 12.5px; font-weight: 700; color: var(--p-text-primary);
   margin: 0; line-height: 1.3;
@@ -1966,8 +2015,6 @@ async function completePayment() {
   overflow: hidden; word-break: break-word;
   min-height: 32.5px;
 }
-/* Was hardcoded #94a3b8 — switched to --p-text-faint for the same
-   theme-contrast reason as .pcard-name above. */
 .pcard-sku { font-size: 10px; color: var(--p-text-faint); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pcard-tag {
   font-size: 9px; font-weight: 700; color: var(--p-accent);
@@ -1975,12 +2022,7 @@ async function completePayment() {
   border-radius: 20px; padding: 1px 6px; margin: 2px 0 0; display: inline-block; width: fit-content;
 }
 .pcard-footer  { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
-/* Was hardcoded #fb923c (a lighter dark-mode-tuned orange) — switched to
-   --p-accent so the price always uses the theme's actual accent color
-   (which already has good contrast in both modes) instead of a fixed
-   shade picked for dark backgrounds. */
 .pcard-price       { font-size: 14px; font-weight: 800; color: var(--p-accent); }
-/* Was hardcoded #94a3b8 — same fix as .pcard-sku above. */
 .pcard-stock-count { font-size: 10px; font-weight: 600; color: var(--p-text-faint); }
 
 .product-add-overlay {
@@ -2288,18 +2330,7 @@ async function completePayment() {
    so the --p-* bridge tokens defined on .pos-root do NOT reach
    anything here. Every rule below uses --c-* directly with an inline
    fallback instead of --p-*, so it never depends on .pos-root being
-   an ancestor.
-
-   CONFIRMED VIA DEVTOOLS: on the live teleported .modal, computed
-   background-color was rgba(0,0,0,0) (the browser's own initial
-   value) and computed border-style was `none` on all sides — proof
-   that var(--p-surface-overlay) / var(--p-border) resolved to nothing
-   at all in that context, which invalidates the whole declaration
-   they're used in (background-color falls back to transparent,
-   border falls back to none/currentColor). This is NOT an alpha-
-   channel/transparency problem and NOT a specificity/cascade problem
-   — it's an undefined-custom-property problem, caused specifically by
-   Teleport moving this subtree outside where --p-* is defined. */
+   an ancestor. */
 .modal-backdrop {
   position: fixed; inset: 0;
   background: var(--c-overlay, rgba(0,0,0,.6)); backdrop-filter: blur(6px);
@@ -2362,6 +2393,25 @@ async function completePayment() {
 }
 .modal-product-price { font-size: 13px; font-weight: 700; color: var(--c-accent, #f97316); margin: 0; }
 .modal-product-price span { font-weight: 500; color: var(--c-text-faint, #64748b); margin-left: 4px; }
+
+/* Size & Price dropdown */
+.variant-select-wrap { position: relative; display: flex; align-items: center; }
+.variant-select {
+  width: 100%; height: 42px; padding: 0 34px 0 12px;
+  border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 10px;
+  background: var(--c-surface-sunken, #0b1524); color: var(--c-text-primary, #f1f5f9);
+  font-size: 13.5px; font-weight: 600; font-family: inherit; outline: none;
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.variant-select:focus {
+  border-color: var(--c-accent, #f97316);
+  box-shadow: 0 0 0 3px var(--c-accent-ring, rgba(249,115,22,.25));
+}
+.variant-select-caret {
+  position: absolute; right: 12px; font-size: 10px;
+  color: var(--c-text-faint, #64748b); pointer-events: none;
+}
 
 .modal-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
 .modal-stats--2col { grid-template-columns: 1fr 1fr; }

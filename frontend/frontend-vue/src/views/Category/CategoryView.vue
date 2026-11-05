@@ -13,19 +13,70 @@
         </RouterLink>
       </div>
 
+      <!-- ── ALERT ── -->
+      <transition name="alert-fade">
+        <div v-if="successMessage" class="alert" :class="alertIsWarning ? 'alert--warn' : 'alert--success'">
+          <i :class="alertIsWarning ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-check'"></i>
+          <span>{{ successMessage }}</span>
+          <button class="alert-close" @click="successMessage = ''"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </transition>
+
+      <!-- ── BULK ACTION BAR ── -->
+      <transition name="alert-fade">
+        <div v-if="selectedCount > 0" class="bulk-bar">
+          <div class="bulk-bar-left">
+            <i class="fa-solid fa-square-check"></i>
+            <span><strong>{{ selectedCount }}</strong> categor{{ selectedCount > 1 ? 'ies' : 'y' }} selected</span>
+          </div>
+          <div class="bulk-bar-actions">
+            <button class="btn btn--ghost btn--sm" @click="clearSelection">
+              <i class="fa-solid fa-xmark"></i> Clear
+            </button>
+            <button class="btn btn--danger btn--sm" @click="showBulkDeleteModal = true">
+              <i class="fa-solid fa-trash-can"></i> Delete Selected
+            </button>
+          </div>
+        </div>
+      </transition>
+
       <!-- ── TABLE CARD ── -->
       <div class="table-card">
         <div class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th style="width:55%">Category Name</th>
-                <th style="width:25%">Products Count</th>
+                <th class="th-check">
+                  <input
+                    type="checkbox"
+                    class="chk"
+                    :checked="allSelected"
+                    :indeterminate="someSelected"
+                    :disabled="categories.length === 0"
+                    @change="toggleSelectAll"
+                    aria-label="Select all categories"
+                  />
+                </th>
+                <th style="width:50%">Category Name</th>
+                <th style="width:24%">Products Count</th>
                 <th style="width:20%; text-align:right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="cat in categories" :key="cat.CategoryID">
+              <tr
+                v-for="cat in categories"
+                :key="cat.CategoryID"
+                :class="{ 'row-selected': selectedIds.has(cat.CategoryID) }"
+              >
+                <td class="td-check">
+                  <input
+                    type="checkbox"
+                    class="chk"
+                    :checked="selectedIds.has(cat.CategoryID)"
+                    @change="toggleSelect(cat.CategoryID)"
+                    :aria-label="`Select ${cat.CategoryName}`"
+                  />
+                </td>
                 <td>
                   <div class="cell-name">
                     <div class="cell-avatar">
@@ -53,7 +104,7 @@
               </tr>
 
               <tr v-if="categories.length === 0">
-                <td colspan="3" class="td-empty">
+                <td colspan="4" class="td-empty">
                   <div class="empty-state">
                     <i class="fa-solid fa-layer-group"></i>
                     <p>No categories yet</p>
@@ -138,6 +189,38 @@
         </div>
       </transition>
     </Teleport>
+
+    <!-- ── BULK DELETE MODAL ── -->
+    <Teleport to="body">
+      <transition name="modal-fade">
+        <div v-if="showBulkDeleteModal" class="modal-backdrop" @click.self="cancelBulkDelete">
+          <div class="del-modal">
+            <div class="del-modal-icon-ring">
+              <div class="del-modal-icon"><i class="fa-solid fa-trash-can"></i></div>
+            </div>
+            <div class="del-modal-body">
+              <h3 class="del-modal-title">Delete {{ selectedCount }} Categor{{ selectedCount > 1 ? 'ies' : 'y' }}</h3>
+              <p class="del-modal-desc">
+                You are about to permanently delete
+                <strong class="del-modal-name">{{ selectedCount }} selected categor{{ selectedCount > 1 ? 'ies' : 'y' }}</strong>.
+                <span v-if="selectedProductsTotal > 0">
+                  Together they have <strong>{{ selectedProductsTotal }}</strong> product(s) assigned.
+                </span>
+                This action cannot be undone.
+              </p>
+            </div>
+            <div class="del-modal-footer">
+              <button class="del-modal-btn del-modal-btn--cancel" @click="cancelBulkDelete" :disabled="bulkDeleting">Cancel</button>
+              <button class="del-modal-btn del-modal-btn--confirm" @click="confirmBulkDelete" :disabled="bulkDeleting">
+                <i v-if="bulkDeleting" class="fa-solid fa-spinner fa-spin"></i>
+                <i v-else class="fa-solid fa-trash-can"></i>
+                {{ bulkDeleting ? 'Deleting…' : 'Yes, Delete All' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
   </Layout>
 </template>
 
@@ -146,7 +229,9 @@ import Layout from '@/components/Layout.vue'
 import api from '@/api/axios'
 import { ref, onMounted, computed, nextTick, onBeforeUnmount } from 'vue'
 
-const categories = ref([])
+const categories     = ref([])
+const successMessage = ref('')
+const alertIsWarning = ref(false)
 
 /* dropdown */
 const openMenuId     = ref(null)
@@ -159,15 +244,24 @@ const showDeleteModal  = ref(false)
 const categoryToDelete = ref(null)
 const deleting         = ref(false)
 
+/* bulk selection */
+const selectedIds         = ref(new Set())
+const showBulkDeleteModal = ref(false)
+const bulkDeleting        = ref(false)
+
 const setMenuButtonRef = (id) => (el) => {
   if (el) menuButtonRefs.set(id, el)
   else    menuButtonRefs.delete(id)
 }
 
+async function loadCategories() {
+  const res = await api.get('/api/categories')
+  categories.value = res.data.categories
+}
+
 onMounted(async () => {
   try {
-    const res = await api.get('/api/categories')
-    categories.value = res.data.categories
+    await loadCategories()
   } catch (err) {
     console.error('Failed to load categories', err)
   }
@@ -177,6 +271,72 @@ const currentCategory = computed(() =>
   categories.value.find((c) => c.CategoryID === openMenuId.value)
 )
 
+function flash(msg, warning = false) {
+  successMessage.value = msg
+  alertIsWarning.value = warning
+  setTimeout(() => { successMessage.value = '' }, 3000)
+}
+
+/* ── Bulk selection ── */
+const selectedCount = computed(() => selectedIds.value.size)
+
+const allSelected = computed(() =>
+  categories.value.length > 0 &&
+  categories.value.every(c => selectedIds.value.has(c.CategoryID))
+)
+const someSelected = computed(() =>
+  !allSelected.value && categories.value.some(c => selectedIds.value.has(c.CategoryID))
+)
+const selectedProductsTotal = computed(() =>
+  categories.value
+    .filter(c => selectedIds.value.has(c.CategoryID))
+    .reduce((sum, c) => sum + (c.products_count ?? 0), 0)
+)
+
+function toggleSelect(id) {
+  const next = new Set(selectedIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedIds.value = next
+}
+function toggleSelectAll() {
+  selectedIds.value = allSelected.value
+    ? new Set()
+    : new Set(categories.value.map(c => c.CategoryID))
+}
+function clearSelection() { selectedIds.value = new Set() }
+
+function cancelBulkDelete() { if (!bulkDeleting.value) showBulkDeleteModal.value = false }
+
+async function confirmBulkDelete() {
+  if (bulkDeleting.value || selectedIds.value.size === 0) return
+  bulkDeleting.value = true
+  const ids = [...selectedIds.value]
+  try {
+    const results = await Promise.allSettled(
+      ids.map(id => api.delete(`/api/categories/${id}`, { withCredentials: true }))
+    )
+    const failed  = results.filter(r => r.status === 'rejected').length
+    const deleted = ids.length - failed
+
+    showBulkDeleteModal.value = false
+    clearSelection()
+    await loadCategories()
+
+    flash(
+      failed
+        ? `${deleted} deleted, ${failed} could not be deleted.`
+        : `${deleted} categor${deleted > 1 ? 'ies' : 'y'} deleted successfully.`,
+      failed > 0
+    )
+  } catch (err) {
+    console.error('Bulk delete failed:', err)
+    alert('Could not delete the selected categories.')
+  } finally {
+    bulkDeleting.value = false
+  }
+}
+
+/* ── Row dropdown ── */
 function toggleMenu(id) {
   if (openMenuId.value === id) { closeMenu(); return }
   openMenuId.value = id
@@ -201,7 +361,8 @@ function onClickOutside(e) {
 }
 function onKeydown(e) {
   if (e.key === 'Escape') {
-    if (showDeleteModal.value) cancelDelete()
+    if (showBulkDeleteModal.value) cancelBulkDelete()
+    else if (showDeleteModal.value) cancelDelete()
     else closeMenu()
   }
 }
@@ -212,6 +373,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
 })
 
+/* ── Single delete ── */
 function promptDelete(cat) {
   closeMenu()
   categoryToDelete.value = cat
@@ -227,8 +389,12 @@ async function confirmDelete() {
   if (!categoryToDelete.value || deleting.value) return
   deleting.value = true
   try {
-    await api.delete(`/api/categories/${categoryToDelete.value.CategoryID}`, { withCredentials: true })
-    categories.value = categories.value.filter(c => c.CategoryID !== categoryToDelete.value.CategoryID)
+    const id = categoryToDelete.value.CategoryID
+    await api.delete(`/api/categories/${id}`, { withCredentials: true })
+    categories.value = categories.value.filter(c => c.CategoryID !== id)
+    if (selectedIds.value.has(id)) {
+      const next = new Set(selectedIds.value); next.delete(id); selectedIds.value = next
+    }
     showDeleteModal.value  = false
     categoryToDelete.value = null
   } catch (err) {
@@ -282,7 +448,36 @@ async function confirmDelete() {
   color: #fff; box-shadow: var(--c-shadow-accent);
 }
 .btn--primary:hover { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
+.btn--ghost { background: var(--c-surface-local); border-color: var(--c-border-strong-local); color: var(--c-text-secondary-local); }
+.btn--ghost:hover { background: var(--c-surface-raised-local); border-color: var(--c-accent-border-local); color: var(--c-text-primary-local); }
+.btn--danger {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  color: #fff; border: none; box-shadow: 0 2px 8px rgba(244,63,94,.30);
+}
+.btn--danger:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .btn--sm { padding: 7px 14px; font-size: 12.5px; }
+
+/* ALERT */
+.alert { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 12px; font-size: 13.5px; font-weight: 500; border: 1px solid transparent; }
+.alert--success { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25); color: #10b981; }
+.alert--warn    { background: rgba(245,158,11,.10); border-color: rgba(245,158,11,.28); color: #d97706; }
+html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); color: #4ADE80; }
+html[data-theme="dark"] .alert--warn    { background: rgba(245,158,11,.14); color: #FBBF24; }
+.alert-close { background: none; border: none; cursor: pointer; color: inherit; opacity: .6; margin-left: auto; font-size: 13px; padding: 2px; transition: opacity .15s; }
+.alert-close:hover { opacity: 1; }
+.alert-fade-enter-active, .alert-fade-leave-active { transition: opacity .22s, transform .22s; }
+.alert-fade-enter-from, .alert-fade-leave-to { opacity: 0; transform: translateY(-6px); }
+
+/* BULK ACTION BAR */
+.bulk-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; border-radius: 12px;
+  background: var(--c-accent-soft-local); border: 1px solid var(--c-accent-border-local);
+  color: var(--c-text-primary-local); font-size: 13.5px;
+}
+.bulk-bar-left { display: flex; align-items: center; gap: 10px; }
+.bulk-bar-left i { color: var(--c-accent-local); font-size: 15px; }
+.bulk-bar-actions { display: flex; align-items: center; gap: 8px; }
 
 .table-card {
   background: var(--c-surface-local); border: 1px solid var(--c-border-local);
@@ -305,6 +500,35 @@ async function confirmDelete() {
   vertical-align: middle; transition: background-color .15s, border-color .22s;
 }
 .data-table tbody tr:last-child td { border-bottom: none; }
+
+/* CHECKBOX */
+.data-table thead th.th-check,
+.data-table tbody td.td-check { width: 52px; padding-right: 0; }
+.chk {
+  appearance: none; -webkit-appearance: none;
+  width: 20px; height: 20px; margin: 0; cursor: pointer;
+  border: 1.5px solid var(--c-border-strong-local); border-radius: 6px;
+  background: var(--c-surface-local);
+  display: inline-grid; place-content: center; vertical-align: middle;
+  transition: background-color .15s, border-color .15s, box-shadow .15s;
+}
+.chk:hover:not(:disabled) { border-color: var(--c-accent-local); }
+.chk:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--c-accent-soft-local); }
+.chk:disabled { opacity: .5; cursor: not-allowed; }
+.chk:checked, .chk:indeterminate {
+  background-color: var(--c-accent-local); border-color: var(--c-accent-local);
+}
+.chk:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+  background-size: 14px; background-position: center; background-repeat: no-repeat;
+}
+.chk:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
+  background-size: 14px; background-position: center; background-repeat: no-repeat;
+}
+
+/* SELECTED ROW */
+.data-table tbody tr.row-selected td { background: var(--c-accent-soft-local); }
 
 .cell-name   { display: flex; align-items: center; gap: 10px; }
 .cell-avatar {
@@ -341,16 +565,14 @@ async function confirmDelete() {
 .empty-state i { font-size: 36px; }
 .empty-state p { font-size: 14px; font-weight: 600; color: var(--c-text-muted-local); margin: 0; }
 
-/* MODAL — solid, opaque overlay; color adapts to theme rather than a
-   translucent black wash, so it never blends into a dark-mode page.
-   No blur, alpha is effectively 1. */
+/* MODAL — solid, opaque overlay; color adapts to theme. */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(15, 23, 42, .70); /* light mode: solid dark slate overlay */
+  background: rgba(15, 23, 42, .70);
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 html[data-theme="dark"] .modal-backdrop {
-  background: rgba(0, 0, 0, .82); /* dark mode: solid near-black overlay */
+  background: rgba(0, 0, 0, .82);
 }
 .modal-fade-enter-active { transition: opacity .22s ease, transform .22s ease; }
 .modal-fade-leave-active { transition: opacity .18s ease, transform .18s ease; }
@@ -408,6 +630,10 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
 .del-modal-btn--cancel:hover:not(:disabled) { background: var(--c-border-local); color: var(--c-text-primary-local); }
 .del-modal-btn--confirm { background: linear-gradient(135deg,#f43f5e,#e11d48); border: none; color: #fff; box-shadow: 0 2px 12px rgba(244,63,94,.35); }
 .del-modal-btn--confirm:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 4px 20px rgba(244,63,94,.50); transform: translateY(-1px); }
+
+@media (max-width: 700px) {
+  .cat-page { padding: 16px 16px 48px; }
+}
 </style>
 
 <!-- GLOBAL — Teleported dropdown -->

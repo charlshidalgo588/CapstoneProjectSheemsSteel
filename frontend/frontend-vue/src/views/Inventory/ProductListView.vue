@@ -54,17 +54,46 @@
         </div>
       </transition>
 
+      <!-- ── BULK ACTION BAR ── -->
+      <transition name="alert-fade">
+        <div v-if="selectedCount > 0" class="bulk-bar">
+          <div class="bulk-bar-left">
+            <i class="fa-solid fa-square-check"></i>
+            <span><strong>{{ selectedCount }}</strong> product{{ selectedCount > 1 ? 's' : '' }} selected</span>
+          </div>
+          <div class="bulk-bar-actions">
+            <button class="btn btn--ghost btn--sm" @click="clearSelection">
+              <i class="fa-solid fa-xmark"></i> Clear
+            </button>
+            <button class="btn btn--danger btn--sm" @click="showBulkDeleteModal = true">
+              <i class="fa-solid fa-trash-can"></i> Delete Selected
+            </button>
+          </div>
+        </div>
+      </transition>
+
       <!-- ── TABLE CARD ── -->
       <div class="table-card">
         <div class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th style="width:32%">Product</th>
-                <th style="width:14%">Category</th>
-                <th style="width:13%">SKU</th>
-                <th style="width:12%">Price</th>
-                <th style="width:10%">Stock</th>
+                <th class="th-check">
+                  <input
+                    type="checkbox"
+                    class="chk"
+                    :checked="allVisibleSelected"
+                    :indeterminate="someVisibleSelected"
+                    :disabled="filteredProducts.length === 0"
+                    @change="toggleSelectAll"
+                    aria-label="Select all products"
+                  />
+                </th>
+                <th style="width:25%">Product</th>
+                <th style="width:13%">Category</th>
+                <th style="width:12%">SKU</th>
+                <th style="width:16%">Price</th>
+                <th style="width:9%">Stock</th>
                 <th style="width:19%; text-align:right">Actions</th>
               </tr>
             </thead>
@@ -73,8 +102,21 @@
                 v-for="product in filteredProducts"
                 :key="product.ProductID"
                 :data-product-row="product.ProductID"
-                :class="{ 'row-highlight': highlightedProductId === product.ProductID }"
+                :class="{
+                  'row-highlight': highlightedProductId === product.ProductID,
+                  'row-selected': selectedIds.has(product.ProductID)
+                }"
               >
+                <!-- Select checkbox -->
+                <td class="td-check">
+                  <input
+                    type="checkbox"
+                    class="chk"
+                    :checked="selectedIds.has(product.ProductID)"
+                    @change="toggleSelect(product.ProductID)"
+                    :aria-label="`Select ${product.ProductName}`"
+                  />
+                </td>
 
                 <!-- Product name + avatar -->
                 <td>
@@ -94,7 +136,16 @@
 
                 <td class="cell-muted">{{ product.category?.CategoryName || '—' }}</td>
                 <td class="cell-mono cell-muted">{{ product.SKU }}</td>
-                <td class="cell-price">₱{{ formatPrice(product.SellingPrice) }}</td>
+
+                <!-- Price: single price, or a range when sizes differ -->
+                <td class="cell-price">
+                  {{ priceLabel(product) }}
+                  <span
+                    v-if="sizeCount(product) > 1"
+                    class="size-count"
+                    :title="sizesTooltip(product)"
+                  >{{ sizeCount(product) }} sizes</span>
+                </td>
 
                 <!-- Stock -->
                 <td>
@@ -122,7 +173,7 @@
               </tr>
 
               <tr v-if="filteredProducts.length === 0">
-                <td colspan="6" class="td-empty">
+                <td colspan="7" class="td-empty">
                   <div class="empty-state">
                     <i :class="stockFilter === 'low' ? 'fa-solid fa-circle-check' : 'fa-solid fa-box-open'"></i>
                     <p>{{ stockFilter === 'low' ? 'No low-stock products right now.' : 'No products found' }}</p>
@@ -257,6 +308,35 @@
         </div>
       </transition>
     </Teleport>
+
+    <!-- ── BULK DELETE MODAL ── -->
+    <Teleport to="body">
+      <transition name="modal-fade">
+        <div v-if="showBulkDeleteModal" class="modal-backdrop" @click.self="cancelBulkDelete">
+          <div class="del-modal">
+            <div class="del-modal-icon-ring">
+              <div class="del-modal-icon"><i class="fa-solid fa-trash-can"></i></div>
+            </div>
+            <div class="del-modal-body">
+              <h3 class="del-modal-title">Delete {{ selectedCount }} Product{{ selectedCount > 1 ? 's' : '' }}</h3>
+              <p class="del-modal-desc">
+                You are about to permanently delete
+                <strong class="del-modal-name">{{ selectedCount }} selected product{{ selectedCount > 1 ? 's' : '' }}</strong>.
+                This cannot be undone.
+              </p>
+            </div>
+            <div class="del-modal-footer">
+              <button class="del-modal-btn del-modal-btn--cancel" @click="cancelBulkDelete" :disabled="bulkDeleting">Cancel</button>
+              <button class="del-modal-btn del-modal-btn--confirm" @click="confirmBulkDelete" :disabled="bulkDeleting">
+                <i v-if="bulkDeleting" class="fa-solid fa-spinner fa-spin"></i>
+                <i v-else class="fa-solid fa-trash-can"></i>
+                {{ bulkDeleting ? 'Deleting…' : 'Yes, Delete All' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
   </Layout>
 </template>
 
@@ -303,16 +383,39 @@ const showDeleteModal  = ref(false)
 const productToDelete  = ref(null)
 const deleting         = ref(false)
 
+/* bulk selection */
+const selectedIds         = ref(new Set())
+const showBulkDeleteModal = ref(false)
+const bulkDeleting        = ref(false)
+
 const setMenuButtonRef = id => el => { if (el) menuButtonRefs.set(id, el); else menuButtonRefs.delete(id) }
 const imagePath   = path => `http://127.0.0.1:8000/storage/${path}`
 const formatPrice = v => Number(v||0).toLocaleString(undefined, { minimumFractionDigits:2 })
 
-// "Low stock" is now per-product, driven by each product's own
-// ReorderLevel (set on the product itself) rather than one fixed number
-// for the whole catalog — a box of nails and a roofing sheet can have
-// very different reorder points. Both formatProduct() paths on the
-// backend (productList + findByBarcode) already return ReorderLevel
-// inside `inventory`, so no API change was needed for this.
+/* ── SIZES & PRICES ──
+   /api/product-list returns `variants: [{ VariantID, Label, SellingPrice }]`
+   on every product. The Price column shows one price, or a range when the
+   sizes are priced differently, plus a "N sizes" tag with a hover list. */
+const sizeCount = p => p.variants?.length ?? 0
+
+function priceLabel(p) {
+  const prices = (p.variants ?? []).map(v => Number(v.SellingPrice))
+  if (!prices.length) return `₱${formatPrice(p.SellingPrice)}`
+  const min = Math.min(...prices)
+  const max = Math.max(...prices)
+  return min === max
+    ? `₱${formatPrice(min)}`
+    : `₱${formatPrice(min)} – ₱${formatPrice(max)}`
+}
+
+const sizesTooltip = p =>
+  (p.variants ?? []).map(v => `${v.Label} — ₱${formatPrice(v.SellingPrice)}`).join('\n')
+
+// "Low stock" is per-product, driven by each product's own ReorderLevel
+// (set on the product itself) rather than one fixed number for the whole
+// catalog — a box of nails and a roofing sheet can have very different
+// reorder points. Both formatProduct() paths on the backend (productList +
+// findByBarcode) already return ReorderLevel inside `inventory`.
 const stockClass = p => {
   const qty     = p.inventory?.QuantityOnHand ?? 0
   const reorder = p.inventory?.ReorderLevel ?? 0
@@ -391,21 +494,90 @@ onBeforeUnmount(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 watch(() => route.query.search, v => { searchQuery.value = (v || '').toLowerCase() }, { immediate: true })
 watch(selectedCategory, nc => { router.replace({ query: { ...route.query, category: nc || undefined } }) })
 
-const currentProduct = computed(() => filteredProducts.value.find(p => p.ProductID === openMenuId.value))
+// Search also matches size labels (e.g. "8 ft") so a product can be found by its size.
 const filteredProducts = computed(() =>
   products.value.filter(p => {
-    const ms = !searchQuery.value || [p.ProductName, p.SKU, p.category?.CategoryName].join(' ').toLowerCase().includes(searchQuery.value)
+    const ms = !searchQuery.value || [
+      p.ProductName,
+      p.SKU,
+      p.category?.CategoryName,
+      ...(p.variants ?? []).map(v => v.Label),
+    ].join(' ').toLowerCase().includes(searchQuery.value)
     const mc = !selectedCategory.value || String(p.CategoryID) === selectedCategory.value
     const mf = stockFilter.value !== 'low' || isLowStock(p)
     return ms && mc && mf
   })
 )
+const currentProduct = computed(() => filteredProducts.value.find(p => p.ProductID === openMenuId.value))
 
 // Computed off the full product list (not filteredProducts), so the
 // count badge on the "Low Stock" button doesn't shrink to itself once
 // that filter is active — it always reflects the true total needing attention.
 const lowStockCount = computed(() => products.value.filter(isLowStock).length)
 
+/* ── Bulk selection ── */
+const selectedCount = computed(() => selectedIds.value.size)
+
+const allVisibleSelected = computed(() =>
+  filteredProducts.value.length > 0 &&
+  filteredProducts.value.every(p => selectedIds.value.has(p.ProductID))
+)
+const someVisibleSelected = computed(() =>
+  !allVisibleSelected.value &&
+  filteredProducts.value.some(p => selectedIds.value.has(p.ProductID))
+)
+
+function toggleSelect(id) {
+  const next = new Set(selectedIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedIds.value = next
+}
+
+// Selects/deselects only what's currently visible (respects search,
+// category and stock filters), so "select all" never grabs hidden rows.
+function toggleSelectAll() {
+  const next = new Set(selectedIds.value)
+  if (allVisibleSelected.value) {
+    filteredProducts.value.forEach(p => next.delete(p.ProductID))
+  } else {
+    filteredProducts.value.forEach(p => next.add(p.ProductID))
+  }
+  selectedIds.value = next
+}
+
+function clearSelection() { selectedIds.value = new Set() }
+
+// Changing a filter clears the selection so you can never delete
+// rows that are no longer on screen.
+watch([stockFilter, selectedCategory, searchQuery], clearSelection)
+
+function cancelBulkDelete() { if (!bulkDeleting.value) showBulkDeleteModal.value = false }
+
+async function confirmBulkDelete() {
+  if (bulkDeleting.value || selectedIds.value.size === 0) return
+  bulkDeleting.value = true
+  const ids = [...selectedIds.value]
+  try {
+    const results = await Promise.allSettled(
+      ids.map(id => api.delete(`/api/products/${id}`, { withCredentials: true }))
+    )
+    const failed  = results.filter(r => r.status === 'rejected').length
+    const deleted = ids.length - failed
+
+    successMessage.value = failed
+      ? `${deleted} deleted, ${failed} failed.`
+      : `${deleted} product${deleted > 1 ? 's' : ''} deleted successfully.`
+
+    showBulkDeleteModal.value = false
+    clearSelection()
+    await loadProducts()
+    setTimeout(() => successMessage.value = '', 2500)
+  } finally {
+    bulkDeleting.value = false
+  }
+}
+
+/* ── Row dropdown ── */
 function toggleMenu(id) {
   if (openMenuId.value === id) { closeMenu(); return }
   openMenuId.value = id
@@ -423,11 +595,14 @@ function onClickOutside(e) {
   const dd = dropdownRef.value; const btn = menuButtonRefs.get(openMenuId.value)
   if (dd && !dd.contains(e.target) && btn && !btn.contains(e.target)) closeMenu()
 }
-function onKeydown(e) { if (e.key === 'Escape') { closeMenu(); closeRestockModal(); cancelDelete() } }
+function onKeydown(e) {
+  if (e.key === 'Escape') { closeMenu(); closeRestockModal(); cancelDelete(); cancelBulkDelete() }
+}
 document.addEventListener('click', onClickOutside)
 document.addEventListener('keydown', onKeydown)
 onBeforeUnmount(() => { document.removeEventListener('click', onClickOutside); document.removeEventListener('keydown', onKeydown) })
 
+/* ── Restock ── */
 function openRestockModal(product) { modalProduct.value = product; restockQty.value = 1; modalVisible.value = true }
 function closeRestockModal() { modalVisible.value = false; modalProduct.value = null; restockQty.value = 1 }
 
@@ -443,6 +618,7 @@ async function submitRestock() {
   finally { isRestocking.value = false }
 }
 
+/* ── Single delete ── */
 function promptDelete(product) { closeMenu(); productToDelete.value = product; showDeleteModal.value = true }
 function cancelDelete() { if (deleting.value) return; showDeleteModal.value = false; productToDelete.value = null }
 
@@ -452,6 +628,10 @@ async function confirmDelete() {
   try {
     await api.delete(`/api/products/${productToDelete.value.ProductID}`, { withCredentials: true })
     successMessage.value = `"${productToDelete.value.ProductName}" deleted successfully.`
+    // keep selection in sync if the deleted row was ticked
+    if (selectedIds.value.has(productToDelete.value.ProductID)) {
+      const next = new Set(selectedIds.value); next.delete(productToDelete.value.ProductID); selectedIds.value = next
+    }
     showDeleteModal.value = false; productToDelete.value = null
     await loadProducts()
     setTimeout(() => successMessage.value = '', 2500)
@@ -557,6 +737,11 @@ html[data-theme="dark"] .sf-btn--danger.sf-btn--active { background: rgba(244,63
 }
 .btn--green:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .btn--green:disabled { opacity: .6; cursor: not-allowed; filter: none; transform: none; }
+.btn--danger {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  color: #fff; border: none; box-shadow: 0 2px 8px rgba(244,63,94,.30);
+}
+.btn--danger:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .btn--sm { padding: 7px 14px; font-size: 12.5px; }
 
 /* ALERT */
@@ -567,6 +752,17 @@ html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); colo
 .alert-close:hover { opacity: 1; }
 .alert-fade-enter-active, .alert-fade-leave-active { transition: opacity .22s, transform .22s; }
 .alert-fade-enter-from, .alert-fade-leave-to { opacity: 0; transform: translateY(-6px); }
+
+/* BULK ACTION BAR */
+.bulk-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; border-radius: 12px;
+  background: var(--pl-accent-soft); border: 1px solid var(--pl-accent-border);
+  color: var(--pl-text-primary); font-size: 13.5px;
+}
+.bulk-bar-left { display: flex; align-items: center; gap: 10px; }
+.bulk-bar-left i { color: var(--pl-accent); font-size: 15px; }
+.bulk-bar-actions { display: flex; align-items: center; gap: 8px; }
 
 /* TABLE CARD */
 .table-card { background: var(--pl-surface); border: 1px solid var(--pl-border); border-radius: var(--radius); box-shadow: var(--c-shadow-sm); overflow: hidden; transition: background-color .22s, border-color .22s; }
@@ -583,12 +779,40 @@ html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); colo
 .data-table tbody tr:hover td { background: var(--pl-surface-raised); }
 .data-table tbody tr:last-child td { border-bottom: none; }
 
+/* CHECKBOX */
+.data-table thead th.th-check,
+.data-table tbody td.td-check { width: 52px; padding-right: 0; }
+.chk {
+  appearance: none; -webkit-appearance: none;
+  width: 20px; height: 20px; margin: 0; cursor: pointer;
+  border: 1.5px solid var(--pl-border-strong); border-radius: 6px;
+  background: var(--pl-surface);
+  display: inline-grid; place-content: center; vertical-align: middle;
+  transition: background-color .15s, border-color .15s, box-shadow .15s;
+}
+.chk:hover:not(:disabled) { border-color: var(--pl-accent); }
+.chk:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--pl-ring); }
+.chk:disabled { opacity: .5; cursor: not-allowed; }
+.chk:checked, .chk:indeterminate {
+  background-color: var(--pl-accent); border-color: var(--pl-accent);
+}
+.chk:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+  background-size: 14px; background-position: center; background-repeat: no-repeat;
+}
+.chk:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
+  background-size: 14px; background-position: center; background-repeat: no-repeat;
+}
+
+/* SELECTED ROW */
+.data-table tbody tr.row-selected td { background: var(--pl-accent-soft); }
+
 /* ROW HIGHLIGHT — flashed briefly when arriving from a low-stock or
    product-created notification click, so the exact product the alert
    referred to is unmistakable in the (possibly long) filtered list.
    Green rather than red — the highlight just means "here's the row the
-   notification pointed to," not a warning, so it shouldn't read as an
-   alert color even when it was triggered by a low-stock notification. */
+   notification pointed to," not a warning. */
 .row-highlight td {
   background: rgba(16,185,129,.12) !important;
   animation: row-pulse 1.6s ease-in-out 1;
@@ -616,12 +840,21 @@ html[data-theme="dark"] .row-highlight td { background: rgba(16,185,129,.16) !im
 .product-sku      { font-size: 11px; color: var(--pl-text-faint); }
 .cell-muted       { color: var(--pl-text-muted); transition: color .22s; }
 .cell-mono        { font-variant-numeric: tabular-nums; font-size: 12.5px; }
-.cell-price       { font-weight: 700; color: var(--pl-text-primary); font-variant-numeric: tabular-nums; transition: color .22s; }
+.cell-price       { font-weight: 700; color: var(--pl-text-primary); font-variant-numeric: tabular-nums; line-height: 1.3; transition: color .22s; }
+
+/* SIZE COUNT TAG (under the price when a product has several sizes) */
+.size-count {
+  display: table; margin-top: 3px;
+  font-size: 10.5px; font-weight: 700; font-variant-numeric: normal;
+  color: var(--pl-accent); background: var(--pl-accent-soft);
+  border: 1px solid var(--pl-accent-border);
+  border-radius: 20px; padding: 1px 7px;
+  cursor: help;
+}
 
 /* STOCK BADGE — low stock is RED (not amber) so it reads as a clear
-   warning next to green "In Stock" instead of a softer, easy-to-miss
-   amber. Out-of-stock stays a deeper/bolder red so the two remain
-   visually distinct at a glance despite both being "red family." */
+   warning next to green "In Stock". Out-of-stock stays a deeper/bolder
+   red so the two remain distinct at a glance. */
 .stock-badge {
   display: inline-flex; align-items: center;
   font-size: 12px; font-weight: 700; border-radius: 20px; padding: 3px 10px;
@@ -661,16 +894,14 @@ html[data-theme="dark"] .restock-btn { background: rgba(16,185,129,.18); }
 .empty-state i { font-size: 36px; }
 .empty-state p { font-size: 14px; font-weight: 600; color: var(--pl-text-muted); margin: 0; }
 
-/* MODAL SHARED — solid, opaque overlay; color adapts to theme rather
-   than a translucent black wash, so it never blends into a dark-mode
-   page. No blur, alpha is effectively 1. */
+/* MODAL SHARED — solid, opaque overlay; color adapts to theme. */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(15, 23, 42, .70); /* light mode: solid dark slate overlay */
+  background: rgba(15, 23, 42, .70);
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 html[data-theme="dark"] .modal-backdrop {
-  background: rgba(0, 0, 0, .82); /* dark mode: solid near-black overlay */
+  background: rgba(0, 0, 0, .82);
 }
 .modal-fade-enter-active { transition: opacity .22s ease, transform .22s ease; }
 .modal-fade-leave-active { transition: opacity .18s ease, transform .18s ease; }
@@ -756,7 +987,7 @@ html[data-theme="dark"] .restock-modal-icon { background: rgba(16,185,129,.18); 
 .restock-footer { display: flex; gap: 10px; margin-top: 4px; }
 .restock-footer .btn { flex: 1; justify-content: center; }
 
-/* DELETE MODAL (same as Suppliers pattern) */
+/* DELETE MODAL (single + bulk share this) */
 .del-modal {
   width: 100%; max-width: 400px;
   background: #FFFFFF; border: 1px solid #E5E7EB;

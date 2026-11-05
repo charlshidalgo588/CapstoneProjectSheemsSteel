@@ -67,7 +67,7 @@
                 <p class="form-hint">SKU is automatically generated from the product name.</p>
               </div>
 
-              <!-- ══ BARCODE (NEW) ══ -->
+              <!-- ══ BARCODE ══ -->
               <div class="form-field">
                 <label class="form-label">Barcode</label>
                 <div class="input-wrap barcode-input-wrap">
@@ -185,7 +185,7 @@
           </div>
           <div>
             <h2 class="form-card-title">Product Details</h2>
-            <p class="form-card-sub">Brand and description.</p>
+            <p class="form-card-sub">Brand, description, material and finish.</p>
           </div>
         </div>
         <div class="form-card-body">
@@ -202,123 +202,105 @@
               <textarea v-model="form.Description" class="form-textarea" rows="3" placeholder="Brief product description…"></textarea>
             </div>
           </div>
+
+          <div class="form-grid-3 details-extra-row">
+            <div class="form-field">
+              <label class="form-label">Material</label>
+              <input v-model="form.Material" type="text" class="form-input form-input--plain" placeholder="e.g. Galvanized Steel" />
+            </div>
+            <div class="form-field">
+              <label class="form-label">Profile / Type</label>
+              <input v-model="form.ProfileType" type="text" class="form-input form-input--plain" placeholder="e.g. Corrugated" />
+            </div>
+            <div class="form-field">
+              <label class="form-label">Color</label>
+              <input v-model="form.Color" type="text" class="form-input form-input--plain" placeholder="e.g. Red Oxide" />
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- ══ SPECIFICATIONS ══ -->
+      <!-- ══ SIZES & PRICES ══ -->
       <div class="form-card">
         <div class="form-card-header">
           <div class="form-card-icon form-card-icon--amber">
             <i class="fa-solid fa-ruler-combined"></i>
           </div>
           <div>
-            <h2 class="form-card-title">Specifications</h2>
-            <p class="form-card-sub">Physical dimensions and material properties.</p>
+            <h2 class="form-card-title">Sizes &amp; Prices</h2>
+            <p class="form-card-sub">Each size has its own specs and price. POS shows these as a dropdown.</p>
           </div>
         </div>
         <div class="form-card-body">
-          <div class="form-grid-3">
-            <div class="form-field">
-              <label class="form-label">Material</label>
-              <input v-model="form.Material" type="text" class="form-input" placeholder="e.g. Galvanized Steel" />
-            </div>
-            <div class="form-field">
-              <label class="form-label">Profile / Type</label>
-              <input v-model="form.ProfileType" type="text" class="form-input" placeholder="e.g. Corrugated" />
-            </div>
-            <div class="form-field">
-              <label class="form-label">Color</label>
-              <input v-model="form.Color" type="text" class="form-input" placeholder="e.g. Red Oxide" />
-            </div>
+          <div class="variant-list">
+            <div v-for="(v, vi) in variants" :key="v.uid" class="variant-card">
+              <div class="variant-head">
+                <span class="variant-badge">Size {{ vi + 1 }}</span>
+                <span class="variant-label">{{ variantLabel(v) }}</span>
+                <button
+                  v-if="variants.length > 1"
+                  type="button"
+                  class="variant-remove"
+                  title="Remove this size"
+                  @click="removeVariant(vi)"
+                >
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
 
-            <div class="form-field">
-              <label class="form-label">Length</label>
-              <div class="input-unit-row">
-                <input v-model="form.Length" type="number" class="form-input" placeholder="0.00" />
-                <div class="select-wrap select-wrap--unit">
-                  <select v-model="form.LengthUnit" class="form-select">
-                    <option value="ft">ft</option>
-                    <option value="m">m</option>
-                    <option value="cm">cm</option>
-                    <option value="in">in</option>
-                  </select>
-                  <i class="fa-solid fa-chevron-down select-caret"></i>
+              <div class="spec-rows">
+                <div v-for="(s, si) in v.specs" :key="s.uid" class="spec-row">
+                  <div class="select-wrap">
+                    <select v-model="s.type" class="form-select form-select--plain" @change="onSpecTypeChange(s)">
+                      <option v-for="t in SPEC_TYPES" :key="t.key" :value="t.key">{{ t.label }}</option>
+                    </select>
+                    <i class="fa-solid fa-chevron-down select-caret"></i>
+                  </div>
+                  <input
+                    v-model="s.value"
+                    type="number"
+                    step="0.01"
+                    class="form-input form-input--plain"
+                    placeholder="Value"
+                  />
+                  <div class="select-wrap">
+                    <select v-model="s.unit" class="form-select form-select--plain">
+                      <option v-for="u in specUnits(s.type)" :key="u" :value="u">{{ u }}</option>
+                    </select>
+                    <i class="fa-solid fa-chevron-down select-caret"></i>
+                  </div>
+                  <button type="button" class="spec-remove" title="Remove specification" @click="removeSpec(v, si)">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <button type="button" class="add-spec-btn" @click="addSpec(v)">
+                  <i class="fa-solid fa-plus"></i> Add specification
+                </button>
+              </div>
+
+              <div class="form-grid-2 variant-prices">
+                <div class="form-field">
+                  <label class="form-label">Selling Price <span class="req">*</span></label>
+                  <div class="input-wrap input-wrap--prefix">
+                    <span class="input-prefix">₱</span>
+                    <input v-model="v.SellingPrice" type="number" step="0.01" class="form-input form-input--prefixed" placeholder="0.00" />
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label class="form-label">Cost Price <span class="req">*</span></label>
+                  <div class="input-wrap input-wrap--prefix">
+                    <span class="input-prefix">₱</span>
+                    <input v-model="v.CostPrice" type="number" step="0.01" class="form-input form-input--prefixed" placeholder="0.00" />
+                  </div>
                 </div>
               </div>
             </div>
-
-            <div class="form-field">
-              <label class="form-label">Width</label>
-              <div class="input-unit-row">
-                <input v-model="form.Width" type="number" class="form-input" placeholder="0.00" />
-                <div class="select-wrap select-wrap--unit">
-                  <select v-model="form.WidthUnit" class="form-select">
-                    <option value="ft">ft</option>
-                    <option value="m">m</option>
-                    <option value="cm">cm</option>
-                    <option value="in">in</option>
-                  </select>
-                  <i class="fa-solid fa-chevron-down select-caret"></i>
-                </div>
-              </div>
-            </div>
-
-            <div class="form-field">
-              <label class="form-label">
-                Thickness / Gauge
-                <span class="form-label-hint">mm or gauge</span>
-              </label>
-              <input v-model="form.Thickness" type="number" step="0.01" class="form-input" placeholder="e.g. 0.40" />
-              <p class="form-hint">e.g. <strong>0.40</strong> mm or <strong>26</strong> gauge</p>
-            </div>
           </div>
 
-          <div class="form-field spec-weight-row">
-            <label class="form-label">Weight</label>
-            <div class="input-unit-row input-unit-row--sm">
-              <input v-model="form.Weight" type="number" class="form-input" placeholder="0" />
-              <div class="select-wrap select-wrap--unit">
-                <select v-model="form.WeightUnit" class="form-select">
-                  <option value="g">g</option>
-                  <option value="kg">kg</option>
-                  <option value="mL">mL</option>
-                  <option value="L">L</option>
-                </select>
-                <i class="fa-solid fa-chevron-down select-caret"></i>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══ PRICING ══ -->
-      <div class="form-card">
-        <div class="form-card-header">
-          <div class="form-card-icon form-card-icon--orange">
-            <i class="fa-solid fa-peso-sign"></i>
-          </div>
-          <div>
-            <h2 class="form-card-title">Pricing</h2>
-            <p class="form-card-sub">Selling and cost prices.</p>
-          </div>
-        </div>
-        <div class="form-card-body">
-          <div class="form-grid-2">
-            <div class="form-field">
-              <label class="form-label">Selling Price <span class="req">*</span></label>
-              <div class="input-wrap input-wrap--prefix">
-                <span class="input-prefix">₱</span>
-                <input v-model="form.SellingPrice" type="number" step="0.01" class="form-input form-input--prefixed" placeholder="0.00" />
-              </div>
-            </div>
-            <div class="form-field">
-              <label class="form-label">Cost Price <span class="req">*</span></label>
-              <div class="input-wrap input-wrap--prefix">
-                <span class="input-prefix">₱</span>
-                <input v-model="form.CostPrice" type="number" step="0.01" class="form-input form-input--prefixed" placeholder="0.00" />
-              </div>
-            </div>
-          </div>
+          <button type="button" class="btn btn--ghost add-variant-btn" @click="addVariant">
+            <i class="fa-solid fa-plus"></i> Add Size &amp; Price
+          </button>
         </div>
       </div>
 
@@ -362,7 +344,7 @@
 
     </div>
 
-    <!-- ══ BARCODE SCANNER MODAL (NEW — same USB + Camera pipeline/UX as POS.vue) ══ -->
+    <!-- ══ BARCODE SCANNER MODAL (same USB + Camera pipeline/UX as POS.vue) ══ -->
     <transition name="alert-fade">
       <div v-if="showBarcodeScanner" class="scan-modal-backdrop" @click.self="closeBarcodeScanner" @keydown.esc="closeBarcodeScanner">
         <div class="scan-modal">
@@ -481,12 +463,66 @@ const form = ref({
   ProductName: '', SKU: '', Barcode: '', Unit: '', IsReturnable: false,
   CategoryID: '', SupplierID: '', Brand: '', Description: '',
   Material: '', ProfileType: '', Color: '',
-  Length: null, LengthUnit: 'ft', Width: null, WidthUnit: 'ft',
-  Thickness: null, Weight: 0, WeightUnit: 'g',
-  SellingPrice: '', CostPrice: '', OpeningStock: '', ReorderLevel: '',
+  OpeningStock: '', ReorderLevel: '',
 })
 
-const initialFormSnapshot = ref(JSON.stringify(form.value))
+/* ────────────────────────────────────────────────────────────
+   SIZES & PRICES (variants)
+   Each variant = a list of dynamic specs (type + value + unit)
+   plus its own selling and cost price. The label (e.g.
+   "8 ft × 3 ft × 0.40 mm") is what POS shows in its dropdown.
+──────────────────────────────────────────────────────────── */
+const SPEC_TYPES = [
+  { key: 'Length',    label: 'Length',    units: ['ft', 'm', 'cm', 'in', 'mm'] },
+  { key: 'Width',     label: 'Width',     units: ['ft', 'm', 'cm', 'in', 'mm'] },
+  { key: 'Thickness', label: 'Thickness', units: ['mm', 'in', 'gauge'] },
+  { key: 'Diameter',  label: 'Diameter',  units: ['mm', 'in', 'cm'] },
+  { key: 'Weight',    label: 'Weight',    units: ['kg', 'g', 'lb'] },
+]
+
+let uidCounter = 0
+const nextUid = () => ++uidCounter
+
+const specUnits = (type) => SPEC_TYPES.find(t => t.key === type)?.units ?? []
+const newSpec = (type = 'Length') => ({ uid: nextUid(), type, value: '', unit: specUnits(type)[0] })
+const newVariant = () => ({ uid: nextUid(), specs: [], SellingPrice: '', CostPrice: '' })
+
+const variants = ref([newVariant()])
+
+function addVariant()        { variants.value.push(newVariant()) }
+function removeVariant(i)    { variants.value.splice(i, 1) }
+function addSpec(v)          { v.specs.push(newSpec()) }
+function removeSpec(v, i)    { v.specs.splice(i, 1) }
+function onSpecTypeChange(s) { s.unit = specUnits(s.type)[0] }
+
+/** e.g. "8 ft × 3 ft × 0.40 mm" — shown live here and in the POS dropdown. */
+function variantLabel(v) {
+  const parts = v.specs
+    .filter(s => s.value !== '' && s.value !== null)
+    .map(s => `${Number(s.value)} ${s.unit === 'gauge' ? 'ga' : s.unit}`)
+  return parts.length ? parts.join(' × ') : 'Standard'
+}
+
+function validateVariants() {
+  const seen = new Set()
+  for (let i = 0; i < variants.value.length; i++) {
+    const v = variants.value[i]
+    const n = i + 1
+    if (v.specs.some(s => s.value === '' || s.value === null)) return `Size ${n}: fill in or remove empty specifications.`
+    if (v.SellingPrice === '' || Number(v.SellingPrice) <= 0)   return `Size ${n}: enter a selling price.`
+    if (v.CostPrice === '' || Number(v.CostPrice) < 0)          return `Size ${n}: enter a cost price.`
+    const label = variantLabel(v)
+    if (seen.has(label)) return `Size ${n} duplicates another size ("${label}").`
+    seen.add(label)
+  }
+  return ''
+}
+
+// Snapshot covers the main form AND the sizes, for the unsaved-changes prompt.
+// Initial value is set in onMounted (variants must exist first).
+const formSnapshot = () => JSON.stringify({ form: form.value, variants: variants.value })
+const initialFormSnapshot = ref('')
+
 const preview      = ref(null)
 const imageFile    = ref(null)
 const units        = ['Piece', 'Box', 'Pack', 'Set', 'Roll', 'Kg', 'g', 'L', 'mL']
@@ -539,13 +575,12 @@ async function loadSuppliers()  { const r = await api.get('/api/suppliers');  su
 
 onMounted(async () => {
   await Promise.all([loadCategories(), loadSuppliers()])
-  initialFormSnapshot.value = JSON.stringify(form.value)
+  initialFormSnapshot.value = formSnapshot()
 })
 
 onBeforeRouteLeave(() => {
   if (hasSaved.value) return true
-  const current = JSON.stringify(form.value)
-  if (current !== initialFormSnapshot.value) {
+  if (formSnapshot() !== initialFormSnapshot.value) {
     return window.confirm('You have unsaved changes. Are you sure you want to leave?')
   }
   return true
@@ -882,12 +917,30 @@ async function saveProduct() {
     return
   }
 
+  const variantError = validateVariants()
+  if (variantError) {
+    errorMessage.value = variantError
+    return
+  }
+
   saving.value = true
   try {
     const fd = new FormData()
     for (const key in form.value) {
       fd.append(key, key === 'IsReturnable' ? (form.value[key] ? 1 : 0) : (form.value[key] ?? ''))
     }
+
+    const payload = variants.value.map(v => ({
+      Label: variantLabel(v),
+      Specs: v.specs.map(s => ({ Type: s.type, Value: Number(s.value), Unit: s.unit })),
+      SellingPrice: Number(v.SellingPrice),
+      CostPrice: Number(v.CostPrice),
+    }))
+    fd.append('Variants', JSON.stringify(payload))
+    // Backward-compat: code that still reads a single price gets the first size's price.
+    fd.append('SellingPrice', payload[0].SellingPrice)
+    fd.append('CostPrice', payload[0].CostPrice)
+
     if (imageFile.value) fd.append('Product_Image', imageFile.value)
     await api.post('/api/products', fd, {
       headers: { 'Content-Type': 'multipart/form-data' }
@@ -1003,6 +1056,7 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .form-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .form-stack  { display: flex; flex-direction: column; gap: 16px; }
+.details-extra-row { margin-top: 18px; }
 
 /* FIELDS */
 .form-field { display: flex; flex-direction: column; gap: 7px; }
@@ -1036,8 +1090,9 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .form-input::placeholder { color: var(--p-text-faint); }
 .form-input--disabled { background: var(--p-surface-raised); color: var(--p-text-faint); cursor: not-allowed; }
 .form-input--prefixed { padding-left: 30px; }
+.form-input--plain { padding-left: 14px; }
 
-/* BARCODE FIELD (NEW) */
+/* BARCODE FIELD */
 .barcode-input-wrap { position: relative; }
 .barcode-input { padding-right: 44px; }
 .barcode-scan-btn {
@@ -1063,7 +1118,6 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 
 /* SELECT */
 .select-wrap { position: relative; display: flex; align-items: center; }
-.select-wrap--unit { flex-shrink: 0; width: 80px; }
 .form-select {
   width: 100%; height: 42px;
   padding: 0 32px 0 36px;
@@ -1074,17 +1128,11 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
   transition: border-color .18s, box-shadow .18s, background-color .22s, color .22s;
 }
 .form-select:focus { border-color: var(--p-accent); box-shadow: 0 0 0 3px var(--p-ring); background: var(--p-surface); }
+.form-select--plain { padding-left: 12px; }
 .select-caret {
   position: absolute; right: 10px; font-size: 9px;
   color: var(--p-text-faint); pointer-events: none;
 }
-.select-wrap--unit .form-select { padding-left: 12px; }
-
-/* INPUT + UNIT ROW */
-.input-unit-row { display: flex; gap: 8px; }
-.input-unit-row .form-input { flex: 1; }
-.input-unit-row--sm { width: 240px; }
-.spec-weight-row { margin-top: 18px; }
 
 /* TOGGLE */
 .toggle-row { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; }
@@ -1131,10 +1179,45 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 }
 .upload-remove:hover { opacity: .7; }
 
+/* SIZES & PRICES */
+.variant-list { display: flex; flex-direction: column; gap: 16px; }
+.variant-card {
+  border: 1.5px solid var(--p-border); border-radius: 14px;
+  background: var(--p-surface-sunken); padding: 16px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.variant-head { display: flex; align-items: center; gap: 10px; }
+.variant-badge {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px;
+  background: var(--p-accent-soft); color: var(--p-accent);
+}
+.variant-label { font-size: 13.5px; font-weight: 600; color: var(--p-text-primary); flex: 1; min-width: 0; }
+.variant-remove, .spec-remove {
+  width: 30px; height: 30px; flex-shrink: 0; border: none; border-radius: 8px;
+  background: transparent; color: var(--p-text-faint); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+  transition: background-color .15s, color .15s;
+}
+.variant-remove:hover, .spec-remove:hover { background: rgba(244,63,94,.12); color: #f43f5e; }
+
+.spec-rows { display: flex; flex-direction: column; gap: 8px; }
+.spec-row  { display: grid; grid-template-columns: 1.3fr 1fr .9fr auto; gap: 8px; align-items: center; }
+.add-spec-btn {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: 10px; cursor: pointer;
+  border: 1.5px dashed var(--p-border-strong); background: transparent;
+  color: var(--p-text-muted); font-size: 12.5px; font-weight: 600; font-family: inherit;
+  transition: border-color .15s, color .15s, background-color .15s;
+}
+.add-spec-btn:hover { border-color: var(--p-accent); color: var(--p-accent); background: var(--p-accent-soft); }
+.variant-prices { padding-top: 14px; border-top: 1px dashed var(--p-border-strong); }
+.add-variant-btn { margin-top: 16px; width: 100%; justify-content: center; border-style: dashed; }
+
 /* FORM ACTIONS */
 .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 4px; }
 
-/* BARCODE SCANNER MODAL (NEW) */
+/* BARCODE SCANNER MODAL */
 .scan-modal-backdrop {
   position: fixed; inset: 0;
   background: var(--c-overlay); backdrop-filter: blur(6px);
@@ -1262,7 +1345,8 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 @media (max-width: 800px) {
   .prod-page { padding: 16px 16px 48px; }
   .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
-  .input-unit-row--sm { width: 100%; }
+  .spec-row { grid-template-columns: 1fr 1fr; }
+  .spec-row .spec-remove { grid-column: 2; justify-self: end; }
   .form-actions { flex-direction: column-reverse; align-items: stretch; }
   .btn { justify-content: center; }
 }

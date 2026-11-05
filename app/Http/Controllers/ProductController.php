@@ -8,15 +8,100 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
 {
     /**
      * =========================================================
+     * VARIANT HELPERS
+     * =========================================================
+     * ProductCreate.vue sends `Variants` as a JSON string:
+     *   [{ Label, Specs:[{Type,Value,Unit}], SellingPrice, CostPrice }, ...]
+     * parseVariants() decodes + validates it; syncVariants() writes it.
+     */
+    private function parseVariants(Request $request): ?array
+    {
+        if (!$request->has('Variants')) {
+            return null; // not sent → leave existing variants untouched
+        }
+
+        $raw = $request->input('Variants');
+        $list = is_array($raw) ? $raw : json_decode((string) $raw, true);
+
+        if (!is_array($list) || count($list) === 0) {
+            throw ValidationException::withMessages([
+                'Variants' => 'Add at least one size and price.',
+            ]);
+        }
+
+        $seen = [];
+        $clean = [];
+        foreach ($list as $i => $v) {
+            $n     = $i + 1;
+            $label = trim((string) ($v['Label'] ?? ''));
+            $sell  = $v['SellingPrice'] ?? null;
+            $cost  = $v['CostPrice'] ?? 0;
+
+            if ($label === '') $label = 'Standard';
+            if (!is_numeric($sell) || (float) $sell <= 0) {
+                throw ValidationException::withMessages(['Variants' => "Size {$n}: enter a selling price."]);
+            }
+            if (!is_numeric($cost) || (float) $cost < 0) {
+                throw ValidationException::withMessages(['Variants' => "Size {$n}: enter a valid cost price."]);
+            }
+            if (isset($seen[mb_strtolower($label)])) {
+                throw ValidationException::withMessages(['Variants' => "Size {$n} duplicates another size (\"{$label}\")."]);
+            }
+            $seen[mb_strtolower($label)] = true;
+
+            $clean[] = [
+                'VariantID'    => $v['VariantID'] ?? null,
+                'Label'        => mb_substr($label, 0, 150),
+                'Specs'        => array_values($v['Specs'] ?? []),
+                'SellingPrice' => round((float) $sell, 2),
+                'CostPrice'    => round((float) $cost, 2),
+            ];
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Replaces the product's variants with the submitted list.
+     * Sales keep their own VariantLabel snapshot, so history is safe.
+     */
+    private function syncVariants(Product $product, array $variants): void
+    {
+        $keep = [];
+        foreach ($variants as $v) {
+            $id = $v['VariantID'] ?? null;
+            unset($v['VariantID']);
+
+            // Existing size (belongs to THIS product) → update in place so its
+            // VariantID stays stable. Otherwise it's a new size → create it.
+            $existing = $id
+                ? $product->variants()->where('VariantID', $id)->first()
+                : null;
+
+            if ($existing) {
+                $existing->update($v);
+                $keep[] = $existing->VariantID;
+            } else {
+                $keep[] = $product->variants()->create($v)->VariantID;
+            }
+        }
+
+        // Sizes the person removed in the form.
+        $product->variants()->whereNotIn('VariantID', $keep)->delete();
+    }
+
+    /**
+     * =========================================================
      * SHARED FORMATTER — used by productList() AND findByBarcode()
      * so a product found via a fresh barcode scan (not yet in the
      * POS's locally-loaded catalog) looks IDENTICAL to one loaded
-     * normally — same ImageURL, same Stock shape, etc.
+     * normally — same ImageURL, same Stock shape, same variants.
      * =========================================================
      */
     private function formatProduct(Product $p): array
@@ -40,6 +125,14 @@ class ProductController extends Controller
             'Width'         => $p->Width,
             'WidthUnit'     => $p->WidthUnit,
             'Thickness'     => $p->Thickness,
+
+            // SIZES & PRICES — what the POS dropdown is built from.
+            // CostPrice is intentionally NOT exposed here.
+            'variants' => $p->variants->map(fn ($v) => [
+                'VariantID'    => $v->VariantID,
+                'Label'        => $v->Label,
+                'SellingPrice' => (float) $v->SellingPrice,
+            ])->values(),
 
             // CATEGORY
             'category' => [
@@ -77,11 +170,6 @@ class ProductController extends Controller
      * =========================================================
      * PRODUCT LIST (USED BY POS + PRODUCT LIST PAGE)
      * =========================================================
-     * POS needs the full catalog client-side for instant search/scan,
-     * so this stays unpaginated — but we now only pull the columns
-     * formatProduct() actually uses, on both the product row and its
-     * relations, instead of every column on every table. Same output
-     * shape as before, just cheaper to fetch and smaller to transfer.
      */
     public function productList()
     {
@@ -98,6 +186,7 @@ class ProductController extends Controller
             ->with([
                 'category:CategoryID,CategoryName',
                 'inventory:ProductID,QuantityOnHand,ReorderLevel',
+                'variants:VariantID,ProductID,Label,SellingPrice',
             ])
             ->orderBy('ProductID', 'desc')
             ->get()
@@ -110,19 +199,8 @@ class ProductController extends Controller
      * =========================================================
      * PRODUCT INDEX (MANAGEMENT)
      * =========================================================
-     * Was previously Product::with(...)->get() — every column, every
-     * row, every time, with no limit. That gets linearly slower as the
-     * catalog grows. Now: only the columns this response actually uses,
-     * and real DB-level pagination (50/page) instead of shipping the
-     * whole table.
-     *
-     * ⚠️ BREAKING CHANGE: response shape changes from a flat array to
-     * Laravel's paginator format:
+     * ⚠️ Response is Laravel's paginator format:
      *   { data: [...], current_page, last_page, per_page, total, ... }
-     * The Vue Product List page needs to read `response.data.data`
-     * instead of `response.data`, and can use `current_page` / `last_page`
-     * / `total` to drive a pager. Accepts `?page=` and optional
-     * `?per_page=` (capped at 100) from the frontend.
      */
     public function index(Request $request)
     {
@@ -139,6 +217,7 @@ class ProductController extends Controller
             ->with([
                 'category:CategoryID,CategoryName',
                 'inventory:ProductID,QuantityOnHand',
+                'variants:VariantID,ProductID,Label,SellingPrice,CostPrice',
             ])
             ->orderBy('ProductID', 'desc')
             ->paginate($perPage)
@@ -152,6 +231,14 @@ class ProductController extends Controller
                     'Stock'        => $p->inventory->QuantityOnHand ?? 0,
                     'CategoryName' => $p->category->CategoryName ?? null,
                     'CategoryID'   => $p->CategoryID,
+
+                    // SIZES & PRICES (management view includes cost)
+                    'variants' => $p->variants->map(fn ($v) => [
+                        'VariantID'    => $v->VariantID,
+                        'Label'        => $v->Label,
+                        'SellingPrice' => (float) $v->SellingPrice,
+                        'CostPrice'    => (float) $v->CostPrice,
+                    ])->values(),
 
                     // SPECIFICATIONS
                     'Material'     => $p->Material,
@@ -180,7 +267,7 @@ class ProductController extends Controller
      */
     public function show($id)
     {
-        $product = Product::with(['category', 'inventory', 'suppliers'])
+        $product = Product::with(['category', 'inventory', 'suppliers', 'variants'])
             ->findOrFail($id);
 
         return response()->json([
@@ -210,6 +297,15 @@ class ProductController extends Controller
             'CostPrice'     => (float) $product->CostPrice,
             'IsReturnable'  => (bool) $product->IsReturnable,
 
+            // SIZES & PRICES (full detail incl. Specs, for the edit form)
+            'variants' => $product->variants->map(fn ($v) => [
+                'VariantID'    => $v->VariantID,
+                'Label'        => $v->Label,
+                'Specs'        => $v->Specs ?? [],
+                'SellingPrice' => (float) $v->SellingPrice,
+                'CostPrice'    => (float) $v->CostPrice,
+            ])->values(),
+
             'Product_Image' => $product->Product_Image,
             'ImageURL' => $product->Product_Image
                 ? asset('storage/' . $product->Product_Image)
@@ -228,10 +324,6 @@ class ProductController extends Controller
      */
     public function store(Request $request)
     {
-        // Only validating Barcode here — everything else keeps its existing
-        // (unvalidated) behavior so this doesn't change any other flow.
-        // `nullable` + `filled` handling below prevents duplicate empty
-        // strings from tripping the DB's unique index on Barcode.
         $request->validate([
             'Barcode' => ['nullable', 'string', 'max:100', 'unique:products,Barcode'],
         ]);
@@ -239,6 +331,15 @@ class ProductController extends Controller
         DB::beginTransaction();
 
         try {
+            // Throws a 422 ValidationException if sizes/prices are bad.
+            // Caught separately below so it isn't turned into a 500.
+            $variants = $this->parseVariants($request);
+
+            // Backward-compat: the products table still has its own price
+            // columns, so mirror the FIRST size's price into them.
+            $firstSell = $variants[0]['SellingPrice'] ?? $request->SellingPrice;
+            $firstCost = $variants[0]['CostPrice']    ?? $request->CostPrice;
+
             $product = Product::create([
                 'ProductName'   => $request->ProductName,
                 'Unit'          => $request->Unit,
@@ -260,14 +361,19 @@ class ProductController extends Controller
 
                 'Weight'        => $request->Weight,
                 'WeightUnit'    => $request->WeightUnit,
-                'SellingPrice'  => $request->SellingPrice,
-                'CostPrice'     => $request->CostPrice,
+                'SellingPrice'  => $firstSell,
+                'CostPrice'     => $firstCost,
                 'IsReturnable'  => $request->boolean('IsReturnable'),
 
                 'Product_Image' => $request->hasFile('Product_Image')
                     ? $request->file('Product_Image')->store('products', 'public')
                     : null,
             ]);
+
+            // SIZES & PRICES
+            if ($variants) {
+                $this->syncVariants($product, $variants);
+            }
 
             // INVENTORY
             $product->inventory()->create([
@@ -277,17 +383,6 @@ class ProductController extends Controller
             ]);
 
             // LOG NEW PRODUCT / OPENING STOCK
-            // FIX: previously nothing was ever written to inventory_logs
-            // when a product was created, so brand-new products (and their
-            // opening stock) never showed up anywhere on the Inventory Logs
-            // page — not in Recent Activity, not in Top Adjusted Products,
-            // not counted in the summary KPIs. Logging it here as a
-            // 'stock_in' row (opening stock genuinely is stock coming in)
-            // means it correctly counts toward Total Stock In / Total
-            // Adjustments / Manual Adjustments like any other movement.
-            // The distinct notes value ('New product added') is what lets
-            // the frontend tell this apart from a regular restock and show
-            // a "New" badge instead of a plain stock-in pill.
             DB::table('inventory_logs')->insert([
                 'ProductID'  => $product->ProductID,
                 'type'       => 'stock_in',
@@ -306,10 +401,6 @@ class ProductController extends Controller
             }
 
             // NOTIFY: new product added
-            // user_id left null so it's visible to everyone — matches
-            // NotificationController@index, which treats a null user_id
-            // as a broadcast-to-all notification (whereNull('user_id')
-            // orWhere('user_id', $request->user()->id)).
             Notification::create([
                 'type'            => 'product_created',
                 'title'           => 'New Product Added',
@@ -323,6 +414,12 @@ class ProductController extends Controller
             DB::commit();
             return response()->json(['status' => 'success']);
 
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'status'  => 'error',
+                'message' => collect($e->errors())->flatten()->first(),
+            ], 422);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -339,9 +436,6 @@ class ProductController extends Controller
      */
     public function update(Request $request, $id)
     {
-        // Same Barcode validation as store(), but ignoring this product's
-        // own current row so re-saving a product without changing its
-        // barcode doesn't falsely flag itself as a duplicate.
         $request->validate([
             'Barcode' => [
                 'nullable', 'string', 'max:100',
@@ -353,6 +447,9 @@ class ProductController extends Controller
 
         try {
             $product = Product::with('inventory')->findOrFail($id);
+
+            // null = the edit form didn't send Variants → leave sizes alone.
+            $variants = $this->parseVariants($request);
 
             $product->update([
                 'ProductName'  => $request->ProductName,
@@ -367,18 +464,25 @@ class ProductController extends Controller
                 'Material'     => $request->Material,
                 'ProfileType'  => $request->ProfileType,
                 'Color'        => $request->Color,
-                'Length'       => $request->Length,
-                'LengthUnit'   => $request->LengthUnit,
-                'Width'        => $request->Width,
-                'WidthUnit'    => $request->WidthUnit,
-                'Thickness'    => $request->Thickness,
+                // Legacy single-size dimensions: the edit form no longer sends
+                // these (sizes live in variants now), so keep what's stored
+                // instead of overwriting it with null.
+                'Length'       => $request->has('Length')     ? $request->Length     : $product->Length,
+                'LengthUnit'   => $request->has('LengthUnit') ? $request->LengthUnit : $product->LengthUnit,
+                'Width'        => $request->has('Width')      ? $request->Width      : $product->Width,
+                'WidthUnit'    => $request->has('WidthUnit')  ? $request->WidthUnit  : $product->WidthUnit,
+                'Thickness'    => $request->has('Thickness')  ? $request->Thickness  : $product->Thickness,
 
-                'Weight'       => $request->Weight,
-                'WeightUnit'   => $request->WeightUnit,
-                'SellingPrice' => $request->SellingPrice,
-                'CostPrice'    => $request->CostPrice,
+                'Weight'       => $request->has('Weight')     ? $request->Weight     : $product->Weight,
+                'WeightUnit'   => $request->has('WeightUnit') ? $request->WeightUnit : $product->WeightUnit,
+                'SellingPrice' => $variants[0]['SellingPrice'] ?? $request->SellingPrice,
+                'CostPrice'    => $variants[0]['CostPrice']    ?? $request->CostPrice,
                 'IsReturnable' => $request->boolean('IsReturnable'),
             ]);
+
+            if ($variants !== null) {
+                $this->syncVariants($product, $variants);
+            }
 
             if ($request->hasFile('Product_Image')) {
                 if ($product->Product_Image) {
@@ -390,22 +494,9 @@ class ProductController extends Controller
                 ]);
             }
 
-            // -----------------------------------------------------------
-            // INVENTORY UPDATE (FIXED)
-            // -----------------------------------------------------------
-            // $product->inventory is resolved through Eloquent's magic
-            // __get(), so chaining a compound assignment directly onto it
-            // (e.g. $product->inventory->QuantityOnHand += ...) triggers:
-            //   "Indirect modification of overloaded property
-            //    App\Models\Product::$inventory has no effect"
-            //
-            // Fix: pull the related Inventory model into a real local
-            // variable first, then mutate/save that instead.
+            // INVENTORY UPDATE
             $inventory = $product->inventory;
 
-            // Guard against products that somehow have no inventory row
-            // yet (legacy data, failed store(), etc.) instead of throwing
-            // "Attempt to read property on null".
             if (!$inventory) {
                 $inventory = $product->inventory()->create([
                     'QuantityOnHand' => 0,
@@ -420,11 +511,16 @@ class ProductController extends Controller
             $inventory->ReorderLevel = $request->ReorderLevel;
             $inventory->LastUpdated  = now();
             $inventory->save();
-            // -----------------------------------------------------------
 
             DB::commit();
             return response()->json(['status' => 'success']);
 
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'status'  => 'error',
+                'message' => collect($e->errors())->flatten()->first(),
+            ], 422);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -450,9 +546,6 @@ class ProductController extends Controller
         try {
             $product = Product::with('inventory')->findOrFail($id);
 
-            // Same fix applied here for consistency — pull into a local
-            // variable before mutating, even though this one previously
-            // worked (single += without ->save() chained inline).
             $inventory = $product->inventory;
 
             if (!$inventory) {
@@ -508,6 +601,7 @@ class ProductController extends Controller
 
         $product->suppliers()->detach();
         $product->inventory()->delete();
+        $product->variants()->delete();
         $product->delete();
 
         return response()->json(['status' => 'success']);
@@ -548,7 +642,7 @@ class ProductController extends Controller
      */
     public function findByBarcode($barcode)
     {
-        $product = Product::with(['category', 'inventory'])
+        $product = Product::with(['category', 'inventory', 'variants'])
             ->where('Barcode', $barcode)
             ->first();
 
@@ -561,9 +655,6 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            // Same shape as productList() — so a product found via a fresh
-            // scan (not yet in POS's loaded catalog) renders identically,
-            // including a proper full-URL product image.
             'product' => $this->formatProduct($product),
         ]);
     }

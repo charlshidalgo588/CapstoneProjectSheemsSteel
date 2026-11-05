@@ -72,6 +72,10 @@
                 <span class="identity-val identity-val--mono">{{ product.SKU || 'N/A' }}</span>
               </div>
               <div class="identity-row">
+                <span class="identity-label">Barcode</span>
+                <span class="identity-val identity-val--mono">{{ product.Barcode || '—' }}</span>
+              </div>
+              <div class="identity-row">
                 <span class="identity-label">Category</span>
                 <span class="identity-val">
                   <span class="category-pill">{{ product.category?.CategoryName || 'N/A' }}</span>
@@ -113,10 +117,22 @@
                   {{ product.Description || 'No description available.' }}
                 </span>
               </div>
-              <div class="detail-row">
+              <div class="detail-row" v-if="product.Material">
+                <span class="detail-label">Material</span>
+                <span class="detail-val">{{ product.Material }}</span>
+              </div>
+              <div class="detail-row" v-if="product.ProfileType">
+                <span class="detail-label">Profile / Type</span>
+                <span class="detail-val">{{ product.ProfileType }}</span>
+              </div>
+              <div class="detail-row" v-if="product.Color">
+                <span class="detail-label">Color</span>
+                <span class="detail-val">{{ product.Color }}</span>
+              </div>
+              <div class="detail-row" v-if="product.Weight">
                 <span class="detail-label">Weight</span>
                 <span class="detail-val">
-                  {{ product.Weight ? `${product.Weight} ${product.WeightUnit}` : '—' }}
+                  {{ `${product.Weight} ${product.WeightUnit || ''}` }}
                 </span>
               </div>
             </div>
@@ -132,15 +148,15 @@
             </div>
 
             <div class="detail-list">
-              <!-- Selling price (featured) -->
+              <!-- Selling price (featured) — a range when sizes differ in price -->
               <div class="price-featured">
-                <span class="price-featured-label">Selling Price</span>
-                <span class="price-featured-val">₱{{ formatPrice(product.SellingPrice) }}</span>
+                <span class="price-featured-label">{{ variants.length > 1 ? 'Price Range' : 'Selling Price' }}</span>
+                <span class="price-featured-val">{{ priceLabel }}</span>
               </div>
 
               <div class="detail-row">
-                <span class="detail-label">Cost Price</span>
-                <span class="detail-val">₱{{ formatPrice(product.CostPrice) }}</span>
+                <span class="detail-label">Sizes</span>
+                <span class="detail-val">{{ variants.length || 1 }}</span>
               </div>
 
               <div class="detail-divider"></div>
@@ -166,44 +182,37 @@
 
         </div>
 
-        <!-- ── SPECIFICATIONS ── -->
+        <!-- ── SIZES & PRICES ── -->
         <div class="detail-card">
           <div class="detail-card-header">
-            <div class="detail-card-icon detail-card-icon--amber">
-              <i class="fa-solid fa-ruler-combined"></i>
+            <div class="detail-card-icon detail-card-icon--green">
+              <i class="fa-solid fa-tags"></i>
             </div>
-            <h2 class="detail-card-title">Specifications</h2>
+            <h2 class="detail-card-title">Sizes &amp; Prices</h2>
           </div>
 
-          <div class="spec-grid">
-            <div class="spec-item">
-              <span class="spec-label">Material</span>
-              <span class="spec-val">{{ product.Material || '—' }}</span>
-            </div>
-            <div class="spec-item">
-              <span class="spec-label">Profile / Type</span>
-              <span class="spec-val">{{ product.ProfileType || '—' }}</span>
-            </div>
-            <div class="spec-item">
-              <span class="spec-label">Color</span>
-              <span class="spec-val">{{ product.Color || '—' }}</span>
-            </div>
-            <div class="spec-item">
-              <span class="spec-label">Length</span>
-              <span class="spec-val">
-                {{ product.Length ? `${product.Length} ${product.LengthUnit || ''}` : '—' }}
-              </span>
-            </div>
-            <div class="spec-item">
-              <span class="spec-label">Width</span>
-              <span class="spec-val">
-                {{ product.Width ? `${product.Width} ${product.WidthUnit || ''}` : '—' }}
-              </span>
-            </div>
-            <div class="spec-item">
-              <span class="spec-label">Thickness / Gauge</span>
-              <span class="spec-val">{{ product.Thickness || '—' }}</span>
-            </div>
+          <div class="size-table-wrap">
+            <table class="size-table">
+              <thead>
+                <tr>
+                  <th>Size</th>
+                  <th>Selling Price</th>
+                  <th>Cost Price</th>
+                  <th>Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="v in variants" :key="v.VariantID">
+                  <td class="size-name">{{ v.Label }}</td>
+                  <td>₱{{ formatPrice(v.SellingPrice) }}</td>
+                  <td>₱{{ formatPrice(v.CostPrice) }}</td>
+                  <td><span class="margin-pill">{{ margin(v) }}%</span></td>
+                </tr>
+                <tr v-if="!variants.length">
+                  <td colspan="4" class="size-empty">No sizes set for this product.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -259,6 +268,27 @@ const loading = ref(true)
 
 const formatPrice = val => Number(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const imageUrl    = path => `http://localhost:8000/storage/${path}`
+
+/* ── SIZES & PRICES ──
+   GET /api/products/{id} returns `variants: [{ VariantID, Label, Specs,
+   SellingPrice, CostPrice }]`. The pricing card shows a single price or a
+   range; the Sizes & Prices table lists every size with its margin. */
+const variants = computed(() => product.value.variants ?? [])
+
+const priceLabel = computed(() => {
+  const prices = variants.value.map(v => Number(v.SellingPrice))
+  if (!prices.length) return `₱${formatPrice(product.value.SellingPrice)}`
+  const min = Math.min(...prices)
+  const max = Math.max(...prices)
+  return min === max
+    ? `₱${formatPrice(min)}`
+    : `₱${formatPrice(min)} – ₱${formatPrice(max)}`
+})
+
+const margin = v =>
+  v.SellingPrice > 0
+    ? (((v.SellingPrice - v.CostPrice) / v.SellingPrice) * 100).toFixed(1)
+    : '0.0'
 
 const isLowStock = computed(() => {
   const inv = product.value.inventory
@@ -458,7 +488,7 @@ html[data-theme="dark"] .returnable-pill--no  { background: rgba(244,63,94,.16);
 
 /* Pricing featured */
 .price-featured {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
   background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.20);
   border-radius: 12px; padding: 12px 14px;
   transition: background .22s, border-color .22s;
@@ -485,20 +515,31 @@ html[data-theme="dark"] .stock-count--oos { color: #F87171; }
 }
 html[data-theme="dark"] .low-stock-badge { background: rgba(244,63,94,.16); color: #F87171; }
 
-/* ── SPEC GRID ── */
-.spec-grid {
-  display: grid; grid-template-columns: repeat(3,1fr);
-  gap: 0; padding: 8px 0;
+/* ── SIZES & PRICES TABLE ── */
+.size-table-wrap { overflow-x: auto; padding: 4px 8px 12px; }
+.size-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.size-table th {
+  text-align: left; padding: 10px 12px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--pv-text-faint); border-bottom: 1px solid var(--pv-border);
+  white-space: nowrap;
 }
-.spec-item {
-  padding: 14px 20px; display: flex; flex-direction: column; gap: 5px;
-  border-bottom: 1px solid var(--pv-border); border-right: 1px solid var(--pv-border);
+.size-table td {
+  padding: 12px; color: var(--pv-text-primary);
+  border-bottom: 1px solid var(--pv-border);
+  font-variant-numeric: tabular-nums;
   transition: border-color .22s;
 }
-.spec-item:nth-child(3n) { border-right: none; }
-.spec-item:nth-child(n+4) { border-bottom: none; }
-.spec-label { font-size: 11px; font-weight: 700; color: var(--pv-text-faint); text-transform: uppercase; letter-spacing: .07em; }
-.spec-val   { font-size: 14px; font-weight: 600; color: var(--pv-text-primary); transition: color .22s; }
+.size-table tbody tr:last-child td { border-bottom: none; }
+.size-table tbody tr:hover td { background: var(--pv-surface-raised); }
+.size-name { font-weight: 700; }
+.size-empty { text-align: center; color: var(--pv-text-faint); }
+.margin-pill {
+  display: inline-block; padding: 2px 9px; border-radius: 20px;
+  font-size: 11.5px; font-weight: 700;
+  background: rgba(16,185,129,.12); color: var(--pv-green);
+}
+html[data-theme="dark"] .margin-pill { background: rgba(16,185,129,.18); color: #4ADE80; }
 
 /* ── SUPPLIER GRID ── */
 .supplier-grid { padding: 16px 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px,1fr)); gap: 14px; }
@@ -538,24 +579,13 @@ html[data-theme="dark"] .low-stock-badge { background: rgba(244,63,94,.16); colo
 /* ── RESPONSIVE ── */
 @media (max-width: 1100px) {
   .top-grid    { grid-template-columns: 240px 1fr 1fr; }
-  .spec-grid   { grid-template-columns: repeat(2,1fr); }
-  .spec-item:nth-child(3n)  { border-right: 1px solid var(--pv-border); }
-  .spec-item:nth-child(2n)  { border-right: none; }
-  .spec-item:nth-child(n+5) { border-bottom: none; }
-  .spec-item:nth-child(n+3):nth-child(-n+4) { border-bottom: 1px solid var(--pv-border); }
 }
 @media (max-width: 800px) {
   .prod-view-page { padding: 16px 16px 48px; }
   .top-grid { grid-template-columns: 1fr; }
   .skeleton-grid-3 { grid-template-columns: 1fr; }
-  .spec-grid { grid-template-columns: repeat(2,1fr); }
   .header-row { flex-direction: column; }
   .header-actions { width: 100%; }
   .btn { flex: 1; justify-content: center; }
-}
-@media (max-width: 500px) {
-  .spec-grid { grid-template-columns: 1fr; }
-  .spec-item { border-right: none !important; border-bottom: 1px solid var(--pv-border) !important; }
-  .spec-item:last-child { border-bottom: none !important; }
 }
 </style>

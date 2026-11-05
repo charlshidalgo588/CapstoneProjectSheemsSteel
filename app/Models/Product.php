@@ -126,4 +126,11 @@ class Product extends Model
             'ProductID'
         );
     }
+
+     public function variants()
+    {
+        return $this->hasMany(ProductVariant::class, 'ProductID', 'ProductID')
+                    ->orderBy('VariantID');
+    }
 }
+
