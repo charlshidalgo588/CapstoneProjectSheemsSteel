@@ -10,10 +10,9 @@ import AboutView from '@/views/AboutView.vue'
 import NotFound from '@/views/NotFound.vue'
 import SetPasswordView from '@/views/SetPasswordView.vue'
 
-
 /* ---------------------------------------------------------
    ⚙️ SETTINGS
-------------------- -------------------------------------- */
+--------------------------------------------------------- */
 import SettingsView from '@/views/SettingsView.vue'
 
 /* ---------------------------------------------------------
@@ -31,10 +30,12 @@ import InventoryLogsView from '@/views/InventoryLogsView.vue'
 import ProductTransactionView from '@/views/Transaction/ProductTransactionView.vue'
 import SalesTransactionsView from '@/views/Transaction/SalesTransactionsView.vue'
 import CustomersView from '@/views/CustomersView.vue'
+
 /* ---------------------------------------------------------
    🛒 POS
 --------------------------------------------------------- */
 import POSView from '@/views/Sales/POSView.vue'
+import SaleDetailView from '@/views/Sales/SaleDetailView.vue'
 
 /* ---------------------------------------------------------
    🧾 SUPPLIERS
@@ -113,7 +114,6 @@ const routes = [
     props: true,
     meta: { requiresAuth: true },
   },
- 
 
   /* ⭐ INVENTORY LOGS */
   {
@@ -130,8 +130,15 @@ const routes = [
     component: SalesTransactionsView,
     meta: { requiresAuth: true },
   },
+  {
+    path: '/sales/:id',
+    name: 'sale-detail',
+    component: SaleDetailView,
+    props: true,
+    meta: { requiresAuth: true },
+  },
 
-    /* 👥 CUSTOMERS */
+  /* 👥 CUSTOMERS */
   {
     path: '/customers',
     name: 'customers',

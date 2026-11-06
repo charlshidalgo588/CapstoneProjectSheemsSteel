@@ -7,29 +7,38 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class InventoryLog extends Model
 {
-    protected $primaryKey = 'LogID';
-    
+    protected $primaryKey = 'LogID';   // see the note below: make sure this matches the real column
+
     protected $fillable = [
         'ProductID',
+        'SaleID',
+        'VariantID',
+        'VariantLabel',
         'type',
         'quantity',
         'notes',
-        'created_by'
+        'is_cut',
+        'cut_full_length',
+        'cut_sold_length',
+        'cut_remaining_length',
+        'cut_unit',
+        'created_by',
     ];
 
-    /**
-     * Get the product that owns the inventory log.
-     */
+    protected $casts = [
+        'is_cut'               => 'boolean',
+        'cut_full_length'      => 'float',
+        'cut_sold_length'      => 'float',
+        'cut_remaining_length' => 'float',
+    ];
+
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class, 'ProductID', 'ProductID');
     }
 
-    /**
-     * Get the user who created the inventory log.
-     */
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
     }
-} 
+}

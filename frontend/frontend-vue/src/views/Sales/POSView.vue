@@ -15,10 +15,12 @@
               type="text"
               placeholder="Search products, SKU, size, or barcode…"
               class="search-input"
+              aria-label="Search products"
             />
-            <button v-if="search" @click="search = ''" class="search-clear">
+            <button v-if="search" @click="search = ''" class="search-clear" aria-label="Clear search">
               <i class="fa-solid fa-xmark"></i>
             </button>
+            <kbd v-else class="search-kbd" aria-hidden="true">/</kbd>
           </div>
 
           <button
@@ -33,7 +35,7 @@
 
           <div class="filter-select-wrap">
             <i class="fa-solid fa-layer-group filter-icon"></i>
-            <select v-model="selectedCategory" class="filter-select">
+            <select v-model="selectedCategory" class="filter-select" aria-label="Category">
               <option value="">All Categories</option>
               <option v-for="cat in categories" :key="cat.CategoryID" :value="cat.CategoryID">
                 {{ cat.CategoryName }}
@@ -149,11 +151,32 @@
 
         <!-- Product Meta -->
         <div class="product-meta">
-          <span class="product-count">{{ filteredProducts.length }} products</span>
+          <!-- Switch between whole products and leftover (cut) pieces -->
+          <div class="view-tabs" role="tablist">
+            <button type="button" role="tab" :aria-selected="view === 'products'" :class="{ 'is-on': view === 'products' }" @click="view = 'products'">Products</button>
+            <button type="button" role="tab" :aria-selected="view === 'leftovers'" :class="{ 'is-on': view === 'leftovers' }" @click="view = 'leftovers'">
+              <i class="fa-solid fa-ruler-horizontal"></i> Leftovers
+              <span class="view-tabs-count">{{ remnants.length }}</span>
+            </button>
+          </div>
+
+          <span v-if="view === 'products'" class="product-count">{{ filteredProducts.length }} product{{ filteredProducts.length === 1 ? '' : 's' }}</span>
+          <span v-else class="product-count">{{ filteredRemnants.length }} leftover{{ filteredRemnants.length === 1 ? '' : 's' }}</span>
           <span v-if="search" class="product-filter-tag">
             "{{ search }}"
-            <button @click="search = ''"><i class="fa-solid fa-xmark"></i></button>
+            <button @click="search = ''" aria-label="Clear search"><i class="fa-solid fa-xmark"></i></button>
           </span>
+          <button
+            v-if="view === 'products'"
+            type="button"
+            class="meta-chip"
+            :class="{ 'meta-chip--active': availableOnly }"
+            :aria-pressed="availableOnly"
+            @click="availableOnly = !availableOnly"
+          >
+            <i class="fa-solid" :class="availableOnly ? 'fa-circle-check' : 'fa-circle'"></i>
+            Available only
+          </button>
         </div>
 
         <!-- Load error -->
@@ -163,33 +186,42 @@
           <button @click="loadCatalog" class="load-retry-btn">Retry</button>
         </div>
 
-        <!-- Loading -->
-        <div v-else-if="loading" class="load-state">
-          <i class="fa-solid fa-spinner fa-spin"></i>
-          <p>Loading products…</p>
+        <!-- Loading skeleton -->
+        <div v-else-if="loading" class="product-grid" aria-busy="true">
+          <div v-for="n in 12" :key="'sk' + n" class="product-card product-card--skeleton">
+            <div class="sk sk--img"></div>
+            <div class="sk sk--line"></div>
+            <div class="sk sk--line sk--short"></div>
+          </div>
         </div>
 
         <!-- Product Grid (scrollable — every card keeps its full details) -->
-        <div v-else class="product-grid">
+        <div v-else-if="view === 'products'" class="product-grid">
           <div
             v-for="product in filteredProducts"
             :key="product.id"
             class="product-card"
             :class="{ 'product-card--oos': !canAddProduct(product), 'product-card--flash': flashProductId === product.id }"
+            :tabindex="canAddProduct(product) ? 0 : -1"
+            role="button"
+            :aria-disabled="!canAddProduct(product)"
             @click="canAddProduct(product) && openQuantityModal(product)"
+            @keydown.enter.self="canAddProduct(product) && openQuantityModal(product)"
           >
             <div class="product-stock-badge" :class="stockBadgeClass(product)">
               {{ stockBadgeLabel(product) }}
             </div>
             <div class="product-img-wrap">
-              <img v-if="product.image" :src="product.image" class="product-img" @error="onImgError(product)" />
+              <img v-if="product.image" :src="product.image" class="product-img" :alt="product.name" @error="onImgError(product)" />
               <div v-else class="product-img-placeholder"><i class="fa-solid fa-cube"></i></div>
             </div>
             <div class="pcard-info">
               <p class="pcard-name" :title="product.name || 'Unnamed product'">{{ product.name || 'Unnamed product' }}</p>
               <p class="pcard-sku">SKU: {{ product.sku || '—' }}</p>
               <p v-if="product.pricingType === 'sqm'" class="pcard-tag">Cut-to-size (sqm)</p>
-              <p v-else-if="product.variants.length > 1" class="pcard-tag">{{ product.variants.length }} sizes</p>
+              <p v-else-if="product.variants.length > 1" class="pcard-tag">
+                {{ product.variants.length }} sizes · {{ sellableVariants(product).length }} available
+              </p>
               <div class="pcard-footer">
                 <span class="pcard-price">{{ cardPrice(product) }}</span>
                 <span class="pcard-stock-count">{{ availableFor(product) }} left</span>
@@ -201,30 +233,73 @@
           <div v-if="filteredProducts.length === 0" class="product-empty">
             <i class="fa-solid fa-box-open"></i>
             <p>No products found</p>
+            <button v-if="search || selectedCategory || availableOnly" class="load-retry-btn" @click="resetFilters">Clear filters</button>
+          </div>
+        </div>
+
+        <!-- Leftover pieces (what is left after a cut) — still sellable -->
+        <div v-else class="product-grid">
+          <div
+            v-for="r in filteredRemnants"
+            :key="r.id"
+            class="product-card"
+            :class="{ 'product-card--oos': remnantAvailable(r) <= 0 }"
+            role="button"
+            :tabindex="remnantAvailable(r) > 0 ? 0 : -1"
+            :aria-disabled="remnantAvailable(r) <= 0"
+            @click="addRemnantToCart(r)"
+            @keydown.enter.self="addRemnantToCart(r)"
+          >
+            <div class="product-stock-badge badge--low">Leftover</div>
+            <div class="product-img-wrap">
+              <img v-if="remnantImage(r)" :src="remnantImage(r)" class="product-img" :alt="r.productName" />
+              <div v-else class="product-img-placeholder"><i class="fa-solid fa-cube"></i></div>
+            </div>
+            <div class="pcard-info">
+              <p class="pcard-name" :title="r.productName">{{ r.productName }}</p>
+              <p class="pcard-sku">SKU: {{ remnantSku(r) || '—' }}</p>
+              <p class="pcard-tag">{{ r.label ? r.label + ' · ' : '' }}{{ fmtLeft(r) }} piece</p>
+              <div class="pcard-footer">
+                <span class="pcard-price">{{ r.price != null ? '₱' + r.price.toFixed(2) : 'Set price' }}</span>
+                <span class="pcard-stock-count">{{ remnantAvailable(r) }} left</span>
+              </div>
+            </div>
+            <div class="product-add-overlay"><i class="fa-solid fa-plus"></i></div>
+          </div>
+
+          <!-- Empty state: shows a real error + Retry when the leftover request failed -->
+          <div v-if="filteredRemnants.length === 0" class="product-empty">
+            <template v-if="remnantError">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              <p>{{ remnantError }}</p>
+              <button class="load-retry-btn" @click="loadRemnants">Retry</button>
+            </template>
+            <template v-else>
+              <i class="fa-solid fa-ruler-horizontal"></i>
+              <p>No leftover pieces{{ search ? ' match your search' : ' on hand' }}</p>
+            </template>
           </div>
         </div>
       </div>
 
       <!-- ══ RIGHT — CART ══
-           On desktop/tablet (>768px) this sits beside the product grid as
-           normal. Below 768px it becomes a bottom-sheet drawer (see the
-           .pos-right media query): closed by default and hidden below the
-           viewport, opened via the floating mobile-cart-bar, and closed via
-           the handle/close button or the backdrop. -->
+           On desktop/tablet (>768px) this sits beside the product grid.
+           Below 768px it becomes a bottom-sheet drawer: closed by default,
+           opened via the floating mobile-cart-bar, closed via the handle,
+           the close button or the backdrop. -->
       <div class="pos-right" :class="{ 'cart-drawer--open': isMobile && cartOpen }">
-        <!-- Drag-handle affordance — mobile bottom-sheet only -->
         <div v-if="isMobile" class="cart-drawer-handle" aria-hidden="true"></div>
 
         <div class="cart-header">
           <div class="cart-header-top">
-            <div>
-              <p class="cart-eyebrow">Point of Sale</p>
+            <div class="cart-title-wrap">
               <h2 class="cart-title">Current Sale</h2>
+              <span class="cart-badge">{{ cart.length }} item{{ cart.length !== 1 ? 's' : '' }}</span>
             </div>
             <div class="cart-header-top-right">
-              <div class="cart-badge">
-                {{ cart.length }} item{{ cart.length !== 1 ? 's' : '' }}
-              </div>
+              <button v-if="cart.length > 0 || services.length > 0" type="button" class="cart-clear-link" @click="clearCart">
+                <i class="fa-solid fa-trash-can"></i> Clear
+              </button>
               <button v-if="isMobile" class="cart-drawer-close" @click="cartOpen = false" aria-label="Close cart">
                 <i class="fa-solid fa-chevron-down"></i>
               </button>
@@ -240,6 +315,7 @@
                 type="text"
                 placeholder="Customer name (required)"
                 class="customer-input"
+                :class="{ 'customer-input--error': customerMissing }"
                 autocomplete="off"
                 @input="onCustomerInput"
                 @focus="onCustomerFocus"
@@ -299,10 +375,11 @@
               @click="toggleCustomerList"
               class="customer-gen-btn"
               title="Show repeat buyers"
+              aria-label="Show repeat buyers"
             >
               <i class="fa-solid fa-users"></i>
             </button>
-            <button @click="generateCustomerName" class="customer-gen-btn" title="Walk-in name (not tracked)">
+            <button @click="generateCustomerName" class="customer-gen-btn" title="Walk-in name (not tracked)" aria-label="Generate walk-in name">
               <i class="fa-solid fa-wand-magic-sparkles"></i>
             </button>
           </div>
@@ -320,69 +397,120 @@
           </div>
         </div>
 
+        <!-- Cart lines — the ONLY part of the panel that scrolls -->
         <div class="cart-items">
-          <div v-if="cart.length === 0" class="cart-empty">
+          <div v-if="cart.length === 0 && services.length === 0" class="cart-empty">
             <i class="fa-solid fa-cart-shopping"></i>
             <p>Cart is empty</p>
-            <span>Click a product to add it</span>
+            <span>Tap a product to add it</span>
           </div>
-          <div v-for="(item, idx) in cart" :key="item.key" class="cart-item">
-            <div class="cart-item-index">{{ idx + 1 }}</div>
+
+          <div v-for="item in cart" :key="item.key" class="cart-item">
             <div class="cart-item-body">
-              <p class="cart-item-name">{{ item.name }}</p>
-              <p class="cart-item-meta">{{ item.qty }} × ₱{{ item.price.toFixed(2) }}</p>
+              <p class="cart-item-name" :title="lineName(item)">{{ lineName(item) }}</p>
+              <div class="cart-item-sub">
+                <span class="cart-item-sub-price">₱{{ item.price.toFixed(2) }} each</span>
+                <!-- Leftover lines have no sizes to re-pick, so no edit pencil -->
+                <button v-if="item.origPrice == null && !item.remnantId" @click="editCartItem(item)" class="cart-item-edit" title="Edit sizes & quantity" aria-label="Edit line">
+                  <i class="fa-solid fa-pen"></i>
+                </button>
+                <button @click="openAdjustModal(item)" class="cart-item-edit" :title="item.remnantId ? 'Change price' : 'Cut piece / change price'" aria-label="Cut piece or change price">
+                  <i class="fa-solid fa-tag"></i>
+                </button>
+                <button @click="removeFromCart(item.key)" class="cart-item-del" title="Remove line" aria-label="Remove line">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+              <p v-if="item.origPrice != null" class="cart-item-adj">
+                {{ item.cut ? 'Cut piece' : 'Custom price' }} · list ₱{{ item.origPrice.toFixed(2) }}
+              </p>
             </div>
-            <div class="cart-item-qty-mini">
-              <button class="cart-item-qty-btn" @click="decrementLine(item)" title="Decrease"><i class="fa-solid fa-minus"></i></button>
-              <span class="cart-item-qty-val">{{ item.qty }}</span>
-              <button class="cart-item-qty-btn" @click="incrementLine(item)" title="Increase"><i class="fa-solid fa-plus"></i></button>
-            </div>
+
             <div class="cart-item-right">
               <span class="cart-item-total">₱{{ (item.qty * item.price).toFixed(2) }}</span>
-              <button @click="editCartItem(item)" class="cart-item-edit" title="Edit">
-                <i class="fa-solid fa-pen"></i>
-              </button>
-              <button @click="removeFromCart(item.key)" class="cart-item-del" title="Remove line">
-                <i class="fa-solid fa-trash-can"></i>
-              </button>
+              <div class="cart-item-qty-mini">
+                <button class="cart-item-qty-btn" @click="decrementLine(item)" title="Decrease" aria-label="Decrease quantity"><i class="fa-solid fa-minus"></i></button>
+                <span class="cart-item-qty-val">{{ item.qty }}</span>
+                <button class="cart-item-qty-btn" @click="incrementLine(item)" title="Increase" aria-label="Increase quantity"><i class="fa-solid fa-plus"></i></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Service fees (labour) — shown at the bottom of the scrolling list -->
+          <div v-for="svc in services" :key="svc.id" class="cart-item cart-item--service">
+            <div class="cart-item-body">
+              <p class="cart-item-name" :title="svc.name"><i class="fa-solid fa-screwdriver-wrench svc-line-icon"></i>{{ svc.name }}</p>
+              <div class="cart-item-sub">
+                <span class="cart-item-sub-price">{{ svc.workerName ? `${svc.workerName} · ₱${svc.workerAmount.toFixed(2)}` : 'Service fee' }}</span>
+                <button @click="openServiceModal(svc)" class="cart-item-edit" title="Edit service" aria-label="Edit service"><i class="fa-solid fa-pen"></i></button>
+                <button @click="removeService(svc.id)" class="cart-item-del" title="Remove service" aria-label="Remove service"><i class="fa-solid fa-trash-can"></i></button>
+              </div>
+            </div>
+            <div class="cart-item-right">
+              <span class="cart-item-total">₱{{ svc.fee.toFixed(2) }}</span>
             </div>
           </div>
         </div>
 
+        <!-- Add extra service -->
+        <div class="cart-service-bar">
+          <button type="button" class="cart-service-btn" @click="openServiceModal()">
+            <i class="fa-solid fa-screwdriver-wrench"></i> Add extra service
+          </button>
+        </div>
+
+        <!-- Compact summary — Total and the pay button stay prominent -->
         <div class="cart-summary">
-          <div class="summary-rows">
-            <div class="summary-row">
-              <span>Subtotal</span><span>₱{{ subtotal.toFixed(2) }}</span>
-            </div>
-            <div class="summary-row">
-              <span>Discount</span>
-              <div class="discount-controls">
-                <input v-model.number="discountValue" type="number" min="0" class="discount-input" />
-                <div class="discount-type">
-                  <button class="dtype-btn" :class="{ 'dtype-btn--active': discountType === '%' }" @click="discountType = '%'">%</button>
-                  <button class="dtype-btn" :class="{ 'dtype-btn--active': discountType === 'PHP' }" @click="discountType = 'PHP'">₱</button>
-                </div>
+          <div class="summary-line">
+            <span>Subtotal</span>
+            <span>₱{{ subtotal.toFixed(2) }}</span>
+          </div>
+
+          <div class="summary-line">
+            <span>
+              Discount
+              <em v-if="discountAmount > 0" class="summary-saving">− ₱{{ discountAmount.toFixed(2) }}</em>
+            </span>
+            <div class="discount-controls">
+              <input v-model.number="discountValue" type="number" min="0" class="discount-input" aria-label="Discount value" />
+              <div class="discount-type">
+                <button class="dtype-btn" :class="{ 'dtype-btn--active': discountType === '%' }" @click="discountType = '%'">%</button>
+                <button class="dtype-btn" :class="{ 'dtype-btn--active': discountType === 'PHP' }" @click="discountType = 'PHP'">₱</button>
               </div>
             </div>
-            <div class="summary-row">
-              <span>VATable Sales</span><span>₱{{ vatableSales.toFixed(2) }}</span>
-            </div>
-            <div class="summary-row">
-              <span>VAT (12% Included)</span><span>₱{{ vat.toFixed(2) }}</span>
-            </div>
           </div>
+
+          <button
+            type="button"
+            class="summary-toggle"
+            :class="{ 'summary-toggle--open': showTaxDetails }"
+            :aria-expanded="showTaxDetails"
+            @click="showTaxDetails = !showTaxDetails"
+          >
+            <span>VAT details</span>
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+          <div v-if="showTaxDetails" class="summary-tax">
+            <div class="summary-line"><span>VATable Sales</span><span>₱{{ vatableSales.toFixed(2) }}</span></div>
+            <div class="summary-line"><span>VAT (12% included)</span><span>₱{{ vat.toFixed(2) }}</span></div>
+          </div>
+
+          <div v-if="serviceTotal > 0" class="summary-line">
+            <span>Service fee</span>
+            <span>₱{{ serviceTotal.toFixed(2) }}</span>
+          </div>
+
           <div class="summary-total">
             <span>Total</span>
             <span class="summary-total-val">₱{{ total.toFixed(2) }}</span>
           </div>
-          <p v-if="checkoutError" class="checkout-error">{{ checkoutError }}</p>
-          <button @click="openCashModal" class="pay-btn" :disabled="isProcessing || cart.length === 0 || total <= 0">
+
+          <p v-if="checkoutError" class="checkout-error" role="alert">{{ checkoutError }}</p>
+
+          <button @click="openCashModal" class="pay-btn" :disabled="isProcessing || (cart.length === 0 && services.length === 0) || total <= 0">
             <i v-if="!isProcessing" class="fa-solid fa-cash-register"></i>
             <i v-else class="fa-solid fa-spinner fa-spin"></i>
             {{ isProcessing ? 'Processing…' : 'Process Payment' }}
-          </button>
-          <button v-if="cart.length > 0" @click="clearCart" class="clear-btn">
-            <i class="fa-solid fa-trash"></i> Clear Cart
           </button>
         </div>
       </div>
@@ -392,14 +520,11 @@
         <div v-if="isMobile && cartOpen" class="cart-backdrop" @click="cartOpen = false" aria-hidden="true" />
       </transition>
 
-      <!-- MOBILE CART BAR — persistent summary + drawer toggle, only
-           rendered below the stacked-layout breakpoint. Hidden while the
-           drawer itself is open (the drawer's own close button/backdrop
-           take over at that point). -->
+      <!-- MOBILE CART BAR — persistent summary + drawer toggle -->
       <button v-if="isMobile && !cartOpen" class="mobile-cart-bar" @click="cartOpen = true">
         <span class="mobile-cart-bar-icon">
           <i class="fa-solid fa-cart-shopping"></i>
-          <span v-if="cart.length" class="mobile-cart-bar-badge">{{ cart.length }}</span>
+          <span v-if="cartCount" class="mobile-cart-bar-badge">{{ cartCount }}</span>
         </span>
         <span class="mobile-cart-bar-total">₱{{ total.toFixed(2) }}</span>
         <span class="mobile-cart-bar-cta">View Cart <i class="fa-solid fa-chevron-up"></i></span>
@@ -407,72 +532,36 @@
     </div>
 
     <!-- ══ QUANTITY MODAL ══
-         Teleported to <body> so it can never inherit opacity/filter/transform
-         from an ancestor (e.g. Layout's <main> wrapper). Scoped styles still
-         apply to teleported content, BUT this element is no longer a
-         descendant of .pos-root in the real DOM once teleported — so any
-         CSS custom property only *defined* on .pos-root (the --p-* bridge
-         tokens) is undefined here. Every rule inside this modal (and the
-         cash modal below) references --c-* tokens directly with an inline
-         fallback instead, so it never depends on .pos-root being an
-         ancestor. See the style block for the full explanation. -->
+         Teleported to <body>. Every rule inside this modal (and the cash
+         modal below) references --c-* tokens directly with an inline
+         fallback, since the --p-* bridge tokens only exist on .pos-root.
+
+         One table: every size is a row with its own quantity stepper.
+         Any row with a quantity above 0 is added to the cart together. -->
     <Teleport to="body">
     <transition name="modal-fade">
       <div v-if="showQtyModal" class="modal-backdrop" @click.self="closeQtyModal" @keydown.esc="closeQtyModal">
-        <div class="modal">
+        <div class="modal modal--wide" role="dialog" aria-modal="true">
+
           <div class="modal-header">
-            <div>
-              <p class="modal-eyebrow">{{ editingKey ? 'Edit Cart Line' : 'Add to Cart' }}</p>
-              <h3 class="modal-title">{{ selectedProduct?.name }}</h3>
-            </div>
-            <button class="modal-close" @click="closeQtyModal"><i class="fa-solid fa-xmark"></i></button>
-          </div>
-          <div class="modal-body">
-            <div class="modal-product-card">
-              <div class="modal-product-img">
+            <div class="modal-head-left">
+              <div class="modal-thumb">
                 <img v-if="selectedProduct?.image" :src="selectedProduct.image" alt="" />
-                <div v-else class="modal-product-img-placeholder"><i class="fa-solid fa-cube"></i></div>
+                <i v-else class="fa-solid fa-cube"></i>
               </div>
-              <div class="modal-product-info">
-                <p class="modal-product-name">{{ selectedProduct?.name }}</p>
-                <p class="modal-product-price">₱{{ basePrice.toFixed(2) }} <span>{{ selectedVariant ? selectedVariant.label : 'base price' }}</span></p>
-              </div>
-            </div>
-
-            <!-- SIZE & PRICE DROPDOWN — built from the sizes entered in ProductCreate -->
-            <div v-if="selectedProduct?.variants?.length" class="modal-section">
-              <p class="modal-section-label">Size &amp; Price</p>
-              <div class="variant-select-wrap">
-                <select v-model="selectedVariantId" class="variant-select">
-                  <option v-for="v in selectedProduct.variants" :key="v.id" :value="v.id">
-                    {{ v.label }} — ₱{{ v.price.toFixed(2) }}
-                  </option>
-                </select>
-                <i class="fa-solid fa-chevron-down variant-select-caret"></i>
+              <div>
+                <p class="modal-eyebrow">{{ editingKey ? 'Edit Cart Line' : 'Add to Cart' }}</p>
+                <h3 class="modal-title">{{ selectedProduct?.name }}</h3>
               </div>
             </div>
+            <button class="modal-close" @click="closeQtyModal" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+          </div>
 
-            <div class="modal-stats modal-stats--2col">
-              <div class="modal-stat modal-stat--icon">
-                <span class="modal-stat-icon" :class="{ 'modal-stat-icon--red': availableStock < 5 }">
-                  <i class="fa-solid fa-boxes-stacked"></i>
-                </span>
-                <div>
-                  <span class="modal-stat-label">Available</span>
-                  <span class="modal-stat-val" :class="{ 'val--red': availableStock < 5, 'val--amber': availableStock >= 5 && availableStock < 15 }">{{ availableStock }}</span>
-                </div>
-              </div>
-              <div class="modal-stat modal-stat--icon">
-                <span class="modal-stat-icon"><i class="fa-solid fa-cart-shopping"></i></span>
-                <div>
-                  <span class="modal-stat-label">Already in Cart</span>
-                  <span class="modal-stat-val">{{ inCart(selectedProduct?.id, editingKey) }}</span>
-                </div>
-              </div>
-            </div>
+          <div class="modal-body">
 
+            <!-- CUT DIMENSIONS (sqm products only) -->
             <div v-if="isSqm" class="modal-section">
-              <p class="modal-section-label">Cut Dimensions <span class="modal-section-hint">({{ selectedProduct.minDimension }}m – {{ selectedProduct.maxDimension }}m)</span></p>
+              <p class="modal-section-label">Cut Dimensions <span class="modal-section-hint">({{ selectedProduct.minDimension }}m – {{ selectedProduct.maxDimension }}m, applies to all selected sizes)</span></p>
               <div class="cut-grid">
                 <div class="cut-field">
                   <label>Length (m)</label>
@@ -484,34 +573,91 @@
                 </div>
               </div>
               <div class="cut-result">
-                <div class="cut-result-item">
-                  <span>Area</span><strong>{{ cutArea.toFixed(2) }} sqm</strong>
-                </div>
-                <div class="cut-result-item cut-result-item--price">
-                  <span>Adjusted Price</span><strong>₱{{ unitPrice.toFixed(2) }}</strong>
-                </div>
+                <div class="cut-result-item"><span>Area</span><strong>{{ cutArea.toFixed(2) }} sqm</strong></div>
+                <div class="cut-result-item cut-result-item--price"><span>Cut piece = price × area</span><strong>per size below</strong></div>
               </div>
             </div>
 
+            <!-- SIZES + QUANTITIES -->
             <div class="modal-section">
-              <p class="modal-section-label">Quantity</p>
-              <div class="qty-row">
-                <button class="qty-btn" @click="qty = Math.max(1, qty - 1)"><i class="fa-solid fa-minus"></i></button>
-                <input v-model.number="qty" type="number" min="1" :max="availableStock" class="qty-input" />
-                <button class="qty-btn" @click="qty = Math.min(availableStock, qty + 1)"><i class="fa-solid fa-plus"></i></button>
+              <div class="size-toolbar">
+                <p class="modal-section-label">
+                  {{ modalHasSizes ? 'Select sizes & quantities' : 'Quantity' }}
+                  <span v-if="modalHasSizes" class="modal-section-hint">
+                    {{ selectedProduct.variants.length }} sizes · {{ sellableVariantCount }} available
+                  </span>
+                </p>
+                <button v-if="selectedRows.length" type="button" class="link-btn" @click="clearDraft">Clear all</button>
               </div>
+
+              <div v-if="modalHasSizes && selectedProduct.variants.length > 6" class="variant-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input v-model="variantSearch" type="text" placeholder="Find a size…" aria-label="Find a size" />
+                <button v-if="variantSearch" type="button" @click="variantSearch = ''" aria-label="Clear"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+
+              <div class="vtable">
+                <div class="vhead">
+                  <span>{{ modalHasSizes ? 'Size' : 'Item' }}</span>
+                  <span>Availability</span>
+                  <span>Quantity</span>
+                  <span>Amount</span>
+                </div>
+
+                <div
+                  v-for="v in modalVariants" :key="rowKey(v)"
+                  class="vrow"
+                  :class="{
+                    'vrow--active': rowQty(v) > 0,
+                    'vrow--low': rowStatus(v) === 'low',
+                    'vrow--oos': rowStatus(v) === 'oos',
+                    'vrow--off': maxQtyFor(v) <= 0
+                  }"
+                >
+                  <div class="vrow-main">
+                    <span class="vrow-label">{{ v.label }}</span>
+                    <span class="vrow-price">₱{{ unitPriceFor(v).toFixed(2) }}</span>
+                  </div>
+
+                  <span class="vrow-stock">{{ variantStockText(selectedProduct, v, editingKey) }}</span>
+
+                  <div class="vstep">
+                    <button type="button" class="vstep-btn" :disabled="rowQty(v) <= 0" @click="stepRow(v, -1)" aria-label="Decrease">
+                      <i class="fa-solid fa-minus"></i>
+                    </button>
+                    <input
+                      type="number" inputmode="numeric" min="0" :max="maxQtyFor(v)"
+                      class="vstep-input" placeholder="0"
+                      :value="rowQty(v) || ''"
+                      :disabled="maxQtyFor(v) <= 0"
+                      :aria-label="`Quantity for ${v.label}`"
+                      @focus="$event.target.select()"
+                      @input="onQtyInput(v, $event)"
+                    />
+                    <button type="button" class="vstep-btn" :disabled="rowQty(v) >= maxQtyFor(v)" @click="stepRow(v, 1)" aria-label="Increase">
+                      <i class="fa-solid fa-plus"></i>
+                    </button>
+                  </div>
+
+                  <span class="vrow-amt">{{ rowQty(v) > 0 ? '₱' + (rowQty(v) * unitPriceFor(v)).toFixed(2) : '—' }}</span>
+                </div>
+
+                <p v-if="!modalVariants.length" class="variant-none">No size matches "{{ variantSearch }}"</p>
+              </div>
+
               <p v-if="modalError" class="modal-error"><i class="fa-solid fa-circle-exclamation"></i> {{ modalError }}</p>
             </div>
           </div>
 
-          <div class="modal-line-total-bar">
-            <span>Line Total</span>
-            <strong>₱{{ (unitPrice * qty).toFixed(2) }}</strong>
-          </div>
-
-          <div class="modal-footer">
-            <button class="modal-cancel" @click="closeQtyModal">Cancel</button>
-            <button class="modal-confirm" @click="addToCart" :disabled="availableStock <= 0">
+          <div class="modal-footer modal-footer--summary">
+            <div class="modal-summary">
+              <span class="modal-summary-meta">
+                {{ selectedRows.length }} size{{ selectedRows.length === 1 ? '' : 's' }} · {{ totalUnits }} unit{{ totalUnits === 1 ? '' : 's' }}
+              </span>
+              <strong class="modal-summary-total">₱{{ modalTotal.toFixed(2) }}</strong>
+            </div>
+            <button class="modal-cancel modal-cancel--fit" @click="closeQtyModal">Cancel</button>
+            <button class="modal-confirm modal-confirm--fit" @click="addToCart" :disabled="!canSubmitModal">
               <i class="fa-solid fa-cart-plus"></i> {{ editingKey ? 'Update Line' : 'Add to Cart' }}
             </button>
           </div>
@@ -524,13 +670,13 @@
     <Teleport to="body">
     <transition name="modal-fade">
       <div v-if="showCashModal" class="modal-backdrop" @click.self="closeCashModal" @keydown.esc="closeCashModal" @keydown.enter="completePayment">
-        <div class="modal modal--narrow">
+        <div class="modal modal--narrow" role="dialog" aria-modal="true">
           <div class="modal-header">
             <div>
               <p class="modal-eyebrow">Checkout</p>
               <h3 class="modal-title">Cash Payment</h3>
             </div>
-            <button class="modal-close" @click="closeCashModal"><i class="fa-solid fa-xmark"></i></button>
+            <button class="modal-close" @click="closeCashModal" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <div class="modal-body">
             <div class="pay-summary">
@@ -540,6 +686,7 @@
               </div>
               <div class="pay-summary-row"><span>VATable Sales</span><span>₱{{ vatableSales.toFixed(2) }}</span></div>
               <div class="pay-summary-row"><span>VAT (12% Included)</span><span>₱{{ vat.toFixed(2) }}</span></div>
+              <div v-if="serviceTotal > 0" class="pay-summary-row"><span>Service Fee</span><span>₱{{ serviceTotal.toFixed(2) }}</span></div>
               <div class="pay-summary-total"><span>Total Due</span><span>₱{{ total.toFixed(2) }}</span></div>
             </div>
             <div class="modal-section">
@@ -547,6 +694,7 @@
               <div class="amount-input-wrap">
                 <span class="amount-prefix">₱</span>
                 <input
+                  ref="amountInput"
                   v-model.number="amountReceived"
                   type="number" min="0"
                   class="amount-input"
@@ -555,6 +703,7 @@
                 />
               </div>
               <div class="quick-amounts">
+                <button class="quick-amt-btn" @click="amountReceived = total">Exact</button>
                 <button v-for="amt in quickAmounts" :key="amt" class="quick-amt-btn" @click="amountReceived = amt">
                   ₱{{ amt.toLocaleString() }}
                 </button>
@@ -563,7 +712,9 @@
             <div class="change-row" :class="{ 'change-row--ready': amountReceivedNum >= total }">
               <div>
                 <p class="change-label">Change</p>
-                <p class="change-sub">{{ amountReceivedNum >= total ? 'Ready to process' : 'Insufficient amount' }}</p>
+                <p class="change-sub">
+                  {{ amountReceivedNum >= total ? 'Ready to process' : `Short by ₱${(total - amountReceivedNum).toFixed(2)}` }}
+                </p>
               </div>
               <span class="change-val">₱{{ change.toFixed(2) }}</span>
             </div>
@@ -575,6 +726,200 @@
               <i v-if="isProcessing" class="fa-solid fa-spinner fa-spin"></i>
               <i v-else class="fa-solid fa-check"></i>
               {{ isProcessing ? 'Processing…' : 'Complete Payment' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+    </Teleport>
+
+    <!-- ══ CUT PIECE / CUSTOM PRICE MODAL ══ -->
+    <Teleport to="body">
+    <transition name="modal-fade">
+      <div v-if="showAdjModal && adjItem" class="modal-backdrop" @click.self="closeAdjModal" @keydown.esc="closeAdjModal">
+        <div class="modal modal--adjust" role="dialog" aria-modal="true">
+          <div class="modal-header">
+            <div>
+              <p class="modal-eyebrow">Adjust line</p>
+              <h3 class="modal-title">{{ adjItem.name }}</h3>
+            </div>
+            <button class="modal-close" @click="closeAdjModal" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          <div class="modal-body">
+            <!-- Leftover pieces are already cut, so they only get a custom price -->
+            <div v-if="!adjIsSqm && !adjItem.remnantId" class="adj-tabs" role="tablist">
+              <button type="button" role="tab" :aria-selected="adjMode === 'cut'" :class="{ 'is-active': adjMode === 'cut' }" @click="setAdjMode('cut')">Sell a cut piece</button>
+              <button type="button" role="tab" :aria-selected="adjMode === 'price'" :class="{ 'is-active': adjMode === 'price' }" @click="setAdjMode('price')">Custom price</button>
+            </div>
+
+            <!-- CUT PIECE -->
+            <template v-if="adjMode === 'cut'">
+              <div class="cut-grid">
+                <div class="cut-field">
+                  <label for="adj-full">Full piece length</label>
+                  <input id="adj-full" ref="adjFullInput" v-model.number="adjFull" type="number" min="0" step="0.01" placeholder="e.g. 8" />
+                </div>
+                <div class="cut-field">
+                  <label for="adj-sold">Length sold</label>
+                  <input id="adj-sold" v-model.number="adjSold" type="number" min="0" step="0.01" placeholder="e.g. 3" />
+                </div>
+              </div>
+              <div class="svc-chips" role="group" aria-label="Length unit">
+                <button v-for="u in CUT_UNITS" :key="u" type="button" class="svc-chip" :class="{ 'svc-chip--on': adjUnit === u }" @click="adjUnit = u">{{ u }}</button>
+              </div>
+              <div v-if="adjRemainder != null" class="adj-remainder">
+                <i class="fa-solid fa-scissors"></i>
+                <span>
+                  <strong>{{ fmtLen(adjRemainder) }} {{ adjUnit }}</strong> will be left over and saved as a remnant for later sale.
+                </span>
+              </div>
+            </template>
+
+            <!-- CUSTOM PRICE REASON -->
+            <div v-else class="modal-section">
+              <div class="cut-field">
+                <label for="adj-reason">Reason for the price change{{ adjItem.remnantId ? ' (optional)' : '' }}</label>
+                <input id="adj-reason" v-model="adjReason" type="text" maxlength="80" placeholder="e.g. Negotiated" autocomplete="off" />
+              </div>
+              <div class="svc-chips">
+                <button v-for="r in PRICE_REASONS" :key="r" type="button" class="svc-chip" :class="{ 'svc-chip--on': adjReason === r }" @click="adjReason = r">{{ r }}</button>
+              </div>
+            </div>
+
+            <div class="modal-section">
+              <div class="size-toolbar">
+                <label class="modal-section-label" for="adj-price">{{ adjMode === 'cut' ? 'Price for this cut (₱ each)' : 'New price (₱ each)' }}</label>
+                <button v-if="adjMode === 'cut' && adjSuggested != null && Number(adjPrice) !== adjSuggested" type="button" class="link-btn" @click="adjPrice = adjSuggested; adjTouched = false">
+                  Use suggested ₱{{ adjSuggested.toFixed(2) }}
+                </button>
+                <button
+                  v-if="adjItem.remnantId && adjItem.baseline != null && Number(adjPrice) !== adjItem.baseline"
+                  type="button" class="link-btn"
+                  @click="adjPrice = adjItem.baseline"
+                >
+                  Use baseline ₱{{ adjItem.baseline.toFixed(2) }}
+                </button>
+              </div>
+              <div class="amount-input-wrap">
+                <span class="amount-prefix">₱</span>
+                <input id="adj-price" v-model.number="adjPrice" type="number" min="0" step="0.01" class="amount-input adj-price-input" placeholder="0.00" @input="adjTouched = true" @keydown.enter.prevent="applyAdjustment" />
+              </div>
+              <p v-if="adjMode === 'cut' && adjSuggested != null" class="svc-note">
+                Suggested price is the same share of the list price ({{ Math.round((Number(adjSold) / Number(adjFull)) * 100) }}% of ₱{{ adjListPrice.toFixed(2) }}). Change it if you charge extra for cutting.
+              </p>
+              <p v-if="adjItem.remnantId && adjItem.baseline != null" class="svc-note">
+                Baseline = list price of the uncut piece minus what the cut was sold for. You can change it.
+              </p>
+            </div>
+
+            <div class="pay-summary">
+              <div class="pay-summary-row"><span>{{ adjItem.remnantId ? 'Baseline price' : 'List price' }}</span><span>₱{{ adjListPrice.toFixed(2) }}</span></div>
+              <div class="pay-summary-row"><span>Price now</span><span>₱{{ (Number(adjPrice) || 0).toFixed(2) }}</span></div>
+              <div class="pay-summary-total"><span>Line total · {{ adjItem.qty }} {{ adjMode === 'cut' ? 'cut' : 'pc' }}{{ adjItem.qty === 1 ? '' : 's' }}</span><span>₱{{ ((Number(adjPrice) || 0) * adjItem.qty).toFixed(2) }}</span></div>
+            </div>
+
+            <p v-if="adjError" class="modal-error"><i class="fa-solid fa-circle-exclamation"></i> {{ adjError }}</p>
+          </div>
+
+          <div class="modal-footer">
+            <button v-if="adjItem.origPrice != null" type="button" class="link-btn adj-reset" @click="resetAdjustment">Reset to list price</button>
+            <button class="modal-cancel" @click="closeAdjModal">Cancel</button>
+            <button class="modal-confirm" @click="applyAdjustment"><i class="fa-solid fa-check"></i> Apply</button>
+          </div>
+        </div>
+      </div>
+    </transition>
+    </Teleport>
+
+    <!-- ══ EXTRA SERVICE MODAL ══ -->
+    <Teleport to="body">
+    <transition name="modal-fade">
+      <div v-if="showServiceModal" class="modal-backdrop" @click.self="closeServiceModal" @keydown.esc="closeServiceModal">
+        <div class="modal modal--service" role="dialog" aria-modal="true">
+          <div class="modal-header">
+            <div>
+              <p class="modal-eyebrow">{{ editingServiceId ? 'Edit Service' : 'Extra Service' }}</p>
+              <h3 class="modal-title">Service fee</h3>
+            </div>
+            <button class="modal-close" @click="closeServiceModal" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          <div class="modal-body">
+            <div class="modal-section">
+              <div class="cut-field">
+                <label for="svc-name">Service</label>
+                <input id="svc-name" ref="svcNameInput" v-model="svcName" type="text" maxlength="80" placeholder="e.g. Roof installation" autocomplete="off" />
+              </div>
+              <div class="svc-chips">
+                <button v-for="p in SERVICE_PRESETS" :key="p" type="button" class="svc-chip" @click="svcName = p">{{ p }}</button>
+              </div>
+            </div>
+
+            <div class="cut-grid">
+              <div class="cut-field">
+                <label for="svc-fee">Service fee charged (₱)</label>
+                <input id="svc-fee" v-model.number="svcFee" type="number" min="0" step="0.01" placeholder="0.00" @keydown.enter.prevent="saveService" />
+              </div>
+              <div class="cut-field">
+                <label for="svc-worker">Worker</label>
+                <input id="svc-worker" v-model="svcWorker" type="text" maxlength="60" placeholder="Who did the work?" autocomplete="off" @keydown.enter.prevent="saveService" />
+              </div>
+            </div>
+
+            <div class="modal-section">
+              <div class="size-toolbar">
+                <p class="modal-section-label">Worker's share</p>
+                <div class="svc-seg" role="group" aria-label="Share type">
+                  <button type="button" :class="{ 'is-active': svcShareType === '%' }" @click="setShareType('%')">%</button>
+                  <button type="button" :class="{ 'is-active': svcShareType === 'PHP' }" @click="setShareType('PHP')">₱</button>
+                </div>
+              </div>
+              <div class="svc-share-row">
+                <input v-model.number="svcShareValue" type="number" min="0" :max="svcShareType === '%' ? 100 : undefined" class="svc-share-input" aria-label="Worker share" @keydown.enter.prevent="saveService" />
+                <div v-if="svcShareType === '%'" class="svc-chips">
+                  <button v-for="n in [50, 60, 70, 80]" :key="n" type="button" class="svc-chip" :class="{ 'svc-chip--on': Number(svcShareValue) === n }" @click="svcShareValue = n">{{ n }}%</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="pay-summary">
+              <div class="pay-summary-row"><span>Customer pays</span><span>₱{{ svcSplit.fee.toFixed(2) }}</span></div>
+              <div class="pay-summary-row"><span>Worker{{ svcWorker.trim() ? ` (${svcWorker.trim()})` : '' }}</span><span>− ₱{{ svcSplit.worker.toFixed(2) }}</span></div>
+              <div class="pay-summary-total"><span>Shop keeps</span><span class="svc-owner-val">₱{{ svcSplit.owner.toFixed(2) }}</span></div>
+            </div>
+            <p class="svc-note">The customer's receipt shows the full fee. Only the shop's share counts toward sales and profit.</p>
+
+            <p v-if="svcError" class="modal-error"><i class="fa-solid fa-circle-exclamation"></i> {{ svcError }}</p>
+          </div>
+
+          <div class="modal-footer">
+            <button class="modal-cancel" @click="closeServiceModal">Cancel</button>
+            <button class="modal-confirm" @click="saveService">
+              <i class="fa-solid fa-check"></i> {{ editingServiceId ? 'Update service' : 'Add service' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+    </Teleport>
+
+    <!-- ══ CLEAR CART CONFIRMATION ══ -->
+    <Teleport to="body">
+    <transition name="modal-fade">
+      <div v-if="showClearModal" class="modal-backdrop" @click.self="closeClearModal" @keydown.esc="closeClearModal">
+        <div class="modal modal--confirm" role="alertdialog" aria-modal="true" aria-labelledby="clear-title" aria-describedby="clear-desc">
+          <div class="confirm-body">
+            <div class="confirm-icon"><i class="fa-solid fa-trash-can"></i></div>
+            <h3 id="clear-title" class="confirm-title">Clear this sale?</h3>
+            <p id="clear-desc" class="confirm-text">
+              {{ clearSummary }}
+            </p>
+          </div>
+          <div class="modal-footer confirm-footer">
+            <button ref="clearKeepBtn" type="button" class="modal-cancel" @click="closeClearModal">Keep items</button>
+            <button type="button" class="modal-confirm modal-confirm--danger" @click="confirmClearCart">
+              <i class="fa-solid fa-trash-can"></i> Clear cart
             </button>
           </div>
         </div>
@@ -609,6 +954,16 @@
       </div>
     </div>
 
+    <template v-if="receiptData.services?.length">
+      <div class="r-divider"></div>
+      <div class="r-items">
+        <div v-for="(sv, i) in receiptData.services" :key="'sv' + i" class="r-item">
+          <div class="r-item-name">{{ sv.name }}</div>
+          <div class="r-item-line"><span>Service fee</span><span>₱{{ sv.fee.toFixed(2) }}</span></div>
+        </div>
+      </div>
+    </template>
+
     <div class="r-divider"></div>
 
     <div class="r-totals">
@@ -616,6 +971,7 @@
       <div class="r-row"><span>Discount</span><span>- ₱{{ receiptData.discount.toFixed(2) }}</span></div>
       <div class="r-row"><span>VATable Sales</span><span>₱{{ receiptData.vatableSales.toFixed(2) }}</span></div>
       <div class="r-row"><span>VAT (12% Incl.)</span><span>₱{{ receiptData.vat.toFixed(2) }}</span></div>
+      <div v-if="receiptData.serviceTotal > 0" class="r-row"><span>Service Fee</span><span>₱{{ receiptData.serviceTotal.toFixed(2) }}</span></div>
     </div>
 
     <div class="r-divider r-divider--solid"></div>
@@ -651,7 +1007,6 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
    CONSTANTS
 ──────────────────────────────────────────────────────────── */
 // Prices are VAT-INCLUSIVE (already contain 12% Philippine VAT).
-// VAT is therefore extracted from the gross amount, never added on top:
 //   Gross Amount = Subtotal - Discount
 //   VATable Sales = Gross Amount / 1.12
 //   VAT           = Gross Amount - VATable Sales
@@ -662,9 +1017,6 @@ const MIN_DIM = 0.1
 const MAX_DIM = 50
 const BARCODE_DUPLICATE_WINDOW_MS = 1200
 const SCAN_DEBOUNCE_MS = 300
-// Hardware (keyboard-wedge) scanners fire keystrokes only a few ms apart.
-// Anything slower than this is treated as a human typing manually, who
-// should never be auto-submitted — only Enter submits for them.
 const SCANNER_KEY_INTERVAL_MS = 60
 const SCANNER_MESSAGE_TIMEOUT_MS = 3000
 const FLASH_DURATION_MS = 900
@@ -681,10 +1033,30 @@ const CAMERA_FORMATS = [
   Html5QrcodeSupportedFormats.ITF,
 ]
 // Sort priority for the product grid: In Stock first, Low Stock next,
-// Out of Stock last. Keyed to the same thresholds used by
-// stockBadgeClass/stockBadgeLabel so the badge shown always matches the
-// section the card is sorted into.
+// Out of Stock last.
 const STOCK_SORT_PRIORITY = { ok: 0, low: 1, oos: 2 }
+
+// ── LOW-STOCK RULES (same as the server: StockService) ──
+// A size is "low" at or below its own ReorderLevel, or at or below 5 when
+// no reorder level was set.
+const LOW_STOCK_DEFAULT = 5
+// true  = a LOW size cannot be selected or sold (must be restocked first).
+// false = low sizes show a warning badge but can still be sold.
+const BLOCK_LOW_STOCK_SALES = true
+
+// ── EXTRA SERVICES (labour) ──
+// The customer pays the FULL service fee. The worker's share is a pass-through
+// (paid out to the worker); only the shop's share is shop revenue/profit.
+// Service fees are kept OUTSIDE the VAT computation of the products.
+// Confirm the VAT treatment of labour with your accountant.
+// ── CUT PIECES & CUSTOM PRICES ──
+// A cut sells part of ONE whole piece. The whole piece leaves normal stock and the
+// leftover length is recorded as a remnant by the server (not counted as a full piece).
+const CUT_UNITS = ['ft', 'm', 'in']
+const PRICE_REASONS = ['Negotiated', 'Bulk deal', 'Damaged', 'Remnant']
+const REQUIRE_PRICE_REASON = true       // a custom price must say why (not required for leftover pieces)
+const SERVICE_PRESETS = ['Installation', 'Cutting', 'Welding', 'Delivery']
+const SERVICE_DEFAULT_WORKER_PCT = 70   // default worker share (%) — change to your usual split
 
 /* ────────────────────────────────────────────────────────────
    HELPERS
@@ -700,16 +1072,18 @@ function round2(n) {
 /** Normalizes product records coming from either the product-list endpoint
  *  or the barcode-lookup endpoint into a single consistent shape.
  *
- *  SIZES & PRICES: each product carries `variants` — the sizes entered in
- *  ProductCreate (e.g. "8 ft × 3 ft × 0.40 mm") with their own selling
- *  price. The POS shows these as a dropdown. Stock is still per PRODUCT,
- *  so every size draws from the same stock count. */
+ *  SIZES, PRICES & STOCK: each product carries `variants` — the sizes
+ *  entered in ProductCreate — each with its own selling price, its own
+ *  stock and its own reorder level. The product's `stock` is the sum of
+ *  its sizes (never the stale stored total). */
 function normalizeProduct(p) {
   const pricingTypeRaw = (p.PricingType ?? p.pricing_type ?? 'piece').toString().toLowerCase()
   const variants = (p.variants ?? p.Variants ?? []).map(v => ({
     id: v.VariantID ?? v.id,
     label: v.Label ?? v.label ?? 'Standard',
     price: Number(v.SellingPrice ?? v.price ?? 0),
+    stock: Number(v.Stock ?? v.stock ?? 0),
+    reorderLevel: Number(v.ReorderLevel ?? v.reorderLevel ?? 0),
   }))
   return {
     id: p.ProductID ?? p.id,
@@ -719,7 +1093,9 @@ function normalizeProduct(p) {
     variants,
     // Fallback price for legacy products that have no variants yet.
     price: Number(variants[0]?.price ?? p.SellingPrice ?? p.price ?? 0),
-    stock: Number(p.inventory?.QuantityOnHand ?? p.Stock ?? p.stock ?? 0),
+    stock: variants.length
+      ? variants.reduce((s, v) => s + v.stock, 0)
+      : Number(p.inventory?.QuantityOnHand ?? p.Stock ?? p.stock ?? 0),
     image: p.ImageURL ?? p.image ?? null,
     category: p.CategoryID ?? p.category ?? null,
     pricingType: pricingTypeRaw === 'sqm' ? 'sqm' : 'piece',
@@ -742,6 +1118,26 @@ function cardPrice(p) {
   return min === max ? `₱${min.toFixed(2)}` : `From ₱${min.toFixed(2)}`
 }
 
+/* ── Size sorting (same rules as the inventory list) ──
+   Reads the number out of labels ("8 ft", "10 ft", "1/2 in", "2 1/2 in")
+   and knows named sizes, so "8" sorts before "10". */
+const NAMED_SIZES = { xxs:0, xs:1, s:2, small:2, m:3, medium:3, l:4, large:4, xl:5, xxl:6, xxxl:7 }
+function sizeKey(label) {
+  const s = String(label ?? '').trim().toLowerCase()
+  if (s in NAMED_SIZES) return NAMED_SIZES[s]
+  const mixed = s.match(/(\d+)\s+(\d+)\s*\/\s*(\d+)/)
+  if (mixed) return Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3])
+  const frac = s.match(/(\d+)\s*\/\s*(\d+)/)
+  if (frac) return Number(frac[1]) / Number(frac[2])
+  const num = s.match(/\d+(?:\.\d+)?/)
+  return num ? Number(num[0]) : Infinity
+}
+function compareSize(a, b) {
+  const ka = sizeKey(a.label), kb = sizeKey(b.label)
+  if (ka !== kb) return ka < kb ? -1 : 1
+  return String(a.label ?? '').localeCompare(String(b.label ?? ''), undefined, { numeric: true, sensitivity: 'base' })
+}
+
 /* ────────────────────────────────────────────────────────────
    STATE
 ──────────────────────────────────────────────────────────── */
@@ -750,8 +1146,14 @@ const categories = ref([])
 const loading    = ref(false)
 const loadError  = ref('')
 
+// Leftover (cut) pieces that can still be sold, and which tab is showing.
+const remnants     = ref([])
+const remnantError = ref('')       // set when /api/pos/remnants fails (so it isn't mistaken for "none on hand")
+const view         = ref('products')   // 'products' | 'leftovers'
+
 const search           = ref('')
 const selectedCategory = ref('')
+const availableOnly    = ref(false)   // hide products that cannot be sold right now
 
 const cart         = ref([])          // unique-keyed, already-merged cart lines
 const customerName = ref('')
@@ -771,13 +1173,40 @@ const customerFieldRef    = ref(null)   // wrapper around name input + dropdown
 
 const showQtyModal  = ref(false)
 const showCashModal = ref(false)
+const showClearModal = ref(false)
+const clearKeepBtn  = ref(null)
+
+// Extra services added to the sale
+const services          = ref([])
+const showServiceModal  = ref(false)
+const editingServiceId  = ref(null)
+const svcName           = ref('')
+const svcFee            = ref(null)
+const svcWorker         = ref('')
+const svcShareType      = ref('%')    // '%' | 'PHP'
+const svcShareValue     = ref(SERVICE_DEFAULT_WORKER_PCT)
+const svcError          = ref('')
+const svcNameInput      = ref(null)
+
+// Cut piece / custom price (edits one cart line)
+const showAdjModal = ref(false)
+const adjKey       = ref(null)
+const adjMode      = ref('cut')        // 'cut' | 'price'
+const adjFull      = ref(null)
+const adjSold      = ref(null)
+const adjUnit      = ref('ft')
+const adjPrice     = ref(null)
+const adjReason    = ref('')
+const adjTouched   = ref(false)        // true once the cashier typed their own price
+const adjError     = ref('')
+const adjFullInput = ref(null)
 const isProcessing  = ref(false)
 const checkoutError = ref('')
 const modalError    = ref('')
 
 const selectedProduct   = ref(null)
-const selectedVariantId = ref(null)   // the size chosen in the modal dropdown
-const qty        = ref(1)
+const variantSearch     = ref('')     // "Find a size…" box (long size lists)
+const draftQty          = ref({})     // { [sizeKey]: quantity } — one entry per size being added
 const cutLength   = ref(1)
 const cutWidth    = ref(1)
 const editingKey  = ref(null)
@@ -785,6 +1214,9 @@ const editingKey  = ref(null)
 const discountType  = ref('%')
 const discountValue = ref(0)
 const amountReceived = ref(0)
+const amountInput    = ref(null)
+
+const showTaxDetails = ref(false)     // "VAT details" fold in the cart summary
 
 const scannerActive  = ref(false)
 const autoAddOnScan  = ref(false)
@@ -806,9 +1238,7 @@ const cameraError    = ref('')
 let html5QrCode = null
 let cameraStopping = null // Promise guarding overlapping stop/start calls
 
-// A single checkout attempt (open cash modal -> pay) shares one idempotency
-// key across retries, so a resubmitted request can be deduped server-side
-// instead of creating a duplicate sale.
+// A single checkout attempt shares one idempotency key across retries.
 const checkoutIdempotencyKey = ref('')
 
 const receiptData = ref(null)
@@ -820,17 +1250,10 @@ let barcodeTimer   = null
 let flashTimer     = null
 let lastScanCode = ''
 let lastScanAt   = 0
-// Timestamps of the most recent USB-input keystrokes, used to tell a
-// hardware scanner's burst-typing apart from a human typing manually.
 let keyTimestamps = []
 
 /* ────────────────────────────────────────────────────────────
    RESPONSIVE — MOBILE CART DRAWER
-   Below this width the cart panel (.pos-right) leaves the side-by-side
-   layout and becomes a bottom-sheet drawer (see the media query in the
-   style block), toggled open/closed by `cartOpen`. A floating summary
-   bar stays on screen whenever the drawer is closed so the running
-   total and item count are never more than a tap away.
 ──────────────────────────────────────────────────────────── */
 const POS_MOBILE_BREAKPOINT = 768
 const isMobile = ref(window.innerWidth <= POS_MOBILE_BREAKPOINT)
@@ -840,8 +1263,6 @@ function onPosResize() {
   const mobile = window.innerWidth <= POS_MOBILE_BREAKPOINT
   if (mobile === isMobile.value) return
   isMobile.value = mobile
-  // The drawer concept only exists on mobile — once back to a side-by-side
-  // width, drop any open/closed drawer state so it doesn't linger.
   if (!mobile) cartOpen.value = false
 }
 
@@ -858,6 +1279,7 @@ async function loadCatalog() {
     ])
     products.value = (prodRes.data || []).map(normalizeProduct)
     categories.value = catRes.data?.categories ?? catRes.data ?? []
+    await loadRemnants()
   } catch (e) {
     loadError.value = 'Failed to load products. Please check your connection and try again.'
     console.error('loadCatalog error:', e)
@@ -865,6 +1287,41 @@ async function loadCatalog() {
     loading.value = false
   }
 }
+
+/** Leftover pieces still on hand. A failure here must never block the normal catalog,
+ *  but it IS reported (remnantError) so it can't be mistaken for "no leftovers". */
+async function loadRemnants() {
+  remnantError.value = ''
+  try {
+    const { data } = await api.get('/api/pos/remnants', { skipLoading: true })
+    remnants.value = (data || []).map(r => ({
+      id: r.RemnantID,
+      productId: r.ProductID,
+      variantId: r.VariantID ?? null,
+      productName: r.ProductName,
+      sku: r.SKU,
+      image: r.ImageURL ?? null,
+      label: r.VariantLabel || '',
+      qty: Math.max(Number(r.Quantity) || 0, 1),   // older rows store 0 = one piece
+      length: Number(r.Length) || 0,
+      unit: r.Unit || '',
+      // Baseline price: list price of the uncut piece minus what the cut sold for
+      // (older leftovers: same share of the list price as the share of the piece left).
+      // null = unknown -> the cashier types the price.
+      price: r.suggested_price != null ? Number(r.suggested_price) : null,
+    }))
+  } catch (e) {
+    remnants.value = []
+    remnantError.value = e?.response?.status === 404
+      ? 'Leftover service not found (404). Check the /api/pos/remnants route.'
+      : 'Could not load leftover pieces.'
+    console.error('loadRemnants error:', e)
+  }
+}
+
+// Refresh every time the cashier opens the Leftovers tab, so changes made on the
+// Inventory Logs page (used / scrapped / put back) show up without a full reload.
+watch(view, v => { if (v === 'leftovers') loadRemnants() })
 
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
@@ -887,24 +1344,93 @@ onUnmounted(() => {
 
 function onImgError(product) { product.image = null }
 
-// Precompute cart quantities per product once per cart mutation, instead of
-// re-scanning the whole cart array for every product card on every render
-// (availableFor/canAddProduct/stockBadge* were each doing an O(n) scan).
-// NOTE: this sums ALL sizes of a product, because stock is per product.
+function resetFilters() {
+  search.value = ''
+  selectedCategory.value = ''
+  availableOnly.value = false
+}
+
+/* ────────────────────────────────────────────────────────────
+   STOCK — PER SIZE
+   Every size has its own stock and reorder level. The cart is tracked
+   per size too, so adding 3 of "20 in × 50 mm" never eats into the
+   stock of "36 in × 40 mm".
+
+   Status of a size:
+     oos : nothing left (stock minus what is already in the cart is 0)
+     low : stock is at/below its reorder level (or 5 if none was set)
+     ok  : healthy
+   A size is SELLABLE when it is ok, or low while BLOCK_LOW_STOCK_SALES
+   is false. Unsellable sizes are disabled in the size picker.
+
+   Leftover (remnant) lines are NOT part of this: they come out of
+   product_remnants on the server, never out of whole-piece stock.
+──────────────────────────────────────────────────────────── */
+const variantThreshold = v => (v.reorderLevel > 0 ? v.reorderLevel : LOW_STOCK_DEFAULT)
+const hasVariants = p => (p.variants?.length ?? 0) > 0
+
+// Cart quantity per product (all sizes) — used for legacy products with no sizes.
+// Leftover lines are skipped: they don't use whole-piece stock.
 const cartQtyByProduct = computed(() => {
   const m = new Map()
-  cart.value.forEach(i => m.set(i.id, (m.get(i.id) || 0) + i.qty))
+  cart.value.filter(i => !i.remnantId).forEach(i => m.set(i.id, (m.get(i.id) || 0) + i.qty))
   return m
 })
+
+/** Qty of ONE size already in the cart (optionally excluding the line being edited). */
+function inCartVariant(productId, variantId, excludeKey = null) {
+  if (productId == null) return 0
+  return cart.value
+    .filter(i => !i.remnantId && i.id === productId && (i.variantId ?? null) === (variantId ?? null) && i.key !== excludeKey)
+    .reduce((s, i) => s + i.qty, 0)
+}
+function variantAvailable(product, v, excludeKey = null) {
+  return Math.max(0, v.stock - inCartVariant(product.id, v.id, excludeKey))
+}
+function variantStatus(product, v, excludeKey = null) {
+  if (variantAvailable(product, v, excludeKey) <= 0) return 'oos'
+  return v.stock <= variantThreshold(v) ? 'low' : 'ok'
+}
+function isVariantSellable(product, v, excludeKey = null) {
+  const s = variantStatus(product, v, excludeKey)
+  return s === 'ok' || (s === 'low' && !BLOCK_LOW_STOCK_SALES)
+}
+function variantStockText(product, v, excludeKey = null) {
+  const s = variantStatus(product, v, excludeKey)
+  const a = variantAvailable(product, v, excludeKey)
+  if (s === 'oos') return 'Out of stock'
+  if (s === 'low') return BLOCK_LOW_STOCK_SALES ? `Low · ${a} left · unavailable` : `Low · ${a} left`
+  return `${a} in stock`
+}
+const sellableVariants = p => p.variants.filter(v => isVariantSellable(p, v))
+
+/** Units the cashier can still sell for this product. */
 function availableFor(product) {
+  if (hasVariants(product)) {
+    return product.variants.reduce(
+      (s, v) => s + (isVariantSellable(product, v) ? variantAvailable(product, v) : 0), 0
+    )
+  }
   return Math.max(0, product.stock - (cartQtyByProduct.value.get(product.id) || 0))
 }
-function canAddProduct(product) { return availableFor(product) > 0 }
-/** Returns the stock-status key ('ok' | 'low' | 'oos') shared by the badge
- *  class/label AND the grid sort order, so the two can never disagree. */
+function canAddProduct(p) {
+  return hasVariants(p) ? sellableVariants(p).length > 0 : availableFor(p) > 0
+}
+/** Status key ('ok' | 'low' | 'oos') shared by the badge AND the grid sort.
+ *  - no sellable size and nothing in stock  → oos
+ *  - no sellable size but some sizes are low → low  (card is disabled)
+ *  - some sizes sellable but others low      → ok
+ *  - every sellable size is low (low allowed) → low */
 function stockStatus(p) {
+  if (hasVariants(p)) {
+    const sellable = sellableVariants(p)
+    if (!sellable.length) {
+      return p.variants.some(v => variantAvailable(p, v) > 0) ? 'low' : 'oos'
+    }
+    return sellable.every(v => variantStatus(p, v) === 'low') ? 'low' : 'ok'
+  }
   const avail = availableFor(p)
-  return avail <= 0 ? 'oos' : avail <= 5 ? 'low' : 'ok'
+  return avail <= 0 ? 'oos' : avail <= LOW_STOCK_DEFAULT ? 'low' : 'ok'
 }
 function stockBadgeClass(p) {
   return `badge--${stockStatus(p)}`
@@ -916,29 +1442,92 @@ function stockBadgeLabel(p) {
 
 /* ────────────────────────────────────────────────────────────
    SEARCH / FILTER / SORT
-   Grid order: In Stock products first, then Low Stock, then Out of
-   Stock — using a stable sort so products within the same status keep
-   their original relative order (alphabetical/catalog order, etc.).
-   Search also matches size labels (e.g. "8 ft").
+   Grid order: In Stock first, then Low Stock, then Out of Stock
+   (stable sort). Search also matches size labels (e.g. "8 ft").
 ──────────────────────────────────────────────────────────── */
 const normalizedSearch = computed(() => search.value.trim().toLowerCase())
 const filteredProducts = computed(() => {
   const q = normalizedSearch.value
   const cat = selectedCategory.value
-  const list = (!q && !cat)
-    ? products.value.slice()
-    : products.value.filter(p => {
-        if (cat && p.category != cat) return false
-        if (!q) return true
-        return (
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q)) ||
-          p.variants.some(v => v.label.toLowerCase().includes(q))
-        )
-      })
+  const list = products.value.filter(p => {
+    if (cat && p.category != cat) return false
+    if (availableOnly.value && !canAddProduct(p)) return false
+    if (!q) return true
+    return (
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+      p.variants.some(v => v.label.toLowerCase().includes(q))
+    )
+  })
   return list.sort((a, b) => STOCK_SORT_PRIORITY[stockStatus(a)] - STOCK_SORT_PRIORITY[stockStatus(b)])
 })
+
+/* ────────────────────────────────────────────────────────────
+   LEFTOVER PIECES (remnants)
+   A leftover is what is left of a piece after a cut. It can be sold
+   again, as its own cart line. Selling one never touches whole-piece stock.
+──────────────────────────────────────────────────────────── */
+const fmtLeft = r => `${round2(r.length)} ${r.unit}`.trim()
+
+// A leftover is the same product, only a different size: show the same photo and SKU
+// as the whole product (falls back to what the leftover endpoint returned).
+const productOf = r => products.value.find(p => p.id === r.productId)
+const remnantImage = r => productOf(r)?.image ?? r.image
+const remnantSku = r => productOf(r)?.sku || r.sku
+
+function remnantInCart(id) {
+  return cart.value.filter(i => i.remnantId === id).reduce((s, i) => s + i.qty, 0)
+}
+function remnantAvailable(r) {
+  return Math.max(0, r.qty - remnantInCart(r.id))
+}
+
+const filteredRemnants = computed(() => {
+  const q = normalizedSearch.value
+  const cat = selectedCategory.value
+  const list = remnants.value.filter(r => {
+    if (cat) {
+      const prod = products.value.find(p => p.id === r.productId)
+      if (prod && prod.category != cat) return false
+    }
+    if (!q) return true
+    return (
+      r.productName.toLowerCase().includes(q) ||
+      (remnantSku(r) || '').toLowerCase().includes(q) ||
+      r.label.toLowerCase().includes(q)
+    )
+  })
+  // Sellable ones first
+  return list.slice().sort((a, b) => (remnantAvailable(a) > 0 ? 0 : 1) - (remnantAvailable(b) > 0 ? 0 : 1))
+})
+
+function addRemnantToCart(r) {
+  if (remnantAvailable(r) <= 0) return
+  checkoutError.value = ''
+  const existing = cart.value.find(i => i.remnantId === r.id)
+  if (existing) { existing.qty += 1; return }
+
+  cart.value.push({
+    key: `rem-${r.id}`,
+    id: r.productId,
+    variantId: r.variantId,
+    remnantId: r.id,
+    remnantMax: r.qty,
+    name: `${r.productName}${r.label ? ` – ${r.label}` : ''} (leftover ${fmtLeft(r)})`,
+    price: r.price ?? 0,
+    baseline: r.price,          // baseline price (uncut list price - cut price); the cashier can still change the price
+    qty: 1,
+    cutLength: null,
+    cutWidth: null,
+    pricingType: 'piece',
+    origPrice: null,
+    priceReason: null,
+    cut: null,
+  })
+  // No suggested price for this leftover (older rows) → ask for one right away.
+  if (r.price == null) openAdjustModal(cart.value[cart.value.length - 1])
+}
 
 /* ────────────────────────────────────────────────────────────
    BARCODE SCANNER (shared pipeline for USB + camera)
@@ -951,24 +1540,16 @@ function toggleScanner() {
   cameraHint.value = ''
   cameraError.value = ''
   keyTimestamps = []
-  // Reset dedup window so toggling the scanner off/on doesn't cause a
-  // legitimate re-scan of the same code to be dropped as a "duplicate".
   lastScanCode = ''
   lastScanAt = 0
   clearTimeout(barcodeTimer)
   if (scannerActive.value) {
     if (scanMode.value === 'usb') nextTick(() => barcodeInput.value?.focus())
-    // Camera mode: don't start here — the scanner banner is still animating
-    // open. onScannerBannerEnter() kicks off the camera once that finishes,
-    // so html5-qrcode attaches to a fully-mounted, fully-sized element.
+    // Camera mode starts from onScannerBannerEnter() once the banner is open.
   } else {
     stopCamera()
   }
 }
-/** Fires once the scanner banner's open transition finishes. Starting the
- *  camera only at this point (instead of on nextTick, while the banner is
- *  still mid max-height animation) avoids handing html5-qrcode a container
- *  that hasn't settled into its final layout yet. */
 function onScannerBannerEnter() {
   if (scannerActive.value && scanMode.value === 'camera') startCamera()
 }
@@ -980,16 +1561,12 @@ async function setScanMode(mode) {
   cameraHint.value = ''
   cameraError.value = ''
   if (!scannerActive.value) return
-  // Banner is already open here (no transition fires), so it's safe to
-  // start immediately — the container is already fully mounted.
   if (mode === 'camera') startCamera()
   else nextTick(() => barcodeInput.value?.focus())
 }
 /** Distinguishes a hardware (keyboard-wedge) scanner's rapid keystroke burst
- *  from a human typing the barcode by hand. Scanners fire characters only
- *  a few ms apart and are auto-submitted after a short pause. Manual typing
- *  is never auto-submitted — it always waits for Enter — so a normal typing
- *  pause can no longer wipe out a half-typed code. */
+ *  from a human typing the barcode by hand. Manual typing is never
+ *  auto-submitted — it always waits for Enter. */
 function onBarcodeKey(e) {
   if (e.key === 'Enter') {
     e.preventDefault()
@@ -1001,15 +1578,11 @@ function onBarcodeKey(e) {
     return
   }
 
-  // Ignore modifier/navigation keys (Shift, Tab, ArrowLeft, ...) for timing
-  // purposes — only actual content-changing keys should affect detection.
   if (e.key.length !== 1 && e.key !== 'Backspace') return
 
   clearTimeout(barcodeTimer)
 
   if (e.key === 'Backspace') {
-    // Editing by hand is a clear signal this is manual entry — never
-    // auto-submit; just let the person keep typing and press Enter.
     keyTimestamps = []
     return
   }
@@ -1021,8 +1594,6 @@ function onBarcodeKey(e) {
     keyTimestamps.slice(1).every((t, i) => t - keyTimestamps[i] <= SCANNER_KEY_INTERVAL_MS)
 
   if (looksLikeScanner) {
-    // Handles hardware scanners that don't send an Enter terminator: submit
-    // shortly after the fast keystroke burst stops.
     barcodeTimer = setTimeout(() => {
       const code = barcodeBuffer.value.trim()
       if (code.length >= 4) {
@@ -1032,16 +1603,23 @@ function onBarcodeKey(e) {
       }
     }, SCAN_DEBOUNCE_MS)
   }
-  // Otherwise this is a human typing manually — no auto-submit timer is
-  // set, so the buffer is never cleared out from under them.
 }
-/** Keeps the hidden scanner input focused for hardware scanners, but never
- *  steals focus away from a field/button the user is deliberately using,
- *  and never competes with an open modal. */
-function onGlobalKeydown() {
-  if (!scannerActive.value || scanMode.value !== 'usb') return
-  if (showQtyModal.value || showCashModal.value) return
+/** Global keys:
+ *  - "/" jumps to the product search (unless the user is typing somewhere).
+ *  - While the USB scanner is on, keeps the hidden scanner input focused,
+ *    but never steals focus from a field in use or competes with a modal. */
+function onGlobalKeydown(e) {
+  if (showQtyModal.value || showCashModal.value || showClearModal.value || showServiceModal.value || showAdjModal.value) return
   const active = document.activeElement
+  const typingElsewhere = active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)
+
+  if (e?.key === '/' && !typingElsewhere && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault()
+    searchInput.value?.focus()
+    return
+  }
+
+  if (!scannerActive.value || scanMode.value !== 'usb') return
   const isBusyElsewhere = active && active !== barcodeInput.value &&
     ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(active.tagName)
   if (isBusyElsewhere) return
@@ -1055,10 +1633,6 @@ function showFeedback(type, text, duration = SCANNER_MESSAGE_TIMEOUT_MS) {
 function showScannerMessage(msg) {
   showFeedback('error', msg)
 }
-/** Fires on every SUCCESSFUL find — regardless of scan source. Shows a
- *  green confirmation bubble, and (camera mode) a checkmark flash over
- *  the video feed so the person gets unmistakable visual confirmation
- *  the scan registered before the modal/cart even updates. */
 function showScanSuccess(name) {
   showFeedback('success', `Found: ${name}`, 1500)
   if (scanMode.value === 'camera') {
@@ -1066,14 +1640,8 @@ function showScanSuccess(name) {
     clearTimeout(cameraFlashTimer)
     cameraFlashTimer = setTimeout(() => { cameraFlashVisible.value = false }, 850)
   }
-  // A successful decode proves the camera CAN read barcodes fine right
-  // now, so clear/reset the "having trouble?" hint countdown.
   scheduleCameraHint()
 }
-/** Shows a gentle troubleshooting tip if the camera has been active for a
- *  while without successfully decoding anything — covers blur, bad
- *  lighting, wrong distance, etc. without needing to detect the specific
- *  cause (html5-qrcode's per-frame errors are too noisy/generic for that). */
 function scheduleCameraHint() {
   clearTimeout(cameraHintTimer)
   cameraHint.value = ''
@@ -1094,8 +1662,7 @@ function triggerFlash(id) {
   flashTimer = setTimeout(() => { flashProductId.value = null }, FLASH_DURATION_MS)
 }
 
-/** Single entry point for ANY scan source (USB keyboard-wedge or camera).
- *  Handles duplicate-scan suppression, then defers to lookupAndHandle. */
+/** Single entry point for ANY scan source (USB keyboard-wedge or camera). */
 function handleScannedCode(rawCode) {
   const code = rawCode.trim()
   if (!code) return
@@ -1128,8 +1695,13 @@ async function lookupAndHandle(code) {
   }
 }
 function handleFoundProduct(product) {
-  if (availableFor(product) <= 0) {
-    showScannerMessage(`${product.name} is out of stock.`)
+  if (!canAddProduct(product)) {
+    const lowOnly = hasVariants(product) && product.variants.some(v => variantAvailable(product, v) > 0)
+    showScannerMessage(
+      lowOnly
+        ? `${product.name} is low on stock and cannot be sold. Restock it first.`
+        : `${product.name} is out of stock.`
+    )
     return
   }
   showScanSuccess(product.name)
@@ -1143,11 +1715,11 @@ function handleFoundProduct(product) {
   }
 }
 function quickAddOne(product) {
-  if (availableFor(product) <= 0) {
+  const variant = hasVariants(product) ? product.variants.find(v => isVariantSellable(product, v)) : null
+  if (hasVariants(product) ? !variant : availableFor(product) <= 0) {
     showScannerMessage(`Not enough stock for ${product.name}.`)
     return
   }
-  const variant = product.variants?.[0] || null
   const key = buildKey(product, 1, 1, variant?.id ?? null)
   const existing = cart.value.find(i => i.key === key)
   if (existing) existing.qty += 1
@@ -1177,9 +1749,6 @@ function describeCameraError(e) {
 }
 async function startCamera() {
   if (html5QrCode || cameraStarting.value) return
-  // If a previous camera instance is still tearing down, wait for that to
-  // finish before attaching a new one to the same DOM node — starting a
-  // new instance mid-teardown was a real source of "camera doesn't scan".
   if (cameraStopping) await cameraStopping.catch(() => {})
 
   cameraError.value = ''
@@ -1193,10 +1762,10 @@ async function startCamera() {
     await html5QrCode.start(
       { facingMode: 'environment' },
       { fps: 10, qrbox: { width: 640, height: 480 } },
-      (decodedText) => handleScannedCode(decodedText), // same pipeline as USB scans
+      (decodedText) => handleScannedCode(decodedText),
       () => { /* per-frame "not found" noise, ignore */ }
     )
-    scheduleCameraHint() // start the "having trouble?" countdown once live
+    scheduleCameraHint()
   } catch (e) {
     cameraError.value = describeCameraError(e)
     console.error('camera start error:', e)
@@ -1210,7 +1779,7 @@ async function stopCamera() {
   cameraHint.value = ''
   if (!html5QrCode) return
   const instance = html5QrCode
-  html5QrCode = null // clear immediately so overlapping calls can't double-stop
+  html5QrCode = null
   cameraStopping = (async () => {
     try {
       await instance.stop()
@@ -1224,43 +1793,56 @@ async function stopCamera() {
 }
 
 /* ────────────────────────────────────────────────────────────
-   QUANTITY MODAL / SIZE DROPDOWN / CUT-SIZE PRICING
+   QUANTITY MODAL — MULTI-SIZE SELECTION / CUT-SIZE PRICING
+
+   Every size (or the single "Standard" row for products without sizes)
+   is one row with its own quantity. All rows with a quantity above 0
+   are added to the cart together, one cart line per size.
 ──────────────────────────────────────────────────────────── */
+const rowKey = v => v.id ?? 'base'
+
 function openQuantityModal(product) {
   selectedProduct.value = product
-  // Default to the first size; the cashier changes it from the dropdown.
-  selectedVariantId.value = product.variants?.[0]?.id ?? null
+  variantSearch.value = ''
+  draftQty.value = {}
   editingKey.value = null
   modalError.value = ''
-  qty.value = 1
   cutLength.value = product.minDimension || 1
   cutWidth.value = product.minDimension || 1
   showQtyModal.value = true
+  // Only one thing to pick (e.g. after a barcode scan)? Pre-fill 1 for speed.
+  const rows = modalRowsAll.value
+  if (rows.length === 1 && maxQtyFor(rows[0]) > 0) setRowQty(rows[0], 1)
 }
 function closeQtyModal() {
   showQtyModal.value = false
   modalError.value = ''
   editingKey.value = null
+  variantSearch.value = ''
+  draftQty.value = {}
 }
 function editCartItem(item) {
+  const unit = item.pricingType === 'sqm' && item.cutLength && item.cutWidth
+    ? round2(item.price / (item.cutLength * item.cutWidth))
+    : item.price
   const product = products.value.find(p => p.id === item.id) || {
     id: item.id,
     name: item.name,
-    variants: [],
-    price: item.pricingType === 'sqm' && item.cutLength && item.cutWidth
-      ? round2(item.price / (item.cutLength * item.cutWidth))
-      : item.price,
+    variants: item.variantId != null
+      ? [{ id: item.variantId, label: 'Selected size', price: unit, stock: item.qty, reorderLevel: 0 }]
+      : [],
+    price: unit,
     stock: item.qty,
     pricingType: item.pricingType,
     minDimension: MIN_DIM,
     maxDimension: MAX_DIM,
   }
   selectedProduct.value = product
-  selectedVariantId.value = item.variantId ?? null
+  variantSearch.value = ''
   cutLength.value = item.cutLength || product.minDimension || 1
   cutWidth.value = item.cutWidth || product.minDimension || 1
-  qty.value = item.qty
   editingKey.value = item.key
+  draftQty.value = { [item.variantId ?? 'base']: item.qty }
   modalError.value = ''
   showQtyModal.value = true
 }
@@ -1272,29 +1854,65 @@ const cutArea = computed(() => {
   const max = selectedProduct.value.maxDimension ?? MAX_DIM
   return round2(clamp(cutLength.value, min, max) * clamp(cutWidth.value, min, max))
 })
-/** The size currently picked in the modal dropdown (null for legacy products). */
-const selectedVariant = computed(() =>
-  selectedProduct.value?.variants?.find(v => v.id === selectedVariantId.value) || null
-)
-/** Price of the picked size, falling back to the product's own price. */
-const basePrice = computed(() => selectedVariant.value?.price ?? selectedProduct.value?.price ?? 0)
-const unitPrice = computed(() => {
-  if (!selectedProduct.value) return 0
-  return isSqm.value ? round2(basePrice.value * cutArea.value) : basePrice.value
+
+const modalHasSizes = computed(() => (selectedProduct.value?.variants?.length ?? 0) > 0)
+
+/** All rows for the open product. Products without sizes get one "Standard" row. */
+const modalRowsAll = computed(() => {
+  const p = selectedProduct.value
+  if (!p) return []
+  if (p.variants?.length) return p.variants
+  return [{ id: null, label: 'Standard', price: p.price, stock: p.stock, reorderLevel: 0 }]
 })
-/** Quantity of a product currently committed elsewhere in the cart
- *  (across ALL its sizes), optionally excluding one line (used while
- *  editing that line). */
-function inCart(id, excludeKey = null) {
-  if (id == null) return 0
-  return cart.value
-    .filter(i => i.id === id && i.key !== excludeKey)
-    .reduce((s, i) => s + i.qty, 0)
+
+/** Rows as displayed: filtered by "Find a size", sellable first, then by size. */
+const modalVariants = computed(() => {
+  const p = selectedProduct.value
+  if (!p) return []
+  const needle = variantSearch.value.trim().toLowerCase()
+  const list = modalRowsAll.value.filter(v => !needle || v.label.toLowerCase().includes(needle))
+  return list.slice().sort((a, b) => {
+    const sa = isVariantSellable(p, a, editingKey.value) ? 0 : 1
+    const sb = isVariantSellable(p, b, editingKey.value) ? 0 : 1
+    return sa - sb || compareSize(a, b)
+  })
+})
+const sellableVariantCount = computed(() => {
+  const p = selectedProduct.value
+  return p ? modalRowsAll.value.filter(v => isVariantSellable(p, v, editingKey.value)).length : 0
+})
+
+function rowStatus(v) { return variantStatus(selectedProduct.value, v, editingKey.value) }
+function rowQty(v) { return draftQty.value[rowKey(v)] || 0 }
+/** Most the cashier can still add for this size (0 when it cannot be sold). */
+function maxQtyFor(v) {
+  const p = selectedProduct.value
+  return p && isVariantSellable(p, v, editingKey.value) ? variantAvailable(p, v, editingKey.value) : 0
 }
-const availableStock = computed(() => {
-  if (!selectedProduct.value) return 0
-  return Math.max(0, selectedProduct.value.stock - inCart(selectedProduct.value.id, editingKey.value))
-})
+function setRowQty(v, raw) {
+  const n = clamp(Math.trunc(Number(raw) || 0), 0, maxQtyFor(v))
+  draftQty.value = { ...draftQty.value, [rowKey(v)]: n }
+  modalError.value = ''
+  return n
+}
+function stepRow(v, delta) { setRowQty(v, rowQty(v) + delta) }
+function onQtyInput(v, e) {
+  const raw = e.target.value
+  if (raw === '') { setRowQty(v, 0); return }
+  const n = setRowQty(v, raw)
+  if (String(n) !== raw) e.target.value = n   // show the clamped value
+}
+function clearDraft() { draftQty.value = {} }
+
+/** Unit price of a size (sqm products: size price × cut area). */
+function unitPriceFor(v) {
+  return isSqm.value ? round2(v.price * cutArea.value) : v.price
+}
+
+const selectedRows = computed(() => modalRowsAll.value.filter(v => rowQty(v) > 0))
+const totalUnits = computed(() => selectedRows.value.reduce((s, v) => s + rowQty(v), 0))
+const modalTotal = computed(() => round2(selectedRows.value.reduce((s, v) => s + rowQty(v) * unitPriceFor(v), 0)))
+const canSubmitModal = computed(() => selectedRows.value.length > 0)
 
 // Clamp cut dimensions to the product's allowed range.
 watch([cutLength, cutWidth], () => {
@@ -1306,59 +1924,52 @@ watch([cutLength, cutWidth], () => {
   if (cl !== cutLength.value) cutLength.value = cl
   if (cw !== cutWidth.value) cutWidth.value = cw
 })
-// Clamp quantity to [1, availableStock].
-watch(qty, (v) => {
-  const max = Math.max(availableStock.value, 1)
-  const n = clamp(Math.trunc(Number(v) || 1), 1, max)
-  if (n !== v) qty.value = n
-})
 
 function addToCart() {
-  if (!selectedProduct.value) return
+  const p = selectedProduct.value
+  if (!p) return
   modalError.value = ''
 
-  const requestedQty = clamp(Math.trunc(qty.value) || 1, 1, 999999)
-  const maxAllowed = availableStock.value
+  const rows = selectedRows.value
+  if (!rows.length) { modalError.value = 'Enter a quantity for at least one size.'; return }
 
-  if (maxAllowed <= 0) {
-    modalError.value = 'No stock available for this item.'
-    return
-  }
-  if (requestedQty > maxAllowed) {
-    modalError.value = `Only ${maxAllowed} unit(s) available.`
-    return
+  for (const v of rows) {
+    const max = maxQtyFor(v)
+    if (rowQty(v) > max) {
+      modalError.value = `Only ${max} unit(s) available for ${v.label}.`
+      return
+    }
   }
 
-  const key = buildKey(selectedProduct.value, cutLength.value, cutWidth.value, selectedVariantId.value)
+  // Editing replaces the old line; every selected size then becomes its own line.
+  if (editingKey.value) cart.value = cart.value.filter(i => i.key !== editingKey.value)
+
+  const hasSizes = !!p.variants?.length
   const dimensionLabel = isSqm.value ? ` (${cutLength.value}×${cutWidth.value}m)` : ''
-  const sizeLabel = selectedVariant.value ? ` – ${selectedVariant.value.label}` : ''
 
-  // If editing and the key changed (size or dimensions changed), remove the old line first.
-  if (editingKey.value && editingKey.value !== key) {
-    cart.value = cart.value.filter(i => i.key !== editingKey.value)
-  }
-
-  const existing = cart.value.find(i => i.key === key)
-  if (existing) {
-    // Overwrite the quantity only when we're editing THIS SAME line.
-    // If we're editing a different line whose new size/dimensions happen to
-    // match an already-existing line, we're merging into it — so add,
-    // don't clobber the quantity that was already there.
-    existing.qty = (editingKey.value === key) ? requestedQty : existing.qty + requestedQty
-    existing.price = unitPrice.value
-  } else {
-    cart.value.push({
-      key,
-      id: selectedProduct.value.id,
-      variantId: selectedVariantId.value,
-      name: `${selectedProduct.value.name}${sizeLabel}${dimensionLabel}`,
-      price: unitPrice.value,
-      qty: requestedQty,
-      cutLength: isSqm.value ? cutLength.value : null,
-      cutWidth: isSqm.value ? cutWidth.value : null,
-      pricingType: selectedProduct.value.pricingType,
-    })
-  }
+  rows.forEach(v => {
+    const variantId = hasSizes ? v.id : null
+    const key = buildKey(p, cutLength.value, cutWidth.value, variantId)
+    const price = unitPriceFor(v)
+    const q = rowQty(v)
+    const existing = cart.value.find(i => i.key === key)
+    if (existing) {
+      existing.qty += q
+      existing.price = price
+    } else {
+      cart.value.push({
+        key,
+        id: p.id,
+        variantId,
+        name: `${p.name}${hasSizes ? ` – ${v.label}` : ''}${dimensionLabel}`,
+        price,
+        qty: q,
+        cutLength: isSqm.value ? cutLength.value : null,
+        cutWidth: isSqm.value ? cutWidth.value : null,
+        pricingType: p.pricingType,
+      })
+    }
+  })
 
   closeQtyModal()
 }
@@ -1367,13 +1978,28 @@ function addToCart() {
    CART
 ──────────────────────────────────────────────────────────── */
 function incrementLine(item) {
+  // Leftover line: limited by how many of THAT leftover exist, not by whole-piece stock.
+  if (item.remnantId) {
+    const r = remnants.value.find(x => x.id === item.remnantId)
+    const max = r ? r.qty : (item.remnantMax || item.qty)
+    if (remnantInCart(item.remnantId) + 1 > max) {
+      checkoutError.value = `Only ${max} of that leftover piece available.`
+      return
+    }
+    checkoutError.value = ''
+    item.qty += 1
+    return
+  }
+
   const product = products.value.find(p => p.id === item.id)
-  const stock = product ? product.stock : Infinity
-  const usedByOthers = inCart(item.id, item.key)
+  const variant = product?.variants?.find(v => v.id === item.variantId)
+  const stock = variant ? variant.stock : (product ? product.stock : Infinity)
+  const usedByOthers = inCartVariant(item.id, item.variantId, item.key)
   if (item.qty + usedByOthers + 1 > stock) {
     checkoutError.value = `Not enough stock to add another unit of ${item.name}.`
     return
   }
+  checkoutError.value = ''
   item.qty += 1
 }
 function decrementLine(item) {
@@ -1381,15 +2007,219 @@ function decrementLine(item) {
   item.qty -= 1
 }
 function removeFromCart(key) { cart.value = cart.value.filter(i => i.key !== key) }
-function clearCart() { if (confirm('Clear all items from the cart?')) cart.value = [] }
+const cartUnits = computed(() => cart.value.reduce((s, i) => s + i.qty, 0))
+function clearCart() {
+  if (!cart.value.length && !services.value.length) return
+  showClearModal.value = true
+  nextTick(() => clearKeepBtn.value?.focus())   // safe default: Enter keeps the items
+}
+function closeClearModal() { showClearModal.value = false }
+function confirmClearCart() {
+  cart.value = []
+  services.value = []
+  checkoutError.value = ''
+  showClearModal.value = false
+}
+const clearSummary = computed(() => {
+  const parts = []
+  const n = cart.value.length
+  if (n) parts.push(`${n} item${n === 1 ? '' : 's'} (${cartUnits.value} unit${cartUnits.value === 1 ? '' : 's'})`)
+  const m = services.value.length
+  if (m) parts.push(`${m} service fee${m === 1 ? '' : 's'}`)
+  const amt = round2(subtotal.value + serviceTotal.value)
+  return `This removes ${parts.join(' and ')} (₱${amt.toFixed(2)}) from the sale. This can't be undone.`
+})
+
+/* ────────────────────────────────────────────────────────────
+   EXTRA SERVICES
+   fee           = what the customer pays (printed on the receipt)
+   workerAmount  = the worker's cut (pass-through, NOT shop revenue)
+   ownerAmount   = fee - workerAmount (the only part that is shop sales/profit)
+──────────────────────────────────────────────────────────── */
+function splitFee(fee, type, value) {
+  const f = round2(Math.max(Number(fee) || 0, 0))
+  const v = Math.max(Number(value) || 0, 0)
+  const raw = type === '%' ? f * (Math.min(v, 100) / 100) : v
+  const worker = round2(Math.min(raw, f))
+  return { fee: f, worker, owner: round2(f - worker) }
+}
+const svcSplit = computed(() => splitFee(svcFee.value, svcShareType.value, svcShareValue.value))
+
+const serviceTotal       = computed(() => round2(services.value.reduce((s, x) => s + x.fee, 0)))
+const serviceWorkerTotal = computed(() => round2(services.value.reduce((s, x) => s + x.workerAmount, 0)))
+const serviceOwnerTotal  = computed(() => round2(services.value.reduce((s, x) => s + x.ownerAmount, 0)))
+const cartCount          = computed(() => cart.value.length + services.value.length)
+
+function openServiceModal(service = null) {
+  svcError.value = ''
+  if (service) {
+    editingServiceId.value = service.id
+    svcName.value = service.name
+    svcFee.value = service.fee
+    svcWorker.value = service.workerName
+    svcShareType.value = service.shareType
+    svcShareValue.value = service.shareValue
+  } else {
+    editingServiceId.value = null
+    svcName.value = ''
+    svcFee.value = null
+    svcWorker.value = ''
+    svcShareType.value = '%'
+    svcShareValue.value = SERVICE_DEFAULT_WORKER_PCT
+  }
+  showServiceModal.value = true
+  nextTick(() => svcNameInput.value?.focus())
+}
+function closeServiceModal() {
+  showServiceModal.value = false
+  svcError.value = ''
+  editingServiceId.value = null
+}
+function setShareType(type) {
+  if (svcShareType.value === type) return
+  svcShareType.value = type
+  svcShareValue.value = type === '%' ? SERVICE_DEFAULT_WORKER_PCT : 0
+}
+function saveService() {
+  svcError.value = ''
+  const name = svcName.value.trim()
+  const { fee, worker, owner } = svcSplit.value
+  if (!name) { svcError.value = 'Enter the service name.'; return }
+  if (fee <= 0) { svcError.value = 'Service fee must be greater than zero.'; return }
+  if (svcShareType.value === 'PHP' && Number(svcShareValue.value) > fee) {
+    svcError.value = "Worker's share cannot be more than the service fee."; return
+  }
+  if (worker > 0 && !svcWorker.value.trim()) { svcError.value = 'Enter the worker who earns this share.'; return }
+
+  const entry = {
+    id: editingServiceId.value ?? `svc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name,
+    fee,
+    workerName: svcWorker.value.trim(),
+    shareType: svcShareType.value,
+    shareValue: Math.max(Number(svcShareValue.value) || 0, 0),
+    workerAmount: worker,
+    ownerAmount: owner,
+  }
+  const idx = services.value.findIndex(x => x.id === entry.id)
+  if (idx >= 0) services.value.splice(idx, 1, entry)
+  else services.value.push(entry)
+  closeServiceModal()
+}
+function removeService(id) { services.value = services.value.filter(x => x.id !== id) }
+
+/* ────────────────────────────────────────────────────────────
+   CUT PIECE / CUSTOM PRICE (per cart line)
+   item.origPrice  = list price before the change (null = line not adjusted)
+   item.priceReason, item.cut = { fullLength, soldLength, unit } | null
+   A cut line always consumes WHOLE pieces from stock (qty = pieces cut).
+   Leftover lines (item.remnantId) can only get a custom price.
+──────────────────────────────────────────────────────────── */
+function fmtLen(n) { return String(round2(n)) }
+function lineName(i) {
+  return i.cut ? `${i.name} (cut ${fmtLen(i.cut.soldLength)} ${i.cut.unit} of ${fmtLen(i.cut.fullLength)} ${i.cut.unit})` : i.name
+}
+const adjItem      = computed(() => cart.value.find(i => i.key === adjKey.value) || null)
+const adjIsSqm     = computed(() => adjItem.value?.pricingType === 'sqm')
+const adjListPrice = computed(() => adjItem.value ? (adjItem.value.origPrice ?? adjItem.value.price) : 0)
+const adjSuggested = computed(() => {
+  const f = Number(adjFull.value), sd = Number(adjSold.value)
+  if (!(f > 0) || !(sd > 0) || sd >= f) return null
+  return round2(adjListPrice.value * sd / f)
+})
+const adjRemainder = computed(() => adjSuggested.value == null ? null : round2(Number(adjFull.value) - Number(adjSold.value)))
+
+// Keep the price following the lengths until the cashier types their own price.
+watch([adjFull, adjSold], () => {
+  if (adjMode.value === 'cut' && !adjTouched.value && adjSuggested.value != null) adjPrice.value = adjSuggested.value
+})
+
+function openAdjustModal(item) {
+  adjKey.value = item.key
+  adjError.value = ''
+  adjTouched.value = false
+  adjReason.value = item.cut ? '' : (item.priceReason || '')
+  if (item.cut) {
+    adjMode.value = 'cut'
+    adjFull.value = item.cut.fullLength
+    adjSold.value = item.cut.soldLength
+    adjUnit.value = item.cut.unit
+    adjPrice.value = item.price
+    adjTouched.value = true
+  } else if (item.origPrice != null || item.pricingType === 'sqm' || item.remnantId) {
+    adjMode.value = 'price'
+    adjPrice.value = item.price > 0 ? item.price : null
+  } else {
+    adjMode.value = 'cut'
+    adjFull.value = null
+    adjSold.value = null
+    adjPrice.value = null
+  }
+  showAdjModal.value = true
+  nextTick(() => adjFullInput.value?.focus())
+}
+function closeAdjModal() { showAdjModal.value = false; adjError.value = ''; adjKey.value = null }
+function setAdjMode(mode) {
+  if (adjMode.value === mode) return
+  adjMode.value = mode
+  adjError.value = ''
+  adjTouched.value = false
+  const item = adjItem.value
+  if (mode === 'price') adjPrice.value = item ? item.price : null
+  else adjPrice.value = adjSuggested.value
+}
+/** Removes the adjustment and merges back into the normal line when one exists. */
+function clearLineAdjustment(item) {
+  if (item.origPrice != null) item.price = item.origPrice
+  item.origPrice = null
+  item.priceReason = null
+  item.cut = null
+  const base = String(item.key).replace(/~adj-.*$/, '')
+  if (base === item.key) return
+  const twin = cart.value.find(i => i !== item && i.key === base)
+  if (twin) { twin.qty += item.qty; cart.value = cart.value.filter(i => i !== item) }
+  else item.key = base
+}
+function resetAdjustment() {
+  const item = adjItem.value
+  if (item) clearLineAdjustment(item)
+  closeAdjModal()
+}
+function applyAdjustment() {
+  const item = adjItem.value
+  if (!item) return
+  adjError.value = ''
+  const price = round2(Number(adjPrice.value) || 0)
+  if (price <= 0) { adjError.value = 'Enter a price greater than zero.'; return }
+
+  let cut = null
+  let reason = adjReason.value.trim()
+  if (adjMode.value === 'cut') {
+    const f = Number(adjFull.value), sd = Number(adjSold.value)
+    if (!(f > 0)) { adjError.value = 'Enter the full piece length.'; return }
+    if (!(sd > 0)) { adjError.value = 'Enter the length sold.'; return }
+    if (sd >= f) { adjError.value = 'Length sold must be shorter than the full piece. Sell a whole piece as a normal item.'; return }
+    cut = { fullLength: round2(f), soldLength: round2(sd), unit: adjUnit.value }
+    reason = reason || 'Cut piece'
+  } else if (REQUIRE_PRICE_REASON && !reason && !item.remnantId) {
+    adjError.value = 'Add a reason for the price change.'
+    return
+  }
+
+  const orig = adjListPrice.value
+  if (!cut && price === orig) { clearLineAdjustment(item); closeAdjModal(); return }
+
+  item.origPrice = orig
+  item.price = price
+  item.priceReason = reason || null
+  item.cut = cut
+  // Adjusted lines get their own key so they never merge with a normal line.
+  if (!String(item.key).includes('~adj-')) item.key = `${item.key}~adj-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
+  closeAdjModal()
+}
 
 /* ────────────────────────────────────────────────────────────
    TOTALS — VAT-INCLUSIVE PRICING
-   Product prices already include 12% VAT. VAT is EXTRACTED, never added:
-     Gross Amount  = Subtotal - Discount
-     VATable Sales = Gross Amount / 1.12
-     VAT           = Gross Amount - VATable Sales
-     Total         = Gross Amount
 ──────────────────────────────────────────────────────────── */
 const subtotal = computed(() => round2(cart.value.reduce((s, i) => s + i.qty * i.price, 0)))
 
@@ -1410,17 +2240,12 @@ const discountAmount = computed(() => {
   return round2(Math.min(Math.max(raw, 0), subtotal.value))
 })
 
-// Gross Amount = Subtotal - Discount (discount is applied BEFORE VAT is extracted)
 const grossAmount = computed(() => round2(Math.max(subtotal.value - discountAmount.value, 0)))
-// VATable Sales = Gross Amount / 1.12
 const vatableSales = computed(() => round2(grossAmount.value / VAT_DIVISOR))
-// VAT = Gross Amount - VATable Sales (the 12% already baked into the price)
 const vat = computed(() => round2(grossAmount.value - vatableSales.value))
-// Total = Gross Amount (VAT is included, not added on top)
-const total = computed(() => grossAmount.value)
+// Customer pays products (VAT-inclusive, after discount) + full service fees.
+const total = computed(() => round2(grossAmount.value + serviceTotal.value))
 
-// Guard against NaN explicitly (e.g. amountReceived cleared to '' in the
-// input) rather than relying on implicit '' -> 0 coercion in arithmetic.
 const amountReceivedNum = computed(() => {
   const n = Number(amountReceived.value)
   return Number.isFinite(n) ? n : 0
@@ -1429,26 +2254,17 @@ const change = computed(() => round2(Math.max(amountReceivedNum.value - total.va
 const quickAmounts = computed(() => {
   const t = Math.ceil(total.value)
   if (t <= 0) return []
-  const candidates = new Set([t])
+  const candidates = new Set()
   ;[100, 500, 1000].forEach(denom => {
     const v = Math.ceil(t / denom) * denom
-    if (v >= t) candidates.add(v)
+    if (v >= t && v !== total.value) candidates.add(v)
   })
-  return Array.from(candidates).sort((a, b) => a - b).slice(0, 4)
+  return Array.from(candidates).sort((a, b) => a - b).slice(0, 3)
 })
 
 /* ────────────────────────────────────────────────────────────
    CUSTOMER (optional tracking for repeat buyers)
-   - Typing a name searches saved customers and offers suggestions.
-   - Picking one links the sale to that customer.
-   - The dropdown lists the client's repeat buyers; typing also finds customers still being tracked.
-   - A typed name is tracked automatically (matched by name) until it qualifies;
-     "Walk-in ..." names are never tracked. Repeat buyers from the client's own list
-     are added on the Customers page.
-   - The repeat-buyers dropdown has its own search box (name or phone).
 ──────────────────────────────────────────────────────────── */
-/* Customer requests pass skipLoading so they never trigger the slim top
-   progress bar in Layout.vue; the dropdown should feel instant, not "busy". */
 async function fetchCustomers(q, { silent = false } = {}) {
   const seq = ++customerSearchSeq
   try {
@@ -1456,9 +2272,9 @@ async function fetchCustomers(q, { silent = false } = {}) {
       params: { search: q || undefined },
       skipLoading: true,
     })
-    if (!q) repeatBuyersCache.value = data              // keep the instant list fresh
-    if (seq !== customerSearchSeq) return               // a newer search already replaced this one
-    if (silent && !showSuggestions.value) return        // background refresh: don't reopen a closed list
+    if (!q) repeatBuyersCache.value = data
+    if (seq !== customerSearchSeq) return
+    if (silent && !showSuggestions.value) return
     customerSuggestions.value = data
     suggestionsTitle.value = q ? '' : 'Repeat buyers'
     showSuggestions.value = data.length > 0
@@ -1467,8 +2283,6 @@ async function fetchCustomers(q, { silent = false } = {}) {
   }
 }
 
-// Loaded once when the POS opens (and again after each sale), so the first
-// click on the name box already has something to show.
 async function loadRepeatBuyers() {
   try {
     const { data } = await api.get('/api/customers', { skipLoading: true })
@@ -1478,9 +2292,6 @@ async function loadRepeatBuyers() {
   }
 }
 
-// Filters the repeat-buyer list by name or phone. Only applies in
-// "Repeat buyers" mode; normal typed-name results are already filtered
-// by the API, so they pass through untouched.
 const visibleSuggestions = computed(() => {
   if (!suggestionsTitle.value) return customerSuggestions.value
   const q = repeatSearch.value.trim().toLowerCase()
@@ -1494,35 +2305,26 @@ const visibleSuggestions = computed(() => {
   })
 })
 
-// Enter in the search box picks the top match.
 function pickFirstVisible() {
   const first = visibleSuggestions.value[0]
   if (first) pickCustomer(first)
 }
 
-// Close the dropdown only when focus leaves the whole customer field
-// (name input + dropdown). Moving focus from the name input into the
-// search box keeps it open.
 function onCustomerFocusOut(e) {
   const next = e.relatedTarget
   if (next && customerFieldRef.value?.contains(next)) return
   showSuggestions.value = false
 }
 
-// Keep clicks inside the dropdown from blurring the field, except when
-// the click is on the search input/clear button, which need real focus.
 function onSuggestMouseDown(e) {
   if (e.target.closest('.customer-suggest-search')) return
   e.preventDefault()
 }
 
-// Reset the search text whenever the dropdown closes, so it opens fresh.
 watch(showSuggestions, (open) => {
   if (!open) repeatSearch.value = ''
 })
 
-// Opens the repeat-buyer list immediately from the cache, then refreshes it
-// in the background so the purchase counts are never stale.
 function showRepeatBuyers() {
   repeatSearch.value = ''
   if (repeatBuyersCache.value.length) {
@@ -1536,15 +2338,13 @@ function showRepeatBuyers() {
 }
 
 function onCustomerInput() {
-  selectedCustomer.value = null // typing again means it is no longer the picked record
+  selectedCustomer.value = null
   clearTimeout(customerSearchTimer)
   const q = customerName.value.trim()
   if (!q) { showRepeatBuyers(); return }
   customerSearchTimer = setTimeout(() => fetchCustomers(q), 150)
 }
 
-// Clicking into the name box shows repeat buyers immediately (or matches
-// for whatever is already typed), so a returning customer is one tap away.
 function onCustomerFocus() {
   if (selectedCustomer.value) return
   const q = customerName.value.trim()
@@ -1552,8 +2352,6 @@ function onCustomerFocus() {
   else fetchCustomers(q)
 }
 
-// The people button next to the name box: lists repeat buyers and puts
-// the cursor straight into the search box.
 function toggleCustomerList() {
   if (showSuggestions.value) { showSuggestions.value = false; return }
   showRepeatBuyers()
@@ -1567,15 +2365,11 @@ function pickCustomer(c) {
   showSuggestions.value = false
 }
 
-// A typed name that was not picked from the dropdown is tracked automatically
-// (matched by name) on the backend. Auto-generated "Walk-in ..." names are not.
 const trackedNewName = computed(() => {
   const n = customerName.value.trim()
   return n.length >= 2 && !/^walk-in\b/i.test(n) && !selectedCustomer.value
 })
 
-// Status line under the name box for a picked customer. The threshold
-// (repeat_min) comes from the API, so it is only defined in one place.
 const customerStatusLabel = computed(() => {
   const c = selectedCustomer.value
   if (!c) return ''
@@ -1592,18 +2386,50 @@ function generateCustomerName() {
   customerName.value = `Walk-in ${ts.getMonth() + 1}/${ts.getDate()} ${String(ts.getHours()).padStart(2, '0')}${String(ts.getMinutes()).padStart(2, '0')}`
 }
 
+/* ── Cart panel UI ── */
+// Turns the customer field red when payment was attempted without a name.
+const customerMissing = computed(() => !!checkoutError.value && !customerName.value.trim())
+
+// Clears that error as soon as a name is typed or picked.
+watch(customerName, (v) => {
+  if (v.trim() && /customer name/i.test(checkoutError.value)) checkoutError.value = ''
+})
+
 /* ────────────────────────────────────────────────────────────
    CHECKOUT
 ──────────────────────────────────────────────────────────── */
+/** Per-size stock check: totals the cart PER SIZE and compares each
+ *  against that size's own stock. Leftover lines are checked separately
+ *  against the leftover piece they come from. */
 function verifyStockBeforeCheckout() {
-  const totals = {}
-  cart.value.forEach(i => { totals[i.id] = (totals[i.id] || 0) + i.qty })
-  for (const id in totals) {
-    const product = products.value.find(p => p.id == id)
-    if (!product) continue // product only known via a fresh scan; server will validate
-    if (totals[id] > product.stock) {
-      return `Not enough stock for ${product.name}. Only ${product.stock} available.`
+  // 1) Normal (whole-piece) lines
+  const totals = new Map()
+  cart.value.filter(i => !i.remnantId).forEach(i => {
+    const k = `${i.id}:${i.variantId ?? ''}`
+    totals.set(k, { id: i.id, variantId: i.variantId, qty: (totals.get(k)?.qty || 0) + i.qty })
+  })
+  for (const t of totals.values()) {
+    const product = products.value.find(p => p.id == t.id)
+    if (!product) continue // only known via a fresh scan; server will validate
+    const variant = product.variants?.find(v => v.id === t.variantId)
+    const stock = variant ? variant.stock : product.stock
+    if (t.qty > stock) {
+      const name = variant ? `${product.name} – ${variant.label}` : product.name
+      return `Not enough stock for ${name}. Only ${stock} available.`
     }
+    if (BLOCK_LOW_STOCK_SALES && variant && variantThreshold(variant) >= variant.stock && variant.stock > 0) {
+      return `${product.name} – ${variant.label} is low on stock and cannot be sold. Remove it from the cart.`
+    }
+  }
+
+  // 2) Leftover lines
+  const remTotals = new Map()
+  cart.value.filter(i => i.remnantId).forEach(i =>
+    remTotals.set(i.remnantId, (remTotals.get(i.remnantId) || 0) + i.qty))
+  for (const [id, q] of remTotals) {
+    const r = remnants.value.find(x => x.id === id)
+    if (!r) return 'A leftover piece in the cart is no longer available. Remove it and refresh.'
+    if (q > r.qty) return `Only ${r.qty} of the ${r.productName} leftover (${fmtLeft(r)}) available.`
   }
   return ''
 }
@@ -1611,17 +2437,19 @@ function verifyStockBeforeCheckout() {
 function openCashModal() {
   checkoutError.value = ''
   if (!customerName.value.trim()) { checkoutError.value = 'Please enter a customer name before processing payment.'; return }
-  if (!cart.value.length) { checkoutError.value = 'Cart is empty. Please add products first.'; return }
+  if (!cart.value.length && !services.value.length) { checkoutError.value = 'Cart is empty. Please add a product or service first.'; return }
   if (total.value <= 0) { checkoutError.value = 'Total must be greater than zero.'; return }
+  // A leftover without a known price must be priced by the cashier first.
+  const unpriced = cart.value.find(i => !(i.price > 0))
+  if (unpriced) { checkoutError.value = `Set a price for ${unpriced.name}.`; return }
   const stockIssue = verifyStockBeforeCheckout()
   if (stockIssue) { checkoutError.value = stockIssue; return }
   amountReceived.value = 0
-  // Fresh idempotency key per checkout attempt; reused across internal
-  // retries of THIS attempt so the backend can dedupe a resubmitted request.
   checkoutIdempotencyKey.value = (crypto.randomUUID
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`)
   showCashModal.value = true
+  nextTick(() => amountInput.value?.focus())
 }
 function closeCashModal() {
   if (isProcessing.value) return
@@ -1667,25 +2495,50 @@ async function completePayment() {
       customer_name: customerName.value.trim(),
       customer_id: selectedCustomer.value?.CustomerID ?? null,
       idempotency_key: checkoutIdempotencyKey.value,
+      // total_amount above = products (after discount) + service_total, i.e. what the customer pays.
+      service_total: serviceTotal.value,
+      service_worker_total: serviceWorkerTotal.value,  // pass-through to workers, NOT shop revenue
+      service_owner_total: serviceOwnerTotal.value,    // the only service amount that counts as shop sales/profit
+      services: services.value.map(x => ({
+        description: x.name,
+        fee: x.fee,
+        worker_name: x.workerName || null,
+        worker_share_type: x.shareType === '%' ? 'percent' : 'amount',
+        worker_share_value: x.shareValue,
+        worker_amount: x.workerAmount,
+        owner_amount: x.ownerAmount,
+      })),
       items: cart.value.map(i => ({
         product_id: i.id,
-        variant_id: i.variantId ?? null, // which size was sold (server re-checks its price)
+        variant_id: i.variantId ?? null, // which size was sold (server re-checks its price + stock)
+        remnant_id: i.remnantId ?? null, // set when this line is a leftover piece (sold from product_remnants)
         quantity: i.qty,
         price: i.price,
         subtotal: round2(i.qty * i.price),
+        // Price changes / cut pieces. The server must accept (and ideally permission-check) these.
+        price_override: i.origPrice != null && i.origPrice !== i.price,
+        original_price: i.origPrice ?? i.price,   // for a cut: the list price of the uncut piece (used for the leftover's baseline)
+        price_reason: i.priceReason || null,
+        // qty = whole pieces consumed from stock; the leftover of each piece becomes a remnant.
+        cut: i.cut ? {
+          full_length: i.cut.fullLength,
+          sold_length: i.cut.soldLength,
+          remainder_length: round2(i.cut.fullLength - i.cut.soldLength),
+          unit: i.cut.unit,
+        } : null,
       })),
     }
     const { data } = await postSaleWithRetry(payload)
 
-    // Snapshot everything the receipt needs BEFORE we clear state, so printing
-    // never races against the cart/customer fields being reset.
-    // (item.name already includes the size label, e.g. "Roof Sheet – 8 ft × 3 ft".)
+    // Snapshot everything the receipt needs BEFORE we clear state.
     receiptData.value = {
       receiptNumber: data?.receipt_number || data?.sale_id || `SSC-${Date.now().toString(36).toUpperCase()}`,
       date: new Date().toLocaleString(),
       customer: customerName.value.trim(),
       cashier: cashierName.value,
-      items: cart.value.map(i => ({ name: i.name, qty: i.qty, price: i.price, total: round2(i.qty * i.price) })),
+      items: cart.value.map(i => ({ name: lineName(i), qty: i.qty, price: i.price, total: round2(i.qty * i.price) })),
+      services: services.value.map(x => ({ name: x.name, fee: x.fee })),   // full fee only — the split is never printed
+      serviceTotal: serviceTotal.value,
       subtotal: subtotal.value,
       discount: discountAmount.value,
       vatableSales: vatableSales.value,
@@ -1698,6 +2551,7 @@ async function completePayment() {
     window.print()
 
     cart.value = []
+    services.value = []
     customerName.value = ''
     selectedCustomer.value = null
     customerSuggestions.value = []
@@ -1705,15 +2559,13 @@ async function completePayment() {
     discountValue.value = 0
     checkoutIdempotencyKey.value = ''
     showCashModal.value = false
-    cartOpen.value = false // sale's done — collapse the mobile drawer back to the summary bar
+    cartOpen.value = false
 
-    await loadCatalog() // refresh stock after a successful sale
-    loadRepeatBuyers() // refresh purchase counts for the dropdown
+    await loadCatalog() // refresh per-size stock AND leftover pieces after a successful sale
+    loadRepeatBuyers()
+    nextTick(() => searchInput.value?.focus())
 
-    // Tell Layout.vue to re-fetch notifications right now instead of
-    // waiting for its 30s poll — a checkout can just have pushed an item
-    // into low-stock/out-of-stock territory, and that should show up in
-    // the bell immediately, not up to 30 seconds later.
+    // Tell Layout.vue to re-fetch notifications right now.
     window.dispatchEvent(new CustomEvent('notifications:refresh'))
   } catch (err) {
     checkoutError.value = err?.response?.data?.message || 'Payment failed. Please try again.'
@@ -1726,22 +2578,8 @@ async function completePayment() {
 
 <style scoped>
 /* ── TOKEN BRIDGE ──
-   Used by everything in this file that is NOT teleported (the product
-   grid, cart panel, scanner UI, etc.) — those elements remain real
-   descendants of .pos-root, so this bridge reaches them fine.
-   IMPORTANT: the two modals below (Add to Cart / Cash Payment) are each
-   wrapped in <Teleport to="body">. Once teleported, they are moved to be
-   direct children of <body> in the ACTUAL DOM — CSS custom properties
-   inherit through the real rendered tree, not the template's visual
-   nesting, so none of the --p-* variables defined here reach anything
-   inside a teleported subtree. Every rule scoped to `.modal-backdrop` /
-   `.modal` and its descendants therefore references `--c-*` tokens
-   directly (with the same inline fallback values) instead of the `--p-*`
-   bridge, so it never depends on `.pos-root` being an ancestor.
-
-   NOTE ON .pcard-* TEXT COLORS: these use the --p-text-primary /
-   --p-text-faint / --p-accent bridge variables so they correctly flip
-   with the active theme instead of being stuck on dark-mode values. */
+   Used by everything NOT teleported. The two modals are teleported to
+   <body>, so they reference --c-* tokens directly with fallbacks. */
 .pos-root {
   --p-bg:             var(--c-bg, #0f172a);
   --p-surface:         var(--c-surface, #1e293b);
@@ -1772,9 +2610,7 @@ async function completePayment() {
   overflow: hidden;
   font-family: 'Inter', system-ui, sans-serif;
   transition: background-color .22s ease;
-  position: relative; /* anchors the mobile cart bar/backdrop, which are
-                          position:fixed and just need this in the tree
-                          for stacking purposes, not for positioning */
+  position: relative;
 }
 
 /* ── LEFT PANEL ── */
@@ -1794,7 +2630,7 @@ async function completePayment() {
 .search-input {
   width: 100%; height: 40px;
   border: 1.5px solid var(--p-border-strong);
-  border-radius: 10px; padding: 0 36px;
+  border-radius: 10px; padding: 0 40px 0 36px;
   font-size: 13px; font-family: inherit;
   background: var(--p-surface); color: var(--p-text-primary);
   outline: none;
@@ -1809,6 +2645,14 @@ async function completePayment() {
   transition: color .15s;
 }
 .search-clear:hover { color: var(--p-text-muted); }
+.search-kbd {
+  position: absolute; right: 10px;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--p-border-strong); border-radius: 5px;
+  font: 600 11px/1 'Inter', system-ui, sans-serif; color: var(--p-text-faint);
+  background: var(--p-surface-sunken); pointer-events: none;
+}
 
 /* Scan button */
 .scan-btn {
@@ -1933,7 +2777,7 @@ async function completePayment() {
 
 /* Product meta */
 .product-meta   { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
-.product-count  { font-size: 12px; font-weight: 600; color: var(--p-text-faint); text-transform: uppercase; letter-spacing: .07em; }
+.product-count  { font-size: 12px; font-weight: 600; color: var(--p-text-faint); text-transform: uppercase; letter-spacing: .07em; margin-right: 4px; }
 .product-filter-tag {
   display: flex; align-items: center; gap: 5px;
   font-size: 12px; font-weight: 600; color: var(--p-accent);
@@ -1941,6 +2785,40 @@ async function completePayment() {
   border-radius: 20px; padding: 2px 8px;
 }
 .product-filter-tag button { background: none; border: none; cursor: pointer; color: inherit; font-size: 10px; padding: 0; }
+.meta-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 11px; margin-left: auto;
+  border: 1.5px solid var(--p-border-strong); border-radius: 20px;
+  background: var(--p-surface); color: var(--p-text-muted);
+  font-size: 11.5px; font-weight: 600; font-family: inherit; cursor: pointer;
+  transition: border-color .15s, background-color .15s, color .15s;
+}
+.meta-chip i { font-size: 10px; }
+.meta-chip:hover { border-color: var(--p-accent-border); color: var(--p-text-primary); }
+.meta-chip--active { background: var(--p-accent-soft); border-color: var(--p-accent-border); color: var(--p-accent); }
+.meta-chip:focus-visible, .scan-btn:focus-visible, .smode-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
+
+/* Products / Leftovers tab switch */
+.view-tabs {
+  display: inline-flex; gap: 4px; padding: 3px;
+  border: 1px solid var(--p-border); border-radius: 10px;
+  background: var(--p-surface-sunken);
+}
+.view-tabs button {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 12px;
+  border: none; border-radius: 7px; background: none; cursor: pointer;
+  font: 600 12px 'Inter', system-ui, sans-serif; color: var(--p-text-muted);
+  transition: background-color .15s, color .15s;
+}
+.view-tabs button:hover { color: var(--p-text-primary); }
+.view-tabs button.is-on { background: var(--p-accent); color: #fff; }
+.view-tabs button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
+.view-tabs-count {
+  min-width: 18px; padding: 0 6px; text-align: center;
+  font-size: 10.5px; font-weight: 700; line-height: 18px; border-radius: 9px;
+  background: rgba(127,127,127,.22);
+}
 
 /* Load state */
 .load-state {
@@ -1984,9 +2862,18 @@ async function completePayment() {
   transition: transform .18s, box-shadow .18s, border-color .18s, background-color .22s;
 }
 .product-card:hover { transform: translateY(-2px); box-shadow: var(--p-shadow-md); border-color: var(--p-accent); }
+.product-card:focus-visible { outline: none; border-color: var(--p-accent); box-shadow: 0 0 0 3px var(--p-ring); }
 .product-card--oos  { opacity: .55; cursor: not-allowed; }
 .product-card--oos:hover { transform: none; box-shadow: var(--p-shadow); border-color: var(--p-border); }
 .product-card--flash { border-color: var(--p-accent); box-shadow: 0 0 0 3px var(--p-ring); }
+.product-card--skeleton { cursor: default; gap: 8px; pointer-events: none; }
+.product-card--skeleton:hover { transform: none; border-color: var(--p-border); box-shadow: var(--p-shadow); }
+
+.sk { border-radius: 6px; background: var(--p-border); animation: sk-pulse 1.3s ease-in-out infinite; }
+.sk--img { height: 96px; border-radius: 7px; }
+.sk--line { height: 11px; width: 90%; }
+.sk--short { width: 55%; }
+@keyframes sk-pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
 .product-stock-badge {
   position: absolute; top: 7px; right: 7px;
@@ -2029,7 +2916,7 @@ async function completePayment() {
   position: absolute; inset: 0;
   background: rgba(234,88,12,.08); display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity .18s; font-size: 22px; color: var(--p-accent);
-  border-radius: calc(var(--radius) - 1px);
+  border-radius: calc(var(--radius) - 1px); pointer-events: none;
 }
 .product-card:not(.product-card--oos):hover .product-add-overlay { opacity: 1; }
 
@@ -2039,12 +2926,15 @@ async function completePayment() {
 }
 .product-empty i { font-size: 36px; }
 
-/* ── RIGHT PANEL ── */
+/* ── RIGHT PANEL ──
+   Header (title + customer) and summary stay pinned;
+   only .cart-items scrolls. */
 .pos-right {
   width: 340px; min-width: 340px;
   background: var(--p-surface);
   border-left: 1px solid var(--p-border);
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column;
+  overflow: hidden;
   transition: background-color .22s, border-color .22s;
 }
 
@@ -2055,17 +2945,30 @@ async function completePayment() {
   flex-shrink: 0;
 }
 
-/* Cart header */
-.cart-header { padding: 18px 20px 14px; border-bottom: 1px solid var(--p-border); flex-shrink: 0; transition: border-color .22s; }
-.cart-header-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
-.cart-header-top-right { display: flex; align-items: center; gap: 8px; }
-.cart-eyebrow { font-size: 10.5px; font-weight: 700; color: var(--p-accent); text-transform: uppercase; letter-spacing: .1em; margin: 0 0 3px; }
-.cart-title   { font-size: 17px; font-weight: 800; color: var(--p-text-primary); margin: 0; letter-spacing: -.02em; transition: color .22s; }
+/* Cart header — one compact title row */
+.cart-header {
+  position: relative; z-index: 5;  /* customer dropdown floats above the list */
+  padding: 14px 16px 12px; border-bottom: 1px solid var(--p-border);
+  flex-shrink: 0; background: var(--p-surface);
+  transition: border-color .22s, background-color .22s;
+}
+.cart-header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.cart-title-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cart-header-top-right { display: flex; align-items: center; gap: 6px; }
+.cart-title   { font-size: 16px; font-weight: 800; color: var(--p-text-primary); margin: 0; letter-spacing: -.02em; transition: color .22s; }
 .cart-badge   {
   font-size: 11px; font-weight: 700;
   background: var(--p-accent-soft); color: var(--p-accent);
-  border: 1px solid var(--p-accent-border); border-radius: 20px; padding: 3px 10px;
+  border: 1px solid var(--p-accent-border); border-radius: 20px; padding: 2px 9px;
 }
+.cart-clear-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 28px; padding: 0 9px; border: none; border-radius: 7px;
+  background: none; color: var(--p-text-faint);
+  font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.cart-clear-link:hover { background: rgba(244,63,94,.10); color: var(--p-red); }
 .cart-drawer-close {
   width: 30px; height: 30px; border: none; border-radius: 8px;
   background: var(--p-surface-raised); color: var(--p-text-muted);
@@ -2079,16 +2982,17 @@ async function completePayment() {
 .customer-field { flex: 1; position: relative; display: flex; align-items: center; }
 .customer-icon  { position: absolute; left: 11px; color: var(--p-text-faint); font-size: 12px; pointer-events: none; }
 .customer-input {
-  width: 100%; height: 38px;
+  width: 100%; height: 36px;
   border: 1.5px solid var(--p-border-strong); border-radius: 9px;
   padding: 0 12px 0 32px; font-size: 13px; font-family: inherit;
   color: var(--p-text-primary); background: var(--p-surface-sunken);
-  outline: none; transition: border-color .18s, background-color .22s, color .22s;
+  outline: none; transition: border-color .18s, box-shadow .18s, background-color .22s, color .22s;
 }
 .customer-input:focus { border-color: var(--p-accent); background: var(--p-surface); }
 .customer-input::placeholder { color: var(--p-text-faint); }
+.customer-input--error { border-color: var(--p-red); box-shadow: 0 0 0 3px rgba(244,63,94,.18); }
 .customer-gen-btn {
-  width: 38px; height: 38px;
+  width: 36px; height: 36px;
   border: 1.5px solid var(--p-border-strong); border-radius: 9px;
   background: var(--p-surface-sunken); color: var(--p-text-muted);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -2097,7 +3001,7 @@ async function completePayment() {
 }
 .customer-gen-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); background: var(--p-accent-soft); }
 
-/* Phone row + customer suggestions + repeat badge */
+/* Customer suggestions + repeat badge */
 .customer-row--status { margin-top: 8px; }
 .customer-suggest {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
@@ -2181,14 +3085,14 @@ async function completePayment() {
   border-color: var(--p-border-strong);
 }
 
-/* Cart items */
+/* Cart items — the only scrolling area of the right panel */
 .cart-items {
-  flex: 1; min-height: 0; overflow-y: auto; padding: 14px 20px;
-  display: flex; flex-direction: column; gap: 8px;
+  flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px;
   scrollbar-width: thin; scrollbar-color: var(--p-border) transparent;
 }
-.cart-items::-webkit-scrollbar { width: 3px; }
-.cart-items::-webkit-scrollbar-thumb { background: var(--p-border); }
+.cart-items::-webkit-scrollbar { width: 4px; }
+.cart-items::-webkit-scrollbar-thumb { background: var(--p-border); border-radius: 4px; }
 
 .cart-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -2199,22 +3103,23 @@ async function completePayment() {
 .cart-empty span { font-size: 12px; }
 
 .cart-item {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   background: var(--p-surface-raised); border: 1px solid var(--p-border);
-  border-radius: 10px; padding: 10px 12px;
+  border-radius: 10px; padding: 8px 10px; flex-shrink: 0;
   transition: border-color .15s, background-color .22s;
 }
 .cart-item:hover { border-color: var(--p-border-strong); }
-.cart-item-index {
-  width: 22px; height: 22px; border-radius: 6px;
-  background: var(--p-accent-soft); color: var(--p-accent);
-  font-size: 11px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
 .cart-item-body  { flex: 1; min-width: 0; }
-.cart-item-name  { font-size: 12.5px; font-weight: 600; color: var(--p-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 0 2px; }
-.cart-item-meta  { font-size: 11.5px; color: var(--p-text-faint); margin: 0; }
-.cart-item-qty-mini { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.cart-item-name {
+  font-size: 12.5px; font-weight: 600; color: var(--p-text-primary);
+  margin: 0 0 2px; line-height: 1.3; white-space: normal; overflow: hidden; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
+}
+.cart-item-sub { display: flex; align-items: center; gap: 2px; font-size: 11.5px; color: var(--p-text-faint); height: 22px; }
+.cart-item-sub-price { margin-right: 6px; font-variant-numeric: tabular-nums; }
+.cart-item-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.cart-item-total { font-size: 13px; font-weight: 700; color: var(--p-text-primary); font-variant-numeric: tabular-nums; }
+.cart-item-qty-mini { display: flex; align-items: center; gap: 4px; }
 .cart-item-qty-btn {
   width: 22px; height: 22px; border: 1px solid var(--p-border-strong); border-radius: 6px;
   background: var(--p-surface); color: var(--p-text-muted); cursor: pointer;
@@ -2222,77 +3127,87 @@ async function completePayment() {
   transition: border-color .15s, color .15s, background .15s;
 }
 .cart-item-qty-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); background: var(--p-accent-soft); }
-.cart-item-qty-val { font-size: 12px; font-weight: 700; color: var(--p-text-primary); width: 18px; text-align: center; }
-.cart-item-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.cart-item-total { font-size: 13px; font-weight: 700; color: var(--p-text-primary); }
+.cart-item-qty-val { font-size: 12px; font-weight: 700; color: var(--p-text-primary); width: 20px; text-align: center; font-variant-numeric: tabular-nums; }
 .cart-item-edit, .cart-item-del {
-  width: 26px; height: 26px; border: none; border-radius: 7px;
+  width: 22px; height: 22px; border: none; border-radius: 6px;
   background: none; color: var(--p-text-faint); cursor: pointer;
-  display: flex; align-items: center; justify-content: center; font-size: 11px;
+  display: flex; align-items: center; justify-content: center; font-size: 10.5px;
   transition: background .15s, color .15s;
 }
 .cart-item-edit:hover { background: var(--p-accent-soft); color: var(--p-accent); }
 .cart-item-del:hover { background: rgba(244,63,94,.12); color: var(--p-red); }
 
-/* Summary */
+/* Summary — compact, pinned to the bottom */
 .cart-summary {
-  border-top: 1px solid var(--p-border); padding: 16px 20px 20px;
-  flex-shrink: 0; background: var(--p-surface-raised);
+  flex-shrink: 0;
+  border-top: 1px solid var(--p-border); padding: 10px 16px 14px;
+  background: var(--p-surface-raised);
   transition: background-color .22s, border-color .22s;
 }
-.summary-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-.summary-row  { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--p-text-muted); }
-.summary-row > span:first-child { font-weight: 500; }
-.summary-row > span:last-child  { font-weight: 600; color: var(--p-text-secondary); }
+.summary-line {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 26px; font-size: 12.5px; color: var(--p-text-muted);
+}
+.summary-line > span:first-child { font-weight: 500; }
+.summary-line > span:last-child { font-weight: 600; color: var(--p-text-secondary); font-variant-numeric: tabular-nums; }
+.summary-saving { font-style: normal; font-weight: 700; font-size: 11.5px; color: var(--p-green); margin-left: 6px; }
 
 .discount-controls { display: flex; align-items: center; gap: 6px; }
 .discount-input {
-  width: 64px; height: 30px;
+  width: 56px; height: 26px;
   border: 1.5px solid var(--p-border-strong); border-radius: 7px;
-  text-align: right; padding: 0 8px; font-size: 12.5px; font-family: inherit;
+  text-align: right; padding: 0 8px; font-size: 12px; font-family: inherit;
   color: var(--p-text-primary); background: var(--p-surface);
   outline: none; transition: border-color .15s, background-color .22s, color .22s;
 }
 .discount-input:focus { border-color: var(--p-accent); }
 .discount-type { display: flex; border: 1.5px solid var(--p-border-strong); border-radius: 7px; overflow: hidden; }
 .dtype-btn {
-  width: 28px; height: 30px; border: none; background: none; cursor: pointer;
+  width: 26px; height: 26px; border: none; background: none; cursor: pointer;
   font-size: 11.5px; font-weight: 600; color: var(--p-text-muted); font-family: inherit;
   transition: background .15s, color .15s;
 }
 .dtype-btn:first-child { border-right: 1px solid var(--p-border-strong); }
 .dtype-btn--active { background: var(--p-accent-soft); color: var(--p-accent); }
 
+.summary-toggle {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  padding: 4px 0; border: none; background: none; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 500; color: var(--p-text-faint);
+  transition: color .15s;
+}
+.summary-toggle:hover { color: var(--p-text-secondary); }
+.summary-toggle i { font-size: 9px; transition: transform .18s; }
+.summary-toggle--open i { transform: rotate(180deg); }
+.summary-tax { margin: 2px 0 4px; padding-left: 10px; border-left: 2px solid var(--p-border-strong); }
+.summary-tax .summary-line { min-height: 22px; font-size: 12px; }
+
 .summary-total {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 0 14px; border-top: 1px solid var(--p-border-strong);
+  padding: 10px 0; margin-top: 4px; border-top: 1px solid var(--p-border-strong);
   transition: border-color .22s;
 }
 .summary-total > span:first-child { font-size: 13px; font-weight: 600; color: var(--p-text-secondary); }
-.summary-total-val { font-size: 22px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.04em; }
+.summary-total-val { font-size: 20px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 
 .checkout-error { font-size: 12px; font-weight: 600; color: var(--p-red); margin: 0 0 10px; text-align: center; }
 
 .pay-btn {
-  width: 100%; height: 46px; border: none; border-radius: 11px;
+  width: 100%; height: 42px; border: none; border-radius: 11px;
   background: linear-gradient(135deg, var(--p-accent) 0%, var(--c-accent-deep, #c2410c) 100%);
-  color: #fff; font-size: 14px; font-weight: 700; font-family: inherit;
+  color: #fff; font-size: 13.5px; font-weight: 700; font-family: inherit;
   cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
-  box-shadow: var(--c-shadow-accent, 0 4px 14px rgba(249,115,22,.35)); margin-bottom: 8px;
+  box-shadow: 0 2px 8px rgba(249,115,22,.25);
   transition: opacity .18s, transform .18s, box-shadow .18s;
 }
-.pay-btn:hover:not(:disabled) { opacity: .92; transform: translateY(-1px); box-shadow: var(--c-shadow-accent-h, 0 6px 20px rgba(249,115,22,.45)); }
-.pay-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-
-.clear-btn {
-  width: 100%; height: 36px;
-  border: 1.5px solid var(--p-border-strong); border-radius: 9px;
-  background: none; color: var(--p-text-muted);
-  font-size: 12.5px; font-weight: 600; font-family: inherit; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  transition: background .15s, color .15s, border-color .15s;
+.pay-btn:hover:not(:disabled) { opacity: .94; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(249,115,22,.35); }
+.pay-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
+/* Disabled = clearly inactive, not a dimmed orange block */
+.pay-btn:disabled {
+  cursor: not-allowed; transform: none; box-shadow: none;
+  background: var(--p-surface-sunken); color: var(--p-text-faint);
+  border: 1.5px solid var(--p-border-strong);
 }
-.clear-btn:hover { background: rgba(244,63,94,.10); color: var(--p-red); border-color: rgba(244,63,94,.30); }
 
 /* ── MOBILE CART DRAWER CHROME ── */
 .cart-backdrop {
@@ -2324,13 +3239,7 @@ async function completePayment() {
 .mobile-cart-bar-cta { margin-left: auto; font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; opacity: .95; }
 
 /* ── MODALS ──
-   These live inside <Teleport to="body">, so they render OUTSIDE
-   .pos-root in the actual DOM tree. CSS custom properties inherit
-   through the real rendered tree, not the template's visual nesting —
-   so the --p-* bridge tokens defined on .pos-root do NOT reach
-   anything here. Every rule below uses --c-* directly with an inline
-   fallback instead of --p-*, so it never depends on .pos-root being
-   an ancestor. */
+   Teleported to <body>: use --c-* directly with inline fallbacks. */
 .modal-backdrop {
   position: fixed; inset: 0;
   background: var(--c-overlay, rgba(0,0,0,.6)); backdrop-filter: blur(6px);
@@ -2351,6 +3260,94 @@ async function completePayment() {
   transition: background-color .22s, border-color .22s;
 }
 .modal--narrow { max-width: 380px; }
+/* Wide modal for the multi-size table */
+.modal--wide { max-width: 720px; }
+.modal--confirm { max-width: 400px; }
+.modal--service { max-width: 500px; }
+.modal--adjust  { max-width: 480px; }
+
+/* Cut piece / custom price — modal */
+.adj-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
+  border: 1px solid var(--c-border, #334155); border-radius: 10px; background: var(--c-surface-sunken, #0b1524);
+}
+.adj-tabs button {
+  height: 32px; border: none; border-radius: 7px; background: none; cursor: pointer;
+  font: 700 12.5px 'Inter', system-ui, sans-serif; color: var(--c-text-muted, #94a3b8);
+  transition: background-color .15s, color .15s;
+}
+.adj-tabs button.is-active { background: var(--c-accent-soft, rgba(249,115,22,.15)); color: var(--c-accent, #f97316); }
+.adj-remainder {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(16,185,129,.10); border: 1px solid rgba(16,185,129,.30);
+  font-size: 12.5px; color: var(--c-text-secondary, #cbd5e1);
+}
+.adj-remainder i { color: #10b981; }
+.adj-remainder strong { color: #10b981; }
+.adj-price-input { height: 46px; font-size: 18px; }
+.adj-reset { margin-right: auto; align-self: center; }
+
+/* Cut piece / custom price — cart line */
+.cart-item-adj { margin: 2px 0 0; font-size: 11px; font-weight: 700; color: var(--p-accent); }
+
+/* Extra service — modal */
+.svc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.svc-chip {
+  height: 28px; padding: 0 11px; border-radius: 20px; cursor: pointer;
+  border: 1.5px solid var(--c-border-strong, #47566b); background: var(--c-surface, #1e293b);
+  color: var(--c-text-secondary, #cbd5e1); font: 600 12px 'Inter', system-ui, sans-serif;
+  transition: border-color .15s, color .15s, background-color .15s;
+}
+.svc-chip:hover, .svc-chip--on { border-color: var(--c-accent-border, rgba(249,115,22,.35)); color: var(--c-accent, #f97316); background: var(--c-accent-soft, rgba(249,115,22,.15)); }
+.svc-seg { display: inline-flex; border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 8px; overflow: hidden; }
+.svc-seg button {
+  width: 36px; height: 28px; border: none; background: none; cursor: pointer;
+  font: 700 12px 'Inter', system-ui, sans-serif; color: var(--c-text-muted, #94a3b8);
+  transition: background-color .15s, color .15s;
+}
+.svc-seg button + button { border-left: 1px solid var(--c-border-strong, #47566b); }
+.svc-seg button.is-active { background: var(--c-accent-soft, rgba(249,115,22,.15)); color: var(--c-accent, #f97316); }
+.svc-share-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.svc-share-input {
+  width: 92px; height: 36px; border-radius: 8px; padding: 0 10px; text-align: right;
+  border: 1.5px solid var(--c-border-strong, #47566b); background: var(--c-surface-sunken, #0b1524);
+  color: var(--c-text-primary, #f1f5f9); font: 700 14px 'Inter', system-ui, sans-serif; outline: none;
+  transition: border-color .15s;
+}
+.svc-share-input:focus { border-color: var(--c-accent, #f97316); }
+.svc-owner-val { color: #10b981; font-weight: 800; }
+.svc-note { margin: -8px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--c-text-faint, #64748b); }
+
+/* Extra service — cart panel */
+.cart-service-bar { flex-shrink: 0; padding: 0 12px 10px; }
+.cart-service-btn {
+  width: 100%; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1.5px dashed var(--p-border-strong); border-radius: 10px; background: none; cursor: pointer;
+  color: var(--p-text-muted); font: 600 12.5px 'Inter', system-ui, sans-serif;
+  transition: border-color .15s, color .15s, background-color .15s;
+}
+.cart-service-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); background: var(--p-accent-soft); }
+.cart-service-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
+.cart-item--service { border-left: 3px solid var(--p-accent); }
+.svc-line-icon { margin-right: 6px; font-size: 10.5px; color: var(--p-accent); }
+
+/* Clear-cart confirmation */
+.confirm-body { padding: 28px 24px 8px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+.confirm-icon {
+  width: 52px; height: 52px; border-radius: 50%;
+  background: rgba(244,63,94,.14); color: #f43f5e; border: 1px solid rgba(244,63,94,.3);
+  display: flex; align-items: center; justify-content: center; font-size: 20px;
+}
+.confirm-title { margin: 4px 0 0; font-size: 17px; font-weight: 800; color: var(--c-text-primary, #f1f5f9); letter-spacing: -.01em; }
+.confirm-text  { margin: 0; font-size: 13px; line-height: 1.55; color: var(--c-text-muted, #94a3b8); max-width: 320px; }
+.confirm-footer { border-top: none; padding-top: 18px; }
+.confirm-footer .modal-cancel, .confirm-footer .modal-confirm { flex: 1; }
+.modal-confirm--danger {
+  background: linear-gradient(135deg, #f43f5e, #be123c);
+  box-shadow: 0 4px 14px rgba(244,63,94,.35);
+}
+.modal-confirm--danger:hover:not(:disabled) { box-shadow: 0 6px 20px rgba(244,63,94,.45); }
+.modal-cancel:focus-visible, .modal-confirm:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--c-accent-ring, rgba(249,115,22,.25)); }
 
 .modal-header {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -2370,73 +3367,126 @@ async function completePayment() {
 
 .modal-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; min-height: 0; }
 
-/* ── Add to Cart modal: product header card ── */
-.modal-product-card {
-  display: flex; align-items: center; gap: 14px;
-  background-color: var(--c-surface-raised, #26364b) !important;
-  opacity: 1 !important;
-  border: 1px solid var(--c-border, #334155);
-  border-radius: 14px; padding: 12px;
-  transition: background-color .22s, border-color .22s;
-}
-.modal-product-img {
-  width: 56px; height: 56px; border-radius: 10px; flex-shrink: 0;
-  background: var(--c-surface-sunken, #0b1524); overflow: hidden;
+/* Header: thumbnail + title */
+.modal-head-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.modal-thumb {
+  width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; overflow: hidden;
+  background: var(--c-surface-sunken, #0b1524); border: 1px solid var(--c-border, #334155);
   display: flex; align-items: center; justify-content: center;
+  color: var(--c-text-faint, #64748b); font-size: 16px;
 }
-.modal-product-img img { width: 100%; height: 100%; object-fit: contain; }
-.modal-product-img-placeholder { color: var(--c-text-faint, #64748b); font-size: 20px; }
-.modal-product-info { min-width: 0; }
-.modal-product-name {
-  font-size: 15px; font-weight: 700; color: var(--c-text-primary, #f1f5f9);
-  margin: 0 0 3px; line-height: 1.3;
-}
-.modal-product-price { font-size: 13px; font-weight: 700; color: var(--c-accent, #f97316); margin: 0; }
-.modal-product-price span { font-weight: 500; color: var(--c-text-faint, #64748b); margin-left: 4px; }
+.modal-thumb img { width: 100%; height: 100%; object-fit: contain; }
 
-/* Size & Price dropdown */
-.variant-select-wrap { position: relative; display: flex; align-items: center; }
-.variant-select {
-  width: 100%; height: 42px; padding: 0 34px 0 12px;
-  border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 10px;
-  background: var(--c-surface-sunken, #0b1524); color: var(--c-text-primary, #f1f5f9);
-  font-size: 13.5px; font-weight: 600; font-family: inherit; outline: none;
-  appearance: none; -webkit-appearance: none; cursor: pointer;
-  transition: border-color .15s, box-shadow .15s;
+.size-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.link-btn {
+  border: none; background: none; cursor: pointer; padding: 4px 8px; border-radius: 6px;
+  font: 600 12px 'Inter', system-ui, sans-serif; color: var(--c-text-muted, #94a3b8);
+  transition: color .15s, background-color .15s;
 }
-.variant-select:focus {
-  border-color: var(--c-accent, #f97316);
-  box-shadow: 0 0 0 3px var(--c-accent-ring, rgba(249,115,22,.25));
-}
-.variant-select-caret {
-  position: absolute; right: 12px; font-size: 10px;
-  color: var(--c-text-faint, #64748b); pointer-events: none;
-}
+.link-btn:hover { color: var(--c-accent, #f97316); background: var(--c-accent-soft, rgba(249,115,22,.15)); }
 
-.modal-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
-.modal-stats--2col { grid-template-columns: 1fr 1fr; }
-.modal-stat {
-  background-color: var(--c-surface-raised, #26364b) !important;
-  opacity: 1 !important;
-  border: 1px solid var(--c-border, #334155);
-  border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;
-  transition: background-color .22s, border-color .22s;
+/* "Find a size" box for long size lists */
+.variant-search {
+  display: flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 12px;
+  border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 9px;
+  background: var(--c-surface-sunken, #0b1524);
+  transition: border-color .15s;
 }
-.modal-stat--icon { display: flex; align-items: center; gap: 10px; }
-.modal-stat-icon {
-  width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
-  background: var(--c-accent-soft, rgba(249,115,22,.15)); color: var(--c-accent, #f97316);
-  display: flex; align-items: center; justify-content: center; font-size: 13px;
+.variant-search:focus-within { border-color: var(--c-accent, #f97316); }
+.variant-search i { font-size: 11px; color: var(--c-text-faint, #64748b); }
+.variant-search input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  font: 500 13px 'Inter', system-ui, sans-serif; color: var(--c-text-primary, #f1f5f9);
 }
-.modal-stat-icon--red { background: rgba(244,63,94,.14); color: var(--c-danger, #f43f5e); }
-.modal-stat-label { font-size: 10.5px; font-weight: 600; color: var(--c-text-faint, #64748b); text-transform: uppercase; letter-spacing: .06em; }
-.modal-stat-val   { font-size: 15px; font-weight: 700; color: var(--c-text-primary, #f1f5f9); }
-.val--red { color: #f43f5e !important; }
-.val--amber { color: #f59e0b !important; }
+.variant-search input::placeholder { color: var(--c-text-faint, #64748b); }
+.variant-search button { border: none; background: none; cursor: pointer; color: var(--c-text-faint, #64748b); font-size: 11px; padding: 2px; }
+.variant-none { margin: 8px 0; text-align: center; font-size: 12.5px; color: var(--c-text-faint, #64748b); }
+
+/* Size table */
+.vtable {
+  border: 1px solid var(--c-border, #334155); border-radius: 12px; overflow: hidden;
+  background: var(--c-surface-sunken, #0b1524);
+}
+.vhead, .vrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px 124px 92px;
+  grid-template-areas: "main stock step amt";
+  align-items: center; column-gap: 12px; padding: 0 14px;
+}
+.vhead {
+  height: 34px; background: var(--c-surface-raised, #26364b);
+  border-bottom: 1px solid var(--c-border, #334155);
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--c-text-faint, #64748b);
+}
+.vhead > :nth-child(3) { text-align: center; }
+.vhead > :nth-child(4) { text-align: right; }
+
+.vrow {
+  min-height: 58px; padding-top: 8px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--c-border, #334155);
+  transition: background-color .15s, box-shadow .15s;
+}
+.vrow:last-of-type { border-bottom: none; }
+.vrow--active { background: var(--c-accent-soft, rgba(249,115,22,.15)); box-shadow: inset 3px 0 0 var(--c-accent, #f97316); }
+.vrow--off .vrow-main, .vrow--off .vrow-amt { opacity: .5; }
+
+.vrow-main { grid-area: main; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vrow-label {
+  font-size: 13.5px; font-weight: 700; color: var(--c-text-primary, #f1f5f9);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vrow-price { font-size: 12px; font-weight: 700; color: var(--c-accent, #f97316); font-variant-numeric: tabular-nums; }
+
+.vrow-stock {
+  grid-area: stock; justify-self: start;
+  font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 20px; white-space: nowrap;
+  background: rgba(16,185,129,.14); color: #10b981;
+}
+.vrow--low .vrow-stock { background: rgba(245,158,11,.16); color: #f59e0b; }
+.vrow--oos .vrow-stock { background: rgba(244,63,94,.14);  color: #f43f5e; }
+
+.vstep { grid-area: step; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.vstep-btn {
+  width: 28px; height: 28px; border-radius: 7px; cursor: pointer; flex-shrink: 0;
+  border: 1.5px solid var(--c-border-strong, #47566b);
+  background: var(--c-surface, #1e293b); color: var(--c-text-secondary, #cbd5e1);
+  display: flex; align-items: center; justify-content: center; font-size: 10px;
+  transition: border-color .15s, color .15s, background-color .15s;
+}
+.vstep-btn:hover:not(:disabled) { border-color: var(--c-accent-border, rgba(249,115,22,.35)); color: var(--c-accent, #f97316); background: var(--c-accent-soft, rgba(249,115,22,.15)); }
+.vstep-btn:disabled { opacity: .35; cursor: not-allowed; }
+.vstep-input {
+  width: 48px; height: 28px; border-radius: 7px; text-align: center;
+  border: 1.5px solid var(--c-border-strong, #47566b);
+  background: var(--c-surface, #1e293b); color: var(--c-text-primary, #f1f5f9);
+  font: 700 13px 'Inter', system-ui, sans-serif; outline: none;
+  -moz-appearance: textfield; appearance: textfield;
+  transition: border-color .15s;
+}
+.vstep-input::-webkit-outer-spin-button, .vstep-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vstep-input:focus { border-color: var(--c-accent, #f97316); }
+.vstep-input:disabled { opacity: .4; cursor: not-allowed; }
+.vstep-input::placeholder { color: var(--c-text-faint, #64748b); }
+
+.vrow-amt {
+  grid-area: amt; text-align: right;
+  font-size: 13px; font-weight: 800; color: var(--c-text-primary, #f1f5f9); font-variant-numeric: tabular-nums;
+}
+.vrow:not(.vrow--active) .vrow-amt { color: var(--c-text-faint, #64748b); font-weight: 600; }
+
+/* Footer: running summary + actions */
+.modal-footer--summary { align-items: center; }
+.modal-summary { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.modal-summary-meta { font-size: 11.5px; font-weight: 600; color: var(--c-text-muted, #94a3b8); }
+.modal-summary-total { font-size: 20px; font-weight: 800; letter-spacing: -.02em; color: var(--c-accent, #f97316); font-variant-numeric: tabular-nums; }
+.modal-cancel--fit  { flex: 0 0 auto; padding: 0 20px; }
+.modal-confirm--fit { flex: 0 0 auto; padding: 0 22px; min-width: 160px; }
 
 .modal-section { display: flex; flex-direction: column; gap: 10px; }
-.modal-section-label { font-size: 13px; font-weight: 700; color: var(--c-text-secondary, #cbd5e1); transition: color .22s; }
-.modal-section-hint  { font-weight: 400; color: var(--c-text-faint, #64748b); font-size: 11.5px; }
+.modal-section-label { font-size: 13px; font-weight: 700; color: var(--c-text-secondary, #cbd5e1); transition: color .22s; display: flex; align-items: center; flex-wrap: wrap; }
+.modal-section-hint  { font-weight: 400; color: var(--c-text-faint, #64748b); font-size: 11.5px; margin-left: 6px; }
 .modal-error { font-size: 12px; font-weight: 600; color: var(--c-danger, #f43f5e); margin: 0; display: flex; align-items: center; gap: 6px; }
 
 .cut-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -2462,34 +3512,6 @@ async function completePayment() {
 .cut-result-item span   { font-size: 10.5px; font-weight: 600; color: var(--c-text-faint, #64748b); text-transform: uppercase; letter-spacing: .06em; }
 .cut-result-item strong { font-size: 13.5px; font-weight: 700; color: var(--c-text-primary, #f1f5f9); }
 .cut-result-item--price strong { color: var(--c-accent, #f97316); }
-
-.qty-row { display: flex; align-items: center; gap: 10px; }
-.qty-btn {
-  width: 38px; height: 38px;
-  border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 9px;
-  background: var(--c-surface, #1e293b); color: var(--c-text-secondary, #cbd5e1);
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  font-size: 12px; flex-shrink: 0;
-  transition: border-color .15s, background-color .15s, color .15s;
-}
-.qty-btn:hover { border-color: var(--c-accent-border, rgba(249,115,22,.35)); color: var(--c-accent, #f97316); background: var(--c-accent-soft, rgba(249,115,22,.15)); }
-.qty-input {
-  width: 70px; height: 38px; border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 9px;
-  text-align: center; font-size: 16px; font-weight: 700; font-family: inherit;
-  color: var(--c-text-primary, #f1f5f9); background: var(--c-surface-sunken, #0b1524);
-  outline: none; transition: border-color .15s, background-color .22s, color .22s;
-}
-.qty-input:focus { border-color: var(--c-accent, #f97316); background: var(--c-surface, #1e293b); }
-
-/* Sticky, unmissable line total between body and footer */
-.modal-line-total-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 22px; margin: 0; flex-shrink: 0;
-  background: var(--c-accent-soft, rgba(249,115,22,.15)); border-top: 1px solid var(--c-accent-border, rgba(249,115,22,.35));
-  transition: background-color .22s, border-color .22s;
-}
-.modal-line-total-bar span   { font-size: 12.5px; font-weight: 700; color: var(--c-accent, #f97316); text-transform: uppercase; letter-spacing: .05em; }
-.modal-line-total-bar strong { font-size: 19px; font-weight: 800; color: var(--c-accent, #f97316); letter-spacing: -.02em; }
 
 .pay-summary {
   background-color: var(--c-surface-raised, #26364b) !important;
@@ -2581,38 +3603,33 @@ async function completePayment() {
 .fade-enter-active, .fade-leave-active { transition: opacity .22s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
-/* ═══════════════════════════════════════════════════════
-   RESPONSIVE — TABLET (≤1024px)
-   Matches Layout's page-content padding at this width (22px) so the
-   negative margin that pulls .pos-root flush to the viewport edges
-   stays exact, and trims the cart column so more of the grid stays
-   visible before the layout stacks entirely at 768px.
-════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .sk, .scanner-line { animation: none; }
+  .modal-fade-enter-active, .modal-fade-leave-active,
+  .scanner-slide-enter-active, .scanner-slide-leave-active,
+  .fade-enter-active, .fade-leave-active { transition: none; }
+}
+
+/* ═══ RESPONSIVE — TABLET (≤1024px) ═══ */
 @media (max-width: 1024px) {
   .pos-root { margin: -22px; }
   .pos-right { width: 300px; min-width: 300px; }
   .product-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
 }
 
-/* ═══════════════════════════════════════════════════════
-   RESPONSIVE — MOBILE (≤768px)
-   Product grid and cart stop sharing the screen side-by-side. The grid
-   takes the full width and scrolls with the page; the cart becomes a
-   bottom-sheet drawer (closed by default, full-width, slides up from
-   under the mobile-cart-bar) instead of a fixed side column.
-════════════════════════════════════════════════════════ */
+/* ═══ RESPONSIVE — MOBILE (≤768px) ═══ */
 @media (max-width: 768px) {
   .pos-root {
     flex-direction: column;
     height: auto;
     min-height: 0;
     overflow: visible;
-    margin: -16px; /* matches Layout's mobile page-content padding */
+    margin: -16px;
   }
 
   .pos-left {
     overflow: visible;
-    padding: 14px 14px 92px; /* bottom room so the mobile-cart-bar never covers the last row */
+    padding: 14px 14px 92px;
   }
 
   .product-grid {
@@ -2622,6 +3639,7 @@ async function completePayment() {
 
   .search-bar { flex-wrap: wrap; row-gap: 8px; }
   .search-field { flex: 1 1 100%; }
+  .search-kbd { display: none; }
   .scan-btn { flex: 1; justify-content: center; }
   .filter-select-wrap { flex: 1; }
   .filter-select { width: 100%; }
@@ -2643,13 +3661,28 @@ async function completePayment() {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .pos-right.cart-drawer--open { transform: translateY(0); }
+  /* drawer height is content-driven here, so the list needs a floor */
+  .cart-items { flex: 1 1 auto; min-height: 220px; }
+}
+
+/* Narrow screens: each size becomes a two-line card */
+@media (max-width: 640px) {
+  .vhead { display: none; }
+  .vrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "main step" "stock amt";
+    row-gap: 8px; padding: 10px 12px;
+  }
+  .modal-footer--summary { flex-wrap: wrap; }
+  .modal-summary { flex: 1 1 100%; flex-direction: row; align-items: baseline; justify-content: space-between; }
+  .modal-cancel--fit, .modal-confirm--fit { flex: 1; }
 }
 
 @media (max-width: 420px) {
   .modal-header { padding: 16px 18px; }
   .modal-body   { padding: 16px 18px; }
   .modal-footer { padding: 12px 18px 18px; }
-  .modal-stats, .cut-grid { grid-template-columns: 1fr; }
+  .cut-grid { grid-template-columns: 1fr; }
 }
 </style>
 

@@ -11,14 +11,35 @@ use Carbon\Carbon;
 
 class HomeController extends Controller
 {
+    /** Item profit = (price at sale - cost at sale) * quantity. */
+    private const PROFIT_SQL = 'SUM((sales_items.PriceAtSale - COALESCE(sales_items.CostAtSale, 0)) * sales_items.Quantity)';
+
+    /**
+     * Shop sales = what the customer paid MINUS the worker's pass-through share
+     * of any extra services. Needs the `svc` subquery joined (see svcSub()).
+     */
+    private const NET_SALES_SQL = 'SUM(sales.TotalAmount - COALESCE(svc.worker_total, 0))';
+
+    /** Per-sale worker total, to join onto `sales`. */
+    private function svcSub()
+    {
+        return DB::raw('(SELECT SaleID, SUM(WorkerAmount) AS worker_total FROM sale_services GROUP BY SaleID) as svc');
+    }
+
+    /** sales + worker totals, ready to filter and sum. */
+    private function netSalesQuery()
+    {
+        return DB::table('sales')->leftJoin($this->svcSub(), 'svc.SaleID', '=', 'sales.SaleID');
+    }
+
     public function dashboard(Request $request)
     {
         $today = Carbon::today();
 
         // --- BASIC TODAY METRICS ---------------------------------------------
-        $todaySales = DB::table('sales')
-            ->whereDate('SaleDate', $today)
-            ->select(DB::raw('ROUND(SUM(TotalAmount)) as total'))
+        $todaySales = $this->netSalesQuery()
+            ->whereDate('sales.SaleDate', $today)
+            ->selectRaw('ROUND(' . self::NET_SALES_SQL . ') as total')
             ->value('total') ?? 0;
 
         $itemsSoldToday = DB::table('sales_items')
@@ -30,22 +51,16 @@ class HomeController extends Controller
 
         // --- INVENTORY SUMMARY -----------------------------------------------
         $inventorySummary = [
-            'quantity_in_hand'   => Inventory::sum('QuantityOnHand'),
-            'quantity_to_receive'=> 0,
+            'quantity_in_hand'    => Inventory::sum('QuantityOnHand'),
+            'quantity_to_receive' => 0,
 
-            // FIX: "low stock" should mean current stock has dropped to/below
-            // the product's own ReorderLevel — not half of its OpeningStock.
-            // OpeningStock is a one-time snapshot from when the product was
-            // created; comparing against it makes fast-selling products
-            // (large OpeningStock, since sold down) get flagged even when
-            // they're still well above their actual reorder threshold.
-            'low_stock_items'    => DB::table('products')
+            'low_stock_items'     => DB::table('products')
                 ->join('inventories', 'products.ProductID', '=', 'inventories.ProductID')
                 ->whereColumn('inventories.QuantityOnHand', '<=', 'inventories.ReorderLevel')
                 ->count(),
 
-            'total_items'        => Product::count(),
-            'active_items'       => Product::whereHas('inventory', function ($q) {
+            'total_items'         => Product::count(),
+            'active_items'        => Product::whereHas('inventory', function ($q) {
                 $q->where('QuantityOnHand', '>', 0);
             })->count(),
         ];
@@ -55,13 +70,19 @@ class HomeController extends Controller
         $startDate = $this->getStartDate($dateRange)->startOfDay();
         $endDate   = $this->getEndDate($dateRange)->endOfDay();
 
-        // --- TOTAL PROFIT -----------------------------------------------------
-        $totalProfit = DB::table('sales_items')
+        // --- TOTAL PROFIT = item profit + the shop's share of services --------
+        $itemProfit = DB::table('sales_items')
             ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
             ->whereBetween('sales.SaleDate', [$startDate, $endDate])
-            ->selectRaw('SUM((sales_items.PriceAtSale - products.CostPrice) * sales_items.Quantity) as profit')
+            ->selectRaw(self::PROFIT_SQL . ' as profit')
             ->value('profit') ?? 0;
+
+        $serviceProfit = DB::table('sale_services')
+            ->join('sales', 'sale_services.SaleID', '=', 'sales.SaleID')
+            ->whereBetween('sales.SaleDate', [$startDate, $endDate])
+            ->sum('sale_services.OwnerAmount');
+
+        $totalProfit = round((float) $itemProfit + (float) $serviceProfit, 2);
 
         // --- TOP SELLING ITEMS ------------------------------------------------
         $topSellingItems = DB::table('sales_items')
@@ -80,32 +101,33 @@ class HomeController extends Controller
             ->limit(5)
             ->get();
 
-        // --- DAILY SALES ------------------------------------------------------
-        $rawSales = Sale::whereBetween('SaleDate', [$startDate, $endDate])
-            ->select(
-                DB::raw('DATE(SaleDate) as date'),
-                DB::raw('SUM(TotalAmount) as total')
-            )
-            ->groupBy('date')
-            ->orderBy('date')
-            ->get()
-            ->keyBy('date');
-
-        // --- DAILY PROFIT -----------------------------------------------------
-        $rawProfit = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
+        // --- DAILY SALES (shop's share) ---------------------------------------
+        $rawSales = $this->netSalesQuery()
             ->whereBetween('sales.SaleDate', [$startDate, $endDate])
-            ->selectRaw('DATE(sales.SaleDate) as date,
-                SUM((sales_items.PriceAtSale - products.CostPrice) * sales_items.Quantity) as profit')
+            ->selectRaw('DATE(sales.SaleDate) as date, ' . self::NET_SALES_SQL . ' as total')
             ->groupBy('date')
             ->orderBy('date')
             ->get()
             ->keyBy('date');
 
-        // ----------------------------------------------------------------------
-        // 🔥 FIX: Generate full date range & align sales + profit data
-        // ----------------------------------------------------------------------
+        // --- DAILY PROFIT: items + services ------------------------------------
+        $rawItemProfit = DB::table('sales_items')
+            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
+            ->whereBetween('sales.SaleDate', [$startDate, $endDate])
+            ->selectRaw('DATE(sales.SaleDate) as date, ' . self::PROFIT_SQL . ' as profit')
+            ->groupBy('date')
+            ->get()
+            ->keyBy('date');
+
+        $rawServiceProfit = DB::table('sale_services')
+            ->join('sales', 'sale_services.SaleID', '=', 'sales.SaleID')
+            ->whereBetween('sales.SaleDate', [$startDate, $endDate])
+            ->selectRaw('DATE(sales.SaleDate) as date, SUM(sale_services.OwnerAmount) as profit')
+            ->groupBy('date')
+            ->get()
+            ->keyBy('date');
+
+        // --- Align sales + profit over the full date range --------------------
         $monthlySales = [];
         $dailyProfit  = [];
 
@@ -120,19 +142,22 @@ class HomeController extends Controller
 
             $monthlySales[] = [
                 'date'  => $date,
-                'total' => $rawSales[$date]->total ?? 0
+                'total' => $rawSales[$date]->total ?? 0,
             ];
 
             $dailyProfit[] = [
                 'date'   => $date,
-                'profit' => $rawProfit[$date]->profit ?? 0
+                'profit' => round(
+                    (float) ($rawItemProfit[$date]->profit ?? 0) + (float) ($rawServiceProfit[$date]->profit ?? 0),
+                    2
+                ),
             ];
         }
 
-        // TOTAL SALES RANGE
-        $monthlyTotal = DB::table('sales')
-            ->whereBetween('SaleDate', [$startDate, $endDate])
-            ->select(DB::raw('SUM(TotalAmount) as total'))
+        // TOTAL SALES RANGE (shop's share)
+        $monthlyTotal = $this->netSalesQuery()
+            ->whereBetween('sales.SaleDate', [$startDate, $endDate])
+            ->selectRaw(self::NET_SALES_SQL . ' as total')
             ->value('total') ?? 0;
 
         // --- RETURN RESPONSE --------------------------------------------------
@@ -144,13 +169,12 @@ class HomeController extends Controller
             'inventorySummary'  => $inventorySummary,
             'topSellingItems'   => $topSellingItems,
 
-            // 🔥 FIXED data (perfectly aligned)
             'monthlySales'      => $monthlySales,
             'dailyProfit'       => $dailyProfit,
 
             'monthlyTotal'      => $monthlyTotal,
             'totalProfit'       => $totalProfit,
-            'dateRange'         => $dateRange
+            'dateRange'         => $dateRange,
         ]);
     }
 

@@ -10,19 +10,41 @@ class SalesItem extends Model
 {
     /** @use HasFactory<\Database\Factories\SalesItemFactory> */
     use HasFactory;
+
     protected $primaryKey = 'SalesItemID';
 
     protected $fillable = [
         'SaleID',
         'ProductID',
+        'VariantID',
+        'VariantLabel',
         'Quantity',
-        'PriceAtSale'
+        'PriceAtSale',
+        'CostAtSale',
     ];
 
     protected $casts = [
-        'Quantity' => 'integer',
-        'PriceAtSale' => 'decimal:2'
+        'Quantity'    => 'integer',
+        'PriceAtSale' => 'decimal:2',
+        'CostAtSale'  => 'decimal:2',
     ];
+
+    /**
+     * Cost of what was actually sold.
+     * A cut piece only carries its share of the full piece's cost:
+     * cost x (length sold / full length).
+     */
+    public static function costFor(float $fullCost, ?array $cut = null): float
+    {
+        $full = (float) ($cut['full_length'] ?? 0);
+        $sold = (float) ($cut['sold_length'] ?? 0);
+
+        if ($full > 0 && $sold > 0) {
+            return round($fullCost * min($sold / $full, 1), 2);
+        }
+
+        return round($fullCost, 2);
+    }
 
     public function product(): BelongsTo
     {

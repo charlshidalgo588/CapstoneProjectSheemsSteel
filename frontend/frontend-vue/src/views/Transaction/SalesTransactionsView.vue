@@ -10,80 +10,158 @@
         </div>
         <div class="header-actions">
           <button v-if="selectedSales.length > 0" @click="openPasswordModal" class="btn btn--danger">
-            <i class="fa-solid fa-trash"></i> Delete Selected
+            <i class="fa-solid fa-trash"></i> Delete selected
             <span class="selected-count">{{ selectedSales.length }}</span>
           </button>
-          <RouterLink to="/pos" class="btn btn--primary">
+          <RouterLink to="/point-of-sale" class="btn btn--primary">
             <i class="fa-solid fa-plus"></i> New Sale
           </RouterLink>
         </div>
       </div>
 
-      <!-- ── PERIOD DROPDOWN ── -->
-      <div class="period-dropdown-wrap period-dropdown">
-        <button @click="togglePeriodDropdown" class="period-trigger">
-          <span class="period-trigger-label">View by</span>
-          <span class="period-trigger-val">{{ selectedPeriodLabel }}</span>
-          <i class="fa-solid fa-chevron-down period-caret" :class="{ 'period-caret--open': periodDropdown }"></i>
-        </button>
+      <!-- ── TOOLBAR: SEARCH + PERIOD ── -->
+      <div class="toolbar">
+        <div class="search-field">
+          <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+          <input
+            ref="searchInput"
+            v-model="search"
+            type="search"
+            class="search-input"
+            placeholder="Search receipt no., customer, clerk, amount…"
+            aria-label="Search sales receipts"
+            autocomplete="off"
+            @keydown.esc="search = ''"
+          />
+          <button v-if="search" class="search-clear" @click="clearSearch" aria-label="Clear search">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+          <kbd v-else class="search-kbd" aria-hidden="true">/</kbd>
+        </div>
 
-        <transition name="dropdown-fade">
-          <div v-if="periodDropdown" class="period-menu">
-            <button
-              v-for="p in periods"
-              :key="p.key"
-              @click="setPeriod(p.key)"
-              class="period-menu-item"
-              :class="{ 'period-menu-item--active': selectedPeriod === p.key }"
-            >
-              <i class="fa-solid fa-check period-check" v-if="selectedPeriod === p.key"></i>
-              <span :style="{ marginLeft: selectedPeriod === p.key ? '0' : '20px' }">{{ p.label }}</span>
-            </button>
-          </div>
-        </transition>
+        <div class="period-dropdown-wrap period-dropdown" :class="{ 'period-dropdown-wrap--muted': isSearching }">
+          <button @click="togglePeriodDropdown" class="period-trigger" :aria-expanded="periodDropdown">
+            <span class="period-trigger-label">View by</span>
+            <span class="period-trigger-val">{{ selectedPeriodLabel }}</span>
+            <i class="fa-solid fa-chevron-down period-caret" :class="{ 'period-caret--open': periodDropdown }"></i>
+          </button>
+
+          <transition name="dropdown-fade">
+            <div v-if="periodDropdown" class="period-menu">
+              <button
+                v-for="p in periods"
+                :key="p.key"
+                @click="setPeriod(p.key)"
+                class="period-menu-item"
+                :class="{ 'period-menu-item--active': selectedPeriod === p.key }"
+              >
+                <i class="fa-solid fa-check period-check" v-if="selectedPeriod === p.key"></i>
+                <span :style="{ marginLeft: selectedPeriod === p.key ? '0' : '20px' }">{{ p.label }}</span>
+              </button>
+            </div>
+          </transition>
+        </div>
+      </div>
+
+      <!-- Search context: tells the user the period is ignored while searching -->
+      <p v-if="isSearching" class="search-note" role="status">
+        <i class="fa-solid fa-circle-info"></i>
+        Searching all dates —
+        <strong>{{ filteredSales.length }}</strong> match{{ filteredSales.length === 1 ? '' : 'es' }}
+        for “{{ search.trim() }}”.
+        <button class="link-btn" @click="clearSearch">Clear search</button>
+      </p>
+
+      <!-- ── SUMMARY STRIP ── -->
+      <div v-if="!loading && !loadError" class="stats">
+        <div class="stat">
+          <span class="stat-label">Receipts</span>
+          <strong class="stat-val">{{ filteredSales.length }}</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Total sales</span>
+          <strong class="stat-val">₱{{ formatAmount(stats.total) }}</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Average sale</span>
+          <strong class="stat-val">₱{{ formatAmount(stats.average) }}</strong>
+        </div>
+        <span class="stat-scope">{{ isSearching ? 'All dates' : selectedPeriodLabel }}</span>
       </div>
 
       <!-- ── TABLE CARD ── -->
       <div class="table-card">
-        <div class="table-wrap">
+
+        <!-- Loading -->
+        <div v-if="loading" class="state-block" aria-busy="true">
+          <div class="skel-row" v-for="n in 6" :key="n"></div>
+        </div>
+
+        <!-- Error -->
+        <div v-else-if="loadError" class="state-block state-block--center" role="alert">
+          <i class="fa-solid fa-triangle-exclamation state-icon state-icon--error"></i>
+          <p class="state-title">{{ loadError }}</p>
+          <button class="btn btn--ghost" @click="loadSales">Try again</button>
+        </div>
+
+        <!-- Table -->
+        <div v-else class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
                 <th class="th-checkbox">
-                  <label class="checkbox-wrap">
-                    <input type="checkbox" v-model="selectAll" @change="toggleSelectAll" />
-                    <span class="checkbox-box"><i class="fa-solid fa-check"></i></span>
+                  <label class="checkbox-wrap" :class="{ 'checkbox-wrap--partial': somePageSelected }">
+                    <input
+                      type="checkbox"
+                      :checked="allPageSelected"
+                      :disabled="!pagedSales.length"
+                      aria-label="Select all receipts on this page"
+                      @change="toggleSelectAll"
+                    />
+                    <span class="checkbox-box">
+                      <i class="fa-solid" :class="somePageSelected ? 'fa-minus' : 'fa-check'"></i>
+                    </span>
                   </label>
                 </th>
-                <th>Date</th>
-                <th>Receipt #</th>
-                <th>Customer</th>
-                <th>Amount</th>
+                <th><button class="sort-btn" @click="setSort('date')">Date <i :class="sortIcon('date')"></i></button></th>
+                <th>Receipt no.</th>
+                <th><button class="sort-btn" @click="setSort('customer')">Customer <i :class="sortIcon('customer')"></i></button></th>
+                <th class="th-right"><button class="sort-btn sort-btn--right" @click="setSort('amount')">Amount <i :class="sortIcon('amount')"></i></button></th>
                 <th>Payment</th>
                 <th>Status</th>
                 <th>Clerk</th>
+                <th class="th-go"><span class="sr-only">Open</span></th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="sale in filteredSales"
+                v-for="sale in pagedSales"
                 :key="sale.SaleID"
                 :data-sale-row="sale.SaleID"
+                class="row-click"
                 :class="{ 'row--selected': selectedSales.includes(sale.SaleID), 'row-highlight': highlightedSaleId === sale.SaleID }"
+                @click="onRowClick($event, sale)"
               >
                 <td class="th-checkbox">
                   <label class="checkbox-wrap">
-                    <input type="checkbox" :value="sale.SaleID" v-model="selectedSales" />
+                    <input
+                      type="checkbox"
+                      :checked="selectedSales.includes(sale.SaleID)"
+                      :aria-label="`Select ${receiptNo(sale)}`"
+                      @change="toggleOne(sale.SaleID)"
+                    />
                     <span class="checkbox-box"><i class="fa-solid fa-check"></i></span>
                   </label>
                 </td>
                 <td class="cell-muted">{{ sale.formatted_date }}</td>
                 <td>
                   <RouterLink :to="`/sales/${sale.SaleID}`" class="receipt-link">
-                    SR-{{ String(sale.SaleID).padStart(5,'0') }}
+                    <template v-for="(s, i) in segments(receiptNo(sale))" :key="i"><mark v-if="s.m">{{ s.t }}</mark><template v-else>{{ s.t }}</template></template>
                   </RouterLink>
                 </td>
-                <td class="cell-secondary">{{ sale.CustomerName }}</td>
+                <td class="cell-secondary">
+                  <template v-for="(s, i) in segments(sale.CustomerName)" :key="i"><mark v-if="s.m">{{ s.t }}</mark><template v-else>{{ s.t }}</template></template>
+                </td>
                 <td class="cell-amount">₱{{ formatAmount(sale.TotalAmount) }}</td>
                 <td class="cell-muted">{{ sale.PaymentMethod }}</td>
                 <td>
@@ -91,19 +169,53 @@
                     {{ sale.Status }}
                   </span>
                 </td>
-                <td class="cell-muted">{{ sale.ClerkName }}</td>
+                <td class="cell-muted">
+                  <template v-for="(s, i) in segments(sale.ClerkName)" :key="i"><mark v-if="s.m">{{ s.t }}</mark><template v-else>{{ s.t }}</template></template>
+                </td>
+                <td class="th-go"><i class="fa-solid fa-chevron-right row-go" aria-hidden="true"></i></td>
               </tr>
 
               <tr v-if="filteredSales.length === 0">
-                <td colspan="8" class="td-empty">
+                <td colspan="9" class="td-empty">
                   <div class="empty-state">
-                    <i class="fa-solid fa-receipt"></i>
-                    <p>No sales found for this period</p>
+                    <i :class="isSearching ? 'fa-solid fa-magnifying-glass' : 'fa-solid fa-receipt'"></i>
+                    <template v-if="isSearching">
+                      <p>No receipts match “{{ search.trim() }}”</p>
+                      <span>Try a receipt number like SR-00085, a customer name, or an amount.</span>
+                      <button class="btn btn--ghost btn--sm" @click="clearSearch">Clear search</button>
+                    </template>
+                    <template v-else>
+                      <p>No sales found for {{ selectedPeriodLabel.toLowerCase() }}</p>
+                      <span>Pick a longer period, or search to find a receipt from any date.</span>
+                      <button v-if="selectedPeriod !== 'all'" class="btn btn--ghost btn--sm" @click="setPeriod('all')">Show all time</button>
+                    </template>
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Pagination -->
+        <div v-if="!loading && !loadError && filteredSales.length > 0" class="pager">
+          <span class="pager-info">
+            Showing <strong>{{ rangeStart }}–{{ rangeEnd }}</strong> of <strong>{{ filteredSales.length }}</strong>
+          </span>
+          <div class="pager-controls">
+            <label class="pager-size">
+              Rows
+              <select v-model.number="pageSize" aria-label="Rows per page">
+                <option :value="25">25</option>
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+              </select>
+            </label>
+            <button class="pager-btn" :disabled="page <= 1" @click="page = 1" aria-label="First page"><i class="fa-solid fa-angles-left"></i></button>
+            <button class="pager-btn" :disabled="page <= 1" @click="page--" aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></button>
+            <span class="pager-page">Page {{ page }} of {{ totalPages }}</span>
+            <button class="pager-btn" :disabled="page >= totalPages" @click="page++" aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></button>
+            <button class="pager-btn" :disabled="page >= totalPages" @click="page = totalPages" aria-label="Last page"><i class="fa-solid fa-angles-right"></i></button>
+          </div>
         </div>
       </div>
 
@@ -120,7 +232,7 @@
             <h3 class="del-modal-title">Admin Verification Required</h3>
             <p class="del-modal-desc">
               You're about to delete <strong>{{ selectedSales.length }}</strong> sale receipt{{ selectedSales.length !== 1 ? 's' : '' }}.
-              Enter your admin password to confirm this action.
+              Stock for the items sold will be returned to inventory. Enter your admin password to confirm.
             </p>
 
             <div class="pw-field">
@@ -154,8 +266,6 @@
     </transition>
 
     <!-- ── SUCCESS CONFIRMATION MODAL ── -->
-    <!-- Shows after deletion completes — more prominent and intentional
-         than a banner, so the owner can't miss that the action succeeded. -->
     <transition name="modal-fade">
       <div v-if="successModal" class="modal-backdrop" @click.self="closeSuccessModal">
         <div class="success-modal">
@@ -172,7 +282,6 @@
               This action cannot be undone.
             </p>
 
-            <!-- Summary chip listing what was deleted -->
             <div class="success-summary-chip">
               <div class="success-summary-icon">
                 <i class="fa-solid fa-trash-can"></i>
@@ -196,35 +305,68 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Layout from '@/components/Layout.vue'
 import api from '@/api/axios'
 
-const route = useRoute()
+const route  = useRoute()
+const router = useRouter()
 
-const sales = ref([])
+/* ────────────────────────────────────────────────────────────
+   HELPERS
+──────────────────────────────────────────────────────────── */
+const formatAmount = v =>
+  Number(v || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const receiptNo = s => `SR-${String(s.SaleID).padStart(5, '0')}`
+
+/* ────────────────────────────────────────────────────────────
+   LOAD
+──────────────────────────────────────────────────────────── */
+const sales     = ref([])
+const loading   = ref(true)
+const loadError = ref('')
 
 async function loadSales() {
+  loading.value = true
+  loadError.value = ''
   try {
     const res = await api.get('/api/sales')
-    sales.value = res.data.map(s => ({
-      ...s,
-      formatted_date: s.SaleDate,
-      CustomerName: s.CustomerName || 'Unknown',
-      ClerkName: s.ClerkName || 'Unknown',
-    }))
+    sales.value = res.data.map(s => {
+      const mapped = {
+        ...s,
+        formatted_date: s.SaleDate,
+        CustomerName: s.CustomerName || 'Unknown',
+        ClerkName: s.ClerkName || 'Unknown',
+        _date: new Date(s.SaleDate),
+      }
+      // One lowercase string per receipt, built once, so typing in the
+      // search box stays fast even with thousands of receipts.
+      mapped._hay = [
+        receiptNo(mapped), String(mapped.SaleID), mapped.CustomerName, mapped.ClerkName,
+        mapped.PaymentMethod, mapped.Status, mapped.formatted_date,
+        String(Number(mapped.TotalAmount)), formatAmount(mapped.TotalAmount),
+      ].join(' ').toLowerCase()
+      return mapped
+    })
   } catch (err) {
     console.error('Failed to load sales:', err)
+    loadError.value = 'We couldn’t load the sales receipts. Check your connection and try again.'
+  } finally {
+    loading.value = false
   }
 }
 
+/* ────────────────────────────────────────────────────────────
+   PERIOD
+──────────────────────────────────────────────────────────── */
 const periods = [
   { key: 'today',   label: 'Today' },
-  { key: 'week',    label: 'This Week' },
-  { key: 'month',   label: 'This Month' },
-  { key: 'quarter', label: 'This Quarter' },
-  { key: 'year',    label: 'This Year' },
+  { key: 'week',    label: 'This week' },
+  { key: 'month',   label: 'This month' },
+  { key: 'quarter', label: 'This quarter' },
+  { key: 'year',    label: 'This year' },
+  { key: 'all',     label: 'All time' },
 ]
 const selectedPeriod = ref('month')
 const periodDropdown = ref(false)
@@ -233,100 +375,228 @@ const selectedPeriodLabel = computed(() => periods.find(p => p.key === selectedP
 function togglePeriodDropdown() { periodDropdown.value = !periodDropdown.value }
 function setPeriod(p) { selectedPeriod.value = p; periodDropdown.value = false }
 
-function handleClickOutside(e) {
-  if (!e.target.closest('.period-dropdown')) periodDropdown.value = false
+function inPeriod(d, key, now) {
+  if (key === 'all') return true
+  if (key === 'today') return d.toDateString() === now.toDateString()
+  if (key === 'week') {
+    const start = new Date(now); start.setDate(now.getDate() - now.getDay()); start.setHours(0, 0, 0, 0)
+    return d >= start
+  }
+  if (key === 'month')   return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+  if (key === 'quarter') return Math.floor(d.getMonth() / 3) === Math.floor(now.getMonth() / 3) && d.getFullYear() === now.getFullYear()
+  if (key === 'year')    return d.getFullYear() === now.getFullYear()
+  return true
 }
 
-/* row highlight — set when arriving from a "New Sale" notification
-   click (?highlightSale=<SaleID>). Cleared automatically after a few
-   seconds so it reads as a "flash", not a permanent state. */
+/* Smallest period that still contains a given date. */
+function periodContaining(date) {
+  const now = new Date()
+  for (const key of ['today', 'week', 'month', 'quarter', 'year']) {
+    if (inPeriod(date, key, now)) return key
+  }
+  return 'all'
+}
+
+/* ────────────────────────────────────────────────────────────
+   SEARCH
+   - Every word must match somewhere on the receipt (receipt no.,
+     customer, clerk, payment, status, date, amount).
+   - "sr-85", "85" and "00085" all find SR-00085.
+   - While searching, the period filter is ignored so an older
+     receipt can always be found.
+──────────────────────────────────────────────────────────── */
+const search = ref('')
+const searchInput = ref(null)
+
+const tokens = computed(() =>
+  search.value.trim().toLowerCase().split(/\s+/).map(t => t.replace(/^₱/, '')).filter(Boolean)
+)
+const isSearching = computed(() => tokens.value.length > 0)
+
+function matchToken(s, t) {
+  if (s._hay.includes(t)) return true
+  const m = t.match(/^sr-?0*(\d+)$/)
+  return !!m && String(s.SaleID) === m[1]
+}
+
+/* Splits text into [{ t, m }] so matches can be wrapped in <mark>. */
+function segments(text) {
+  const str = String(text ?? '')
+  if (!tokens.value.length) return [{ t: str, m: false }]
+  const lower = str.toLowerCase()
+  const ranges = []
+  for (const t of tokens.value) {
+    let i = 0
+    while ((i = lower.indexOf(t, i)) !== -1) { ranges.push([i, i + t.length]); i += t.length }
+  }
+  if (!ranges.length) return [{ t: str, m: false }]
+  ranges.sort((a, b) => a[0] - b[0])
+  const merged = [ranges[0].slice()]
+  for (const [a, b] of ranges.slice(1)) {
+    const last = merged[merged.length - 1]
+    if (a <= last[1]) last[1] = Math.max(last[1], b)
+    else merged.push([a, b])
+  }
+  const out = []
+  let pos = 0
+  for (const [a, b] of merged) {
+    if (a > pos) out.push({ t: str.slice(pos, a), m: false })
+    out.push({ t: str.slice(a, b), m: true })
+    pos = b
+  }
+  if (pos < str.length) out.push({ t: str.slice(pos), m: false })
+  return out
+}
+
+function clearSearch() { search.value = ''; searchInput.value?.focus() }
+
+/* "/" jumps to the search box from anywhere (unless typing in a field). */
+function onGlobalKey(e) {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+  const tag = document.activeElement?.tagName
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
+  e.preventDefault()
+  searchInput.value?.focus()
+}
+
+/* ────────────────────────────────────────────────────────────
+   FILTER + SORT + PAGE
+──────────────────────────────────────────────────────────── */
+const filteredSales = computed(() => {
+  const now = new Date()
+  if (isSearching.value) {
+    return sales.value.filter(s => tokens.value.every(t => matchToken(s, t)))
+  }
+  return sales.value.filter(s => inPeriod(s._date, selectedPeriod.value, now))
+})
+
+const sortKey = ref('date')
+const sortDir = ref('desc')
+
+function setSort(key) {
+  if (sortKey.value === key) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  else { sortKey.value = key; sortDir.value = key === 'customer' ? 'asc' : 'desc' }
+}
+function sortIcon(key) {
+  if (sortKey.value !== key) return 'fa-solid fa-sort sort-icon'
+  return sortDir.value === 'asc' ? 'fa-solid fa-sort-up sort-icon sort-icon--on' : 'fa-solid fa-sort-down sort-icon sort-icon--on'
+}
+
+const sortedSales = computed(() => {
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  const list = filteredSales.value.slice()
+  list.sort((a, b) => {
+    if (sortKey.value === 'amount')   return (Number(a.TotalAmount) - Number(b.TotalAmount)) * dir
+    if (sortKey.value === 'customer') return String(a.CustomerName).localeCompare(String(b.CustomerName)) * dir
+    return (a.SaleID - b.SaleID) * dir // date: newest receipt = highest id
+  })
+  return list
+})
+
+const page     = ref(1)
+const pageSize = ref(25)
+const totalPages = computed(() => Math.max(1, Math.ceil(sortedSales.value.length / pageSize.value)))
+const pagedSales = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return sortedSales.value.slice(start, start + pageSize.value)
+})
+const rangeStart = computed(() => (sortedSales.value.length ? (page.value - 1) * pageSize.value + 1 : 0))
+const rangeEnd   = computed(() => Math.min(page.value * pageSize.value, sortedSales.value.length))
+
+const stats = computed(() => {
+  const paid = filteredSales.value.filter(s => s.Status === 'Paid')
+  const total = paid.reduce((sum, s) => sum + Number(s.TotalAmount || 0), 0)
+  return { total, average: paid.length ? total / paid.length : 0 }
+})
+
+/* Back to page 1 whenever the result set changes. */
+watch([search, selectedPeriod, sortKey, sortDir, pageSize], () => { page.value = 1 })
+
+/* ────────────────────────────────────────────────────────────
+   SELECTION (applies to the rows on the current page only,
+   so "select all" can never grab receipts you can't see)
+──────────────────────────────────────────────────────────── */
+const selectedSales = ref([])
+const allPageSelected = computed(() =>
+  pagedSales.value.length > 0 && pagedSales.value.every(s => selectedSales.value.includes(s.SaleID))
+)
+const somePageSelected = computed(() =>
+  !allPageSelected.value && pagedSales.value.some(s => selectedSales.value.includes(s.SaleID))
+)
+function toggleSelectAll() {
+  selectedSales.value = allPageSelected.value ? [] : pagedSales.value.map(s => s.SaleID)
+}
+function toggleOne(id) {
+  selectedSales.value = selectedSales.value.includes(id)
+    ? selectedSales.value.filter(x => x !== id)
+    : [...selectedSales.value, id]
+}
+watch([search, selectedPeriod, sortKey, sortDir, pageSize, page], () => { selectedSales.value = [] })
+
+/* Click anywhere on a row to open it (checkbox / link clicks keep their own behavior). */
+function onRowClick(e, sale) {
+  if (e.target.closest('a, label, input, button')) return
+  router.push(`/sales/${sale.SaleID}`)
+}
+
+/* ────────────────────────────────────────────────────────────
+   HIGHLIGHT (arriving from a "New Sale" notification)
+──────────────────────────────────────────────────────────── */
 const highlightedSaleId = ref(null)
 let highlightTimer = null
 
-// If arriving from a "New Sale" notification, the sale might not fall
-// inside the currently-selected period (default is "This Month"). Bump
-// the period up to whichever bucket actually contains the sale's date,
-// so the row we're about to highlight is guaranteed to be visible.
-function periodContaining(date) {
-  const now = new Date()
-  if (date.toDateString() === now.toDateString()) return 'today'
-  const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0)
-  if (date >= weekStart) return 'week'
-  if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) return 'month'
-  if (Math.floor(date.getMonth()/3) === Math.floor(now.getMonth()/3) && date.getFullYear() === now.getFullYear()) return 'quarter'
-  if (date.getFullYear() === now.getFullYear()) return 'year'
-  return 'year' // fallback — oldest bucket we have
-}
-
-/** Called once sales are loaded, when the page was opened from a "New
- *  Sale" notification click carrying ?highlightSale=<SaleID>.
- *  notifiable_id is populated on sale notifications, so this matches
- *  directly against SaleID — no name-based guessing needed. Silently
- *  does nothing if no match is found (e.g. the sale was deleted since
- *  the notification fired). */
-function applyHighlightFromQuery() {
+async function applyHighlightFromQuery() {
   const saleId = route.query.highlightSale
   if (!saleId) return
-
   const match = sales.value.find(s => String(s.SaleID) === String(saleId))
   if (!match) return
 
-  selectedPeriod.value = periodContaining(new Date(match.SaleDate))
+  search.value = ''
+  selectedPeriod.value = periodContaining(match._date)
+  await nextTick() // let the filter watchers settle before jumping to the right page
+
+  const idx = sortedSales.value.findIndex(s => s.SaleID === match.SaleID)
+  if (idx >= 0) page.value = Math.floor(idx / pageSize.value) + 1
   highlightedSaleId.value = match.SaleID
 
-  nextTick(() => {
-    const el = document.querySelector(`[data-sale-row="${match.SaleID}"]`)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  })
+  await nextTick()
+  document.querySelector(`[data-sale-row="${match.SaleID}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 
-  if (highlightTimer) clearTimeout(highlightTimer)
+  clearTimeout(highlightTimer)
   highlightTimer = setTimeout(() => { highlightedSaleId.value = null }, 3000)
 }
 
+/* ────────────────────────────────────────────────────────────
+   LIFECYCLE
+──────────────────────────────────────────────────────────── */
+function handleClickOutside(e) {
+  if (!e.target.closest('.period-dropdown')) periodDropdown.value = false
+}
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
+  window.addEventListener('keydown', onGlobalKey)
   await loadSales()
   applyHighlightFromQuery()
 })
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
-  if (highlightTimer) clearTimeout(highlightTimer)
+  window.removeEventListener('keydown', onGlobalKey)
+  clearTimeout(highlightTimer)
 })
 
-const filteredSales = computed(() => {
-  const now = new Date()
-  return sales.value.filter(s => {
-    const d = new Date(s.SaleDate)
-    if (selectedPeriod.value === 'today') return d.toDateString() === now.toDateString()
-    if (selectedPeriod.value === 'week') {
-      const start = new Date(now); start.setDate(now.getDate() - now.getDay()); start.setHours(0,0,0,0)
-      return d >= start
-    }
-    if (selectedPeriod.value === 'month')   return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
-    if (selectedPeriod.value === 'quarter') return Math.floor(d.getMonth()/3) === Math.floor(now.getMonth()/3) && d.getFullYear() === now.getFullYear()
-    if (selectedPeriod.value === 'year')    return d.getFullYear() === now.getFullYear()
-    return true
-  })
-})
-
-const selectedSales = ref([])
-const selectAll = ref(false)
-function toggleSelectAll() { selectedSales.value = selectAll.value ? filteredSales.value.map(s => s.SaleID) : [] }
-
+/* ────────────────────────────────────────────────────────────
+   DELETE
+──────────────────────────────────────────────────────────── */
 const passwordModal = ref(false)
 const adminPassword = ref('')
-const showPw         = ref(false)
-const deleting        = ref(false)
-const deleteError     = ref('')
-
-// Success confirmation modal — shown after deletion completes.
-// deletedCount captures how many were deleted before selectedSales
-// is cleared, so the message stays accurate.
-const successModal = ref(false)
-const deletedCount = ref(0)
+const showPw        = ref(false)
+const deleting      = ref(false)
+const deleteError   = ref('')
+const successModal  = ref(false)
+const deletedCount  = ref(0)
 
 function openPasswordModal() {
-  if (!selectedSales.value.length) { alert('Select a sale.'); return }
+  if (!selectedSales.value.length) return
   deleteError.value = ''
   passwordModal.value = true
 }
@@ -347,39 +617,28 @@ async function confirmDelete() {
     const count = selectedSales.value.length
     await api.post('/api/sales/bulk-delete', {
       saleIds: selectedSales.value,
-      admin_password: adminPassword.value
+      admin_password: adminPassword.value,
     })
 
-    // Step 1: capture count and close the password modal FIRST,
-    // before clearing selectedSales — otherwise Vue re-renders the
-    // still-open modal with "0 sale receipts" before it closes,
-    // which is exactly the confusing flash the user was seeing.
+    // Capture the count and close the password modal BEFORE clearing the
+    // selection, so the modal never flashes "0 sale receipts".
     deletedCount.value = count
     passwordModal.value = false
     adminPassword.value = ''
     showPw.value = false
     deleteError.value = ''
-
-    // Step 2: wait for Vue to finish closing the password modal
-    // before we clear selection, reload, and open the success modal.
     await nextTick()
 
     selectedSales.value = []
-    selectAll.value = false
     await loadSales()
-
-    // Step 3: now open the success modal — password modal is already
-    // gone, so there's no overlap and no "0 receipts" flash.
+    if (page.value > totalPages.value) page.value = totalPages.value
     successModal.value = true
-
   } catch (err) {
     deleteError.value = err?.response?.data?.message || 'Incorrect password or request failed.'
   } finally {
     deleting.value = false
   }
 }
-
-const formatAmount = v => Number(v).toLocaleString()
 </script>
 
 <style scoped>
@@ -407,9 +666,10 @@ const formatAmount = v => Number(v).toLocaleString()
   background: var(--sp-bg);
   padding: 28px 28px 64px;
   font-family: 'Inter', system-ui, sans-serif;
-  display: flex; flex-direction: column; gap: 18px;
+  display: flex; flex-direction: column; gap: 16px;
   transition: background-color .22s;
 }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* PAGE HEADER */
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -426,145 +686,75 @@ const formatAmount = v => Number(v).toLocaleString()
   transition: background .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s;
 }
 .btn:active { transform: scale(.98); }
+.btn:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+.btn--sm { padding: 7px 14px; font-size: 12.5px; }
 .btn--primary { background: linear-gradient(135deg, var(--sp-accent), var(--c-accent-deep)); color: #fff; box-shadow: var(--c-shadow-accent); }
 .btn--primary:hover { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
-.btn--danger {
-  background: rgba(244,63,94,.10); border-color: rgba(244,63,94,.30); color: var(--sp-red);
-}
+.btn--ghost { background: var(--sp-surface); border-color: var(--sp-border-strong); color: var(--sp-text-secondary); }
+.btn--ghost:hover { border-color: var(--sp-accent-border); color: var(--sp-accent); }
+.btn--danger { background: rgba(244,63,94,.10); border-color: rgba(244,63,94,.30); color: var(--sp-red); }
 .btn--danger:hover { background: rgba(244,63,94,.16); border-color: rgba(244,63,94,.45); }
 html[data-theme="dark"] .btn--danger { background: rgba(244,63,94,.14); color: #F87171; border-color: rgba(244,63,94,.35); }
 html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
-.selected-count {
-  background: var(--sp-red); color: #fff; font-size: 11px; font-weight: 700;
-  border-radius: 20px; padding: 1px 7px; margin-left: 2px;
-}
+.selected-count { background: var(--sp-red); color: #fff; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 1px 7px; margin-left: 2px; }
 
-/* SUCCESS CONFIRMATION MODAL */
-.success-modal {
-  width: 100%; max-width: 420px;
-  background: #FFFFFF; border: 1px solid #E5E7EB;
-  border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.35); overflow: hidden;
-  display: flex; flex-direction: column;
-  transition: background-color .22s, border-color .22s;
+/* TOOLBAR */
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.search-field { position: relative; flex: 1 1 320px; display: flex; align-items: center; }
+.search-icon { position: absolute; left: 14px; font-size: 13px; color: var(--sp-text-faint); pointer-events: none; }
+.search-input {
+  width: 100%; height: 42px; padding: 0 44px 0 40px;
+  border: 1.5px solid var(--sp-border-strong); border-radius: 10px;
+  background: var(--sp-surface); color: var(--sp-text-primary);
+  font-size: 13.5px; font-family: inherit; outline: none;
+  transition: border-color .18s, box-shadow .18s, background-color .22s, color .22s;
+  -webkit-appearance: none; appearance: none;
 }
-html[data-theme="dark"] .success-modal {
-  background: #1E2130; border-color: #2A2D3E;
-  box-shadow: 0 24px 64px rgba(0,0,0,.6);
+.search-input::-webkit-search-cancel-button { display: none; }
+.search-input:focus { border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); }
+.search-input::placeholder { color: var(--sp-text-faint); }
+.search-clear {
+  position: absolute; right: 8px; width: 28px; height: 28px; border: none; border-radius: 7px;
+  background: none; color: var(--sp-text-faint); cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; transition: background .15s, color .15s;
 }
-.success-modal::before {
-  content: ''; display: block; height: 4px;
-  background: linear-gradient(90deg, #10b981, #34d399);
-}
-.success-modal-icon-ring {
+.search-clear:hover { background: var(--sp-surface-raised); color: var(--sp-text-primary); }
+.search-kbd {
+  position: absolute; right: 12px; min-width: 22px; height: 22px; padding: 0 6px;
   display: flex; align-items: center; justify-content: center;
-  padding: 28px 0 0;
+  font: 600 11px 'Inter', system-ui, sans-serif; color: var(--sp-text-faint);
+  border: 1px solid var(--sp-border-strong); border-radius: 6px; pointer-events: none;
 }
-.success-modal-icon {
-  width: 64px; height: 64px; border-radius: 50%;
-  background: rgba(16,185,129,.12); border: 2px solid rgba(16,185,129,.30);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 26px; color: #10b981;
-  box-shadow: 0 0 0 10px rgba(16,185,129,.06);
-  animation: success-pop .4s cubic-bezier(.34,1.56,.64,1) both;
+.search-note {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0;
+  font-size: 13px; color: var(--sp-text-muted);
 }
-html[data-theme="dark"] .success-modal-icon {
-  background: rgba(16,185,129,.16); color: #4ADE80;
-  box-shadow: 0 0 0 10px rgba(16,185,129,.08);
-}
-@keyframes success-pop {
-  from { transform: scale(0.5); opacity: 0; }
-  to   { transform: scale(1);   opacity: 1; }
-}
-
-.success-modal-body {
-  padding: 18px 26px 22px;
-  display: flex; flex-direction: column;
-  align-items: center; gap: 10px; text-align: center;
-}
-.success-modal-title {
-  font-size: 19px; font-weight: 800;
-  color: var(--sp-text-primary); letter-spacing: -.02em; margin: 0;
-  transition: color .22s;
-}
-.success-modal-desc {
-  font-size: 13.5px; line-height: 1.65;
-  color: var(--sp-text-muted); margin: 0;
-}
-.success-modal-desc strong { color: var(--sp-text-primary); }
-
-/* Summary chip — shows what was just deleted */
-.success-summary-chip {
-  display: flex; align-items: center; gap: 12px; width: 100%;
-  background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.20);
-  border-radius: 12px; padding: 12px 14px; margin-top: 6px; text-align: left;
-  transition: background .22s, border-color .22s;
-}
-html[data-theme="dark"] .success-summary-chip {
-  background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25);
-}
-.success-summary-icon {
-  width: 36px; height: 36px; border-radius: 9px; flex-shrink: 0;
-  background: rgba(16,185,129,.15); color: #10b981;
-  display: flex; align-items: center; justify-content: center; font-size: 14px;
-}
-html[data-theme="dark"] .success-summary-icon { color: #4ADE80; background: rgba(16,185,129,.20); }
-.success-summary-info { flex: 1; min-width: 0; }
-.success-summary-label {
-  font-size: 10.5px; font-weight: 700; letter-spacing: .08em;
-  text-transform: uppercase; color: #10b981; margin: 0 0 2px;
-}
-html[data-theme="dark"] .success-summary-label { color: #4ADE80; }
-.success-summary-val {
-  font-size: 13.5px; font-weight: 700;
-  color: var(--sp-text-primary); margin: 0;
-  transition: color .22s;
-}
-.success-summary-badge {
-  display: inline-flex; align-items: center;
-  font-size: 11px; font-weight: 700; letter-spacing: .04em;
-  background: rgba(16,185,129,.15); color: #10b981;
-  border-radius: 20px; padding: 3px 10px; flex-shrink: 0;
-}
-html[data-theme="dark"] .success-summary-badge { background: rgba(16,185,129,.22); color: #4ADE80; }
-
-.success-modal-footer { padding: 0 26px 26px; }
-.success-modal-btn {
-  width: 100%; height: 44px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  font-size: 14px; font-weight: 700; font-family: 'Inter', system-ui, sans-serif;
-  border-radius: 11px; cursor: pointer; border: none;
-  background: linear-gradient(135deg, #10b981, #059669);
-  color: #fff; box-shadow: 0 2px 12px rgba(16,185,129,.30);
-  transition: filter .18s, transform .15s, box-shadow .18s;
-}
-.success-modal-btn:hover {
-  filter: brightness(1.08);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 20px rgba(16,185,129,.40);
-}
-.success-modal-btn:active { transform: scale(.97); }
+.search-note i { color: var(--sp-accent); }
+.search-note strong { color: var(--sp-text-primary); }
+.link-btn { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--sp-accent); cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
 
 /* PERIOD DROPDOWN */
-.period-dropdown-wrap { position: relative; display: inline-block; align-self: flex-start; }
+.period-dropdown-wrap { position: relative; display: inline-block; transition: opacity .18s; }
+.period-dropdown-wrap--muted { opacity: .55; }
 .period-trigger {
   display: inline-flex; align-items: center; gap: 8px;
-  height: 40px; padding: 0 16px;
+  height: 42px; padding: 0 16px;
   border: 1.5px solid var(--sp-border-strong); border-radius: 10px;
   background: var(--sp-surface); color: var(--sp-text-secondary);
   font-size: 13px; font-family: inherit; cursor: pointer;
   transition: border-color .18s, background-color .22s, color .22s;
 }
 .period-trigger:hover { border-color: var(--sp-accent-border); }
-.period-trigger-label { font-weight: 700; color: var(--sp-text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.period-trigger:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+.period-trigger-label { font-weight: 600; color: var(--sp-text-faint); font-size: 12px; }
 .period-trigger-val   { font-weight: 600; color: var(--sp-text-primary); transition: color .22s; }
 .period-caret { font-size: 10px; color: var(--sp-text-faint); transition: transform .2s; }
 .period-caret--open { transform: rotate(180deg); }
-
 .period-menu {
   position: absolute; top: calc(100% + 8px); right: 0;
   width: 200px; background: var(--sp-surface); border: 1px solid var(--sp-border);
   border-radius: 13px; box-shadow: var(--c-shadow-lg); z-index: 100; padding: 5px; overflow: hidden;
-  transition: background-color .22s, border-color .22s;
 }
 .period-menu-item {
   display: flex; align-items: center; width: 100%;
@@ -576,9 +766,19 @@ html[data-theme="dark"] .success-summary-badge { background: rgba(16,185,129,.22
 .period-menu-item:hover { background: var(--sp-surface-raised); color: var(--sp-text-primary); }
 .period-menu-item--active { color: var(--sp-accent); font-weight: 700; background: var(--sp-accent-soft); }
 .period-check { font-size: 10px; margin-right: 8px; color: var(--sp-accent); }
-
 .dropdown-fade-enter-active, .dropdown-fade-leave-active { transition: opacity .15s ease, transform .15s ease; }
 .dropdown-fade-enter-from, .dropdown-fade-leave-to { opacity: 0; transform: translateY(-6px); }
+
+/* SUMMARY STRIP */
+.stats {
+  display: flex; align-items: stretch; flex-wrap: wrap;
+  background: var(--sp-surface); border: 1px solid var(--sp-border); border-radius: 12px;
+  transition: background-color .22s, border-color .22s;
+}
+.stat { display: flex; flex-direction: column; gap: 3px; padding: 12px 22px; border-right: 1px solid var(--sp-border); }
+.stat-label { font-size: 12px; color: var(--sp-text-muted); }
+.stat-val { font-size: 18px; font-weight: 800; letter-spacing: -.02em; color: var(--sp-text-primary); font-variant-numeric: tabular-nums; }
+.stat-scope { margin-left: auto; align-self: center; padding: 0 20px; font-size: 12px; font-weight: 600; color: var(--sp-text-faint); }
 
 /* TABLE CARD */
 .table-card { background: var(--sp-surface); border: 1px solid var(--sp-border); border-radius: var(--radius); box-shadow: var(--c-shadow-sm); overflow: hidden; transition: background-color .22s, border-color .22s; }
@@ -586,34 +786,47 @@ html[data-theme="dark"] .success-summary-badge { background: rgba(16,185,129,.22
 .data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .data-table thead th {
   background: var(--sp-surface-raised); color: var(--sp-text-faint);
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
-  text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--sp-border);
+  font-size: 12px; font-weight: 600;
+  text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--sp-border);
   white-space: nowrap; transition: background-color .22s, color .22s, border-color .22s;
 }
+.th-right { text-align: right !important; }
 .th-checkbox { width: 44px; }
+.th-go { width: 36px; padding-left: 0 !important; text-align: right; }
+
+.sort-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; border: none;
+  font: inherit; color: inherit; cursor: pointer; transition: color .15s;
+}
+.sort-btn--right { flex-direction: row-reverse; }
+.sort-btn:hover { color: var(--sp-text-primary); }
+.sort-btn:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 3px; border-radius: 4px; }
+.sort-icon { font-size: 10px; opacity: .5; }
+.sort-icon--on { opacity: 1; color: var(--sp-accent); }
 
 .data-table tbody tr { transition: background-color .15s; }
 .data-table tbody tr:hover td { background: var(--sp-surface-raised); }
 .data-table tbody tr.row--selected td { background: var(--sp-accent-soft); }
 .data-table tbody td { padding: 13px 16px; border-bottom: 1px solid var(--sp-border); white-space: nowrap; transition: background-color .15s, border-color .22s; }
 .data-table tbody tr:last-child td { border-bottom: none; }
+.row-click { cursor: pointer; }
+.row-go { font-size: 11px; color: var(--sp-text-faint); transition: color .15s, transform .15s; }
+.row-click:hover .row-go { color: var(--sp-accent); transform: translateX(2px); }
 
-/* ROW HIGHLIGHT — flashed briefly when arriving from a "New Sale"
-   notification click, so the exact receipt the alert referred to is
-   unmistakable in the (possibly long) filtered list. Uses the same
-   background as row--selected so it stays legible, layered with a
-   short pulse animation using the green "sale" accent to distinguish
-   it from a manual checkbox selection. */
-.row-highlight td {
-  background: var(--sp-accent-soft) !important;
-  animation: sale-row-pulse 1.6s ease-in-out 1;
-}
+/* ROW HIGHLIGHT (arriving from a notification) */
+.row-highlight td { background: var(--sp-accent-soft) !important; animation: sale-row-pulse 1.6s ease-in-out 1; }
 @keyframes sale-row-pulse {
   0%   { background: var(--sp-accent-soft); }
   50%  { background: rgba(16,185,129,.18); }
   100% { background: var(--sp-accent-soft); }
 }
 html[data-theme="dark"] .row-highlight td { background: rgba(16,185,129,.14) !important; }
+
+/* SEARCH MATCH */
+.data-table mark {
+  background: var(--sp-accent-soft); color: var(--sp-accent);
+  border-radius: 3px; padding: 0 2px; font-weight: 700;
+}
 
 /* CHECKBOX */
 .checkbox-wrap { position: relative; display: inline-flex; cursor: pointer; }
@@ -625,44 +838,129 @@ html[data-theme="dark"] .row-highlight td { background: rgba(16,185,129,.14) !im
   font-size: 10px; color: transparent;
   transition: background-color .15s, border-color .15s, color .15s;
 }
-.checkbox-wrap input:checked + .checkbox-box {
-  background: var(--sp-accent); border-color: var(--sp-accent); color: #fff;
-}
+.checkbox-wrap input:checked + .checkbox-box,
+.checkbox-wrap--partial .checkbox-box { background: var(--sp-accent); border-color: var(--sp-accent); color: #fff; }
 .checkbox-wrap input:focus-visible + .checkbox-box { box-shadow: 0 0 0 3px var(--sp-ring); }
 
 /* CELLS */
-.cell-muted     { color: var(--sp-text-muted); transition: color .22s; }
-.cell-secondary { color: var(--sp-text-secondary); transition: color .22s; }
-.cell-amount    { font-weight: 700; color: var(--sp-text-primary); font-variant-numeric: tabular-nums; transition: color .22s; }
-.receipt-link {
-  font-weight: 700; color: var(--sp-accent); text-decoration: none; font-variant-numeric: tabular-nums;
-  transition: opacity .15s;
-}
+.cell-muted     { color: var(--sp-text-muted); }
+.cell-secondary { color: var(--sp-text-secondary); }
+.cell-amount    { font-weight: 700; color: var(--sp-text-primary); text-align: right; font-variant-numeric: tabular-nums; }
+.receipt-link { font-weight: 700; color: var(--sp-accent); text-decoration: none; font-variant-numeric: tabular-nums; }
 .receipt-link:hover { text-decoration: underline; }
+.receipt-link:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; border-radius: 3px; }
 
 .status-pill { display: inline-flex; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 3px 11px; letter-spacing: .03em; }
 .status-pill--paid { background: rgba(16,185,129,.12); color: var(--sp-green); }
-.status-pill--void  { background: rgba(244,63,94,.12);  color: var(--sp-red);   }
+.status-pill--void { background: rgba(244,63,94,.12);  color: var(--sp-red); }
 html[data-theme="dark"] .status-pill--paid { background: rgba(16,185,129,.18); color: #4ADE80; }
-html[data-theme="dark"] .status-pill--void  { background: rgba(244,63,94,.18);  color: #F87171; }
+html[data-theme="dark"] .status-pill--void { background: rgba(244,63,94,.18);  color: #F87171; }
 
-/* EMPTY */
+/* EMPTY / LOADING / ERROR */
 .td-empty { padding: 56px 24px !important; text-align: center; border-bottom: none !important; }
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--sp-text-faint); }
-.empty-state i { font-size: 32px; }
-.empty-state p { font-size: 13.5px; font-weight: 600; color: var(--sp-text-muted); margin: 0; }
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--sp-text-faint); white-space: normal; }
+.empty-state i { font-size: 32px; margin-bottom: 4px; }
+.empty-state p { font-size: 14px; font-weight: 600; color: var(--sp-text-secondary); margin: 0; }
+.empty-state span { font-size: 13px; max-width: 360px; line-height: 1.5; }
+.empty-state .btn { margin-top: 8px; }
 
-/* MODAL — solid, opaque overlay; color adapts to theme rather than a
-   translucent black wash, so it never blends into a dark-mode page.
-   No blur, alpha is effectively 1. */
+.state-block { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.state-block--center { align-items: center; padding: 56px 20px; text-align: center; }
+.state-icon { font-size: 30px; }
+.state-icon--error { color: var(--sp-red); }
+.state-title { margin: 0; font-size: 14px; color: var(--sp-text-muted); max-width: 420px; line-height: 1.5; }
+.skel-row {
+  height: 40px; border-radius: 8px;
+  background: linear-gradient(90deg, var(--sp-surface-raised) 25%, var(--sp-border) 50%, var(--sp-surface-raised) 75%);
+  background-size: 200% 100%; animation: skel-shimmer 1.4s linear infinite;
+}
+@keyframes skel-shimmer { to { background-position: -200% 0; } }
+
+/* PAGINATION */
+.pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; border-top: 1px solid var(--sp-border); font-size: 13px; color: var(--sp-text-muted);
+}
+.pager-info strong { color: var(--sp-text-primary); }
+.pager-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pager-size { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; }
+.pager-size select {
+  height: 32px; padding: 0 8px; border: 1.5px solid var(--sp-border-strong); border-radius: 8px;
+  background: var(--sp-surface); color: var(--sp-text-secondary); font: inherit; cursor: pointer;
+}
+.pager-page { padding: 0 6px; font-weight: 600; color: var(--sp-text-secondary); }
+.pager-btn {
+  width: 32px; height: 32px; border: 1.5px solid var(--sp-border-strong); border-radius: 8px;
+  background: var(--sp-surface); color: var(--sp-text-secondary); cursor: pointer; font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.pager-btn:hover:not(:disabled) { border-color: var(--sp-accent-border); color: var(--sp-accent); background: var(--sp-accent-soft); }
+.pager-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pager-btn:focus-visible, .pager-size select:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+
+/* SUCCESS CONFIRMATION MODAL */
+.success-modal {
+  width: 100%; max-width: 420px;
+  background: #FFFFFF; border: 1px solid #E5E7EB;
+  border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.35); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+html[data-theme="dark"] .success-modal { background: #1E2130; border-color: #2A2D3E; box-shadow: 0 24px 64px rgba(0,0,0,.6); }
+.success-modal::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, #10b981, #34d399); }
+.success-modal-icon-ring { display: flex; align-items: center; justify-content: center; padding: 28px 0 0; }
+.success-modal-icon {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: rgba(16,185,129,.12); border: 2px solid rgba(16,185,129,.30);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; color: #10b981; box-shadow: 0 0 0 10px rgba(16,185,129,.06);
+  animation: success-pop .4s cubic-bezier(.34,1.56,.64,1) both;
+}
+html[data-theme="dark"] .success-modal-icon { background: rgba(16,185,129,.16); color: #4ADE80; box-shadow: 0 0 0 10px rgba(16,185,129,.08); }
+@keyframes success-pop { from { transform: scale(.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.success-modal-body { padding: 18px 26px 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.success-modal-title { font-size: 19px; font-weight: 800; color: var(--sp-text-primary); letter-spacing: -.02em; margin: 0; }
+.success-modal-desc { font-size: 13.5px; line-height: 1.65; color: var(--sp-text-muted); margin: 0; }
+.success-modal-desc strong { color: var(--sp-text-primary); }
+.success-summary-chip {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.20);
+  border-radius: 12px; padding: 12px 14px; margin-top: 6px; text-align: left;
+}
+html[data-theme="dark"] .success-summary-chip { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25); }
+.success-summary-icon {
+  width: 36px; height: 36px; border-radius: 9px; flex-shrink: 0;
+  background: rgba(16,185,129,.15); color: #10b981;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+html[data-theme="dark"] .success-summary-icon { color: #4ADE80; background: rgba(16,185,129,.20); }
+.success-summary-info { flex: 1; min-width: 0; }
+.success-summary-label { font-size: 12px; font-weight: 600; color: #10b981; margin: 0 0 2px; }
+html[data-theme="dark"] .success-summary-label { color: #4ADE80; }
+.success-summary-val { font-size: 13.5px; font-weight: 700; color: var(--sp-text-primary); margin: 0; }
+.success-summary-badge {
+  display: inline-flex; align-items: center; font-size: 11px; font-weight: 700;
+  background: rgba(16,185,129,.15); color: #10b981; border-radius: 20px; padding: 3px 10px; flex-shrink: 0;
+}
+html[data-theme="dark"] .success-summary-badge { background: rgba(16,185,129,.22); color: #4ADE80; }
+.success-modal-footer { padding: 0 26px 26px; }
+.success-modal-btn {
+  width: 100%; height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 14px; font-weight: 700; font-family: 'Inter', system-ui, sans-serif;
+  border-radius: 11px; cursor: pointer; border: none;
+  background: linear-gradient(135deg, #10b981, #059669); color: #fff; box-shadow: 0 2px 12px rgba(16,185,129,.30);
+  transition: filter .18s, transform .15s, box-shadow .18s;
+}
+.success-modal-btn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 4px 20px rgba(16,185,129,.40); }
+.success-modal-btn:active { transform: scale(.97); }
+
+/* MODALS */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(15, 23, 42, .70); /* light mode: solid dark slate overlay */
+  background: rgba(15, 23, 42, .70);
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
-html[data-theme="dark"] .modal-backdrop {
-  background: rgba(0, 0, 0, .82); /* dark mode: solid near-black overlay */
-}
+html[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, .82); }
 .modal-fade-enter-active { transition: opacity .22s ease, transform .22s ease; }
 .modal-fade-leave-active { transition: opacity .18s ease, transform .18s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; transform: scale(.95) translateY(10px); }
@@ -672,12 +970,8 @@ html[data-theme="dark"] .modal-backdrop {
   background: #FFFFFF; border: 1px solid #E5E7EB;
   border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.35); overflow: hidden;
   display: flex; flex-direction: column;
-  transition: background-color .22s, border-color .22s;
 }
-html[data-theme="dark"] .del-modal {
-  background: #1E2130; border-color: #2A2D3E;
-  box-shadow: 0 24px 64px rgba(0,0,0,.6);
-}
+html[data-theme="dark"] .del-modal { background: #1E2130; border-color: #2A2D3E; box-shadow: 0 24px 64px rgba(0,0,0,.6); }
 .del-modal::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, #f43f5e, #fb7185); }
 .del-modal-icon-ring { display: flex; align-items: center; justify-content: center; padding: 28px 0 0; }
 .del-modal-icon {
@@ -688,12 +982,12 @@ html[data-theme="dark"] .del-modal {
 }
 html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color: #F87171; box-shadow: 0 0 0 8px rgba(244,63,94,.08); }
 .del-modal-body { padding: 18px 26px 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
-.del-modal-title { font-size: 18px; font-weight: 800; color: var(--sp-text-primary); letter-spacing: -.02em; margin: 0; transition: color .22s; }
+.del-modal-title { font-size: 18px; font-weight: 800; color: var(--sp-text-primary); letter-spacing: -.02em; margin: 0; }
 .del-modal-desc  { font-size: 13px; line-height: 1.65; color: var(--sp-text-muted); margin: 0; }
 .del-modal-desc strong { color: var(--sp-text-primary); }
 
 .pw-field { width: 100%; text-align: left; margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
-.pw-label { font-size: 12px; font-weight: 600; color: var(--sp-text-secondary); transition: color .22s; }
+.pw-label { font-size: 12px; font-weight: 600; color: var(--sp-text-secondary); }
 .input-wrap { position: relative; display: flex; align-items: center; }
 .input-icon { position: absolute; left: 13px; font-size: 12px; color: var(--sp-text-faint); pointer-events: none; z-index: 1; }
 .pw-input {
@@ -705,30 +999,35 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
 }
 .pw-input:focus { border-color: var(--sp-red); box-shadow: 0 0 0 3px rgba(244,63,94,.12); background: var(--sp-surface); }
 .pw-input::placeholder { color: var(--sp-text-faint); }
-.pw-toggle {
-  position: absolute; right: 12px; background: none; border: none; cursor: pointer;
-  color: var(--sp-text-faint); font-size: 13px; padding: 4px; transition: color .15s;
-}
+.pw-toggle { position: absolute; right: 12px; background: none; border: none; cursor: pointer; color: var(--sp-text-faint); font-size: 13px; padding: 4px; transition: color .15s; }
 .pw-toggle:hover { color: var(--sp-text-muted); }
 .pw-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sp-red); margin: 2px 0 0; }
 
 .del-modal-footer { display: flex; gap: 10px; padding: 18px 26px 26px; }
 .del-modal-btn {
   flex: 1; height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  font-size: 13.5px; font-weight: 600; font-family: 'Inter',system-ui,sans-serif;
+  font-size: 13.5px; font-weight: 600; font-family: 'Inter', system-ui, sans-serif;
   border-radius: 11px; cursor: pointer; transition: background-color .18s, border-color .18s, opacity .18s, transform .15s;
 }
 .del-modal-btn:active { transform: scale(.97); }
 .del-modal-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 .del-modal-btn--cancel { background: var(--sp-surface-raised); border: 1.5px solid var(--sp-border-strong); color: var(--sp-text-secondary); }
 .del-modal-btn--cancel:hover:not(:disabled) { background: var(--sp-border); color: var(--sp-text-primary); }
-.del-modal-btn--confirm { background: linear-gradient(135deg,#f43f5e,#e11d48); border: none; color: #fff; box-shadow: 0 2px 12px rgba(244,63,94,.35); }
+.del-modal-btn--confirm { background: linear-gradient(135deg, #f43f5e, #e11d48); border: none; color: #fff; box-shadow: 0 2px 12px rgba(244,63,94,.35); }
 .del-modal-btn--confirm:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 4px 20px rgba(244,63,94,.50); transform: translateY(-1px); }
 
 @media (max-width: 700px) {
   .sales-page { padding: 16px 16px 48px; }
   .header-actions { flex-direction: column; align-items: stretch; }
-  .period-dropdown-wrap { align-self: stretch; }
+  .period-dropdown-wrap { flex: 1 1 100%; }
   .period-trigger { width: 100%; justify-content: space-between; }
+  .period-menu { left: 0; right: 0; width: auto; }
+  .stat { padding: 10px 14px; flex: 1 1 33%; }
+  .stat-scope { display: none; }
+  .pager { justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel-row, .row-highlight td, .success-modal-icon { animation: none; }
 }
 </style>

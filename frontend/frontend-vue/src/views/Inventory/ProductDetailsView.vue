@@ -61,8 +61,6 @@
               <div v-else class="product-image-placeholder">
                 <i class="fa-solid fa-cube"></i>
               </div>
-
-              <!-- Stock badge overlay -->
               <div class="stock-overlay" :class="stockClass">{{ stockLabel }}</div>
             </div>
 
@@ -148,7 +146,6 @@
             </div>
 
             <div class="detail-list">
-              <!-- Selling price (featured) — a range when sizes differ in price -->
               <div class="price-featured">
                 <span class="price-featured-label">{{ variants.length > 1 ? 'Price Range' : 'Selling Price' }}</span>
                 <span class="price-featured-val">{{ priceLabel }}</span>
@@ -176,6 +173,13 @@
               <div class="detail-row">
                 <span class="detail-label">Reorder Level</span>
                 <span class="detail-val">{{ product.inventory?.ReorderLevel ?? 0 }} units</span>
+              </div>
+
+              <div class="detail-row" v-if="offcutPieces > 0">
+                <span class="detail-label">Offcuts on hand</span>
+                <span class="detail-val">
+                  <span class="offcut-chip"><i class="fa-solid fa-scissors"></i> {{ offcutPieces }} piece{{ offcutPieces > 1 ? 's' : '' }}</span>
+                </span>
               </div>
             </div>
           </div>
@@ -214,6 +218,40 @@
               </tbody>
             </table>
           </div>
+        </div>
+
+        <!-- ── CUT OFFCUTS ON HAND ── -->
+        <div class="detail-card" v-if="remnants.length">
+          <div class="detail-card-header">
+            <div class="detail-card-icon detail-card-icon--amber">
+              <i class="fa-solid fa-scissors"></i>
+            </div>
+            <h2 class="detail-card-title">Cut Offcuts on Hand</h2>
+          </div>
+
+          <div class="size-table-wrap">
+            <table class="size-table">
+              <thead>
+                <tr>
+                  <th>Size</th>
+                  <th>Length each</th>
+                  <th>Pieces</th>
+                  <th>From receipt</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in remnants" :key="r.RemnantID">
+                  <td class="size-name">{{ r.VariantLabel || '—' }}</td>
+                  <td>{{ Number(r.Length) }} {{ r.Unit }}</td>
+                  <td>{{ r.Quantity }}</td>
+                  <td>SR-{{ String(r.SaleID).padStart(5, '0') }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="offcut-note">
+            Offcuts are tracked separately from full-piece stock, so the stock count above only counts whole pieces.
+          </p>
         </div>
 
         <!-- ── SUPPLIERS ── -->
@@ -269,11 +307,12 @@ const loading = ref(true)
 const formatPrice = val => Number(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const imageUrl    = path => `http://localhost:8000/storage/${path}`
 
-/* ── SIZES & PRICES ──
-   GET /api/products/{id} returns `variants: [{ VariantID, Label, Specs,
-   SellingPrice, CostPrice }]`. The pricing card shows a single price or a
-   range; the Sizes & Prices table lists every size with its margin. */
+/* ── SIZES & PRICES ── */
 const variants = computed(() => product.value.variants ?? [])
+
+/* ── OFFCUTS (leftover lengths from cut pieces sold at the POS) ── */
+const remnants     = computed(() => product.value.remnants ?? [])
+const offcutPieces = computed(() => remnants.value.reduce((s, r) => s + Number(r.Quantity || 0), 0))
 
 const priceLabel = computed(() => {
   const prices = variants.value.map(v => Number(v.SellingPrice))
@@ -444,7 +483,6 @@ html[data-theme="dark"] .detail-card-icon--violet { background: rgba(99,102,241,
   font-size: 48px; color: var(--pv-text-faint);
 }
 
-/* Stock overlay badge */
 .stock-overlay {
   position: absolute; top: 12px; right: 12px;
   font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
@@ -454,7 +492,6 @@ html[data-theme="dark"] .detail-card-icon--violet { background: rgba(99,102,241,
 .stock-overlay--low { background: rgba(245,158,11,.90); color: #fff; }
 .stock-overlay--oos { background: rgba(244,63,94,.88);  color: #fff; }
 
-/* Identity list (below image) */
 .identity-list { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 .identity-row  { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .identity-label { font-size: 11.5px; font-weight: 600; color: var(--pv-text-faint); text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
@@ -486,7 +523,6 @@ html[data-theme="dark"] .returnable-pill--no  { background: rgba(244,63,94,.16);
 .detail-val   { font-size: 13.5px; font-weight: 500; color: var(--pv-text-primary); text-align: right; transition: color .22s; }
 .detail-val--desc { text-align: left; line-height: 1.65; color: var(--pv-text-secondary); font-size: 13px; }
 
-/* Pricing featured */
 .price-featured {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
   background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.20);
@@ -514,6 +550,16 @@ html[data-theme="dark"] .stock-count--oos { color: #F87171; }
   border-radius: 20px; padding: 2px 8px; margin-left: 6px;
 }
 html[data-theme="dark"] .low-stock-badge { background: rgba(244,63,94,.16); color: #F87171; }
+
+/* offcut chip + note */
+.offcut-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 700; color: var(--pv-amber);
+  background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.3);
+  border-radius: 20px; padding: 2px 9px;
+}
+html[data-theme="dark"] .offcut-chip { color: #FCD34D; }
+.offcut-note { margin: 0; padding: 4px 20px 16px; font-size: 12px; color: var(--pv-text-muted); line-height: 1.5; }
 
 /* ── SIZES & PRICES TABLE ── */
 .size-table-wrap { overflow-x: auto; padding: 4px 8px 12px; }

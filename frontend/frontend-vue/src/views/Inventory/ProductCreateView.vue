@@ -220,15 +220,15 @@
         </div>
       </div>
 
-      <!-- ══ SIZES & PRICES ══ -->
+      <!-- ══ SIZES, PRICES & STOCK ══ -->
       <div class="form-card">
         <div class="form-card-header">
           <div class="form-card-icon form-card-icon--amber">
             <i class="fa-solid fa-ruler-combined"></i>
           </div>
           <div>
-            <h2 class="form-card-title">Sizes &amp; Prices</h2>
-            <p class="form-card-sub">Each size has its own specs and price. POS shows these as a dropdown.</p>
+            <h2 class="form-card-title">Sizes, Prices &amp; Stock</h2>
+            <p class="form-card-sub">Each size has its own specs, price and stock. POS shows these as a dropdown.</p>
           </div>
         </div>
         <div class="form-card-body">
@@ -279,7 +279,8 @@
                 </button>
               </div>
 
-              <div class="form-grid-2 variant-prices">
+              <!-- Prices -->
+              <div class="form-grid-2 variant-section">
                 <div class="form-field">
                   <label class="form-label">Selling Price <span class="req">*</span></label>
                   <div class="input-wrap input-wrap--prefix">
@@ -295,6 +296,33 @@
                   </div>
                 </div>
               </div>
+
+              <!-- Stock (per size) -->
+              <div class="form-grid-2 variant-section">
+                <div class="form-field">
+                  <label class="form-label">Opening Stock</label>
+                  <input
+                    v-model="v.OpeningStock"
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="form-input form-input--plain"
+                    placeholder="0"
+                  />
+                </div>
+                <div class="form-field">
+                  <label class="form-label">Reorder Level</label>
+                  <input
+                    v-model="v.ReorderLevel"
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="form-input form-input--plain"
+                    placeholder="0"
+                  />
+                  <p class="form-hint">Alert when this size runs low.</p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -304,29 +332,22 @@
         </div>
       </div>
 
-      <!-- ══ INVENTORY ══ -->
+      <!-- ══ INVENTORY SUMMARY (read-only; stock is set per size above) ══ -->
       <div class="form-card">
         <div class="form-card-header">
           <div class="form-card-icon form-card-icon--teal">
             <i class="fa-solid fa-boxes-stacked"></i>
           </div>
           <div>
-            <h2 class="form-card-title">Inventory</h2>
-            <p class="form-card-sub">Opening stock and reorder settings.</p>
+            <h2 class="form-card-title">Inventory Summary</h2>
+            <p class="form-card-sub">Stock is now set per size above.</p>
           </div>
         </div>
         <div class="form-card-body">
-          <div class="form-grid-2">
-            <div class="form-field">
-              <label class="form-label">Opening Stock</label>
-              <input v-model="form.OpeningStock" type="number" class="form-input" placeholder="0" />
-            </div>
-            <div class="form-field">
-              <label class="form-label">Reorder Level</label>
-              <input v-model="form.ReorderLevel" type="number" class="form-input" placeholder="0" />
-              <p class="form-hint">Alert will trigger when stock drops below this value.</p>
-            </div>
-          </div>
+          <p class="form-hint">
+            Total opening stock across {{ variants.length }} size{{ variants.length === 1 ? '' : 's' }}:
+            <b>{{ totalOpeningStock }}</b>
+          </p>
         </div>
       </div>
 
@@ -446,31 +467,58 @@
         </div>
       </div>
     </transition>
+
+    <!-- ══ UNSAVED CHANGES CONFIRMATION ══
+         Same look as the POS.vue "Clear this sale?" modal. Teleported to
+         <body>, so its styles use --c-* tokens with inline fallbacks. -->
+    <Teleport to="body">
+    <transition name="modal-fade">
+      <div v-if="showLeaveModal" class="modal-backdrop" @click.self="stayOnPage" @keydown.esc="stayOnPage">
+        <div class="modal modal--confirm" role="alertdialog" aria-modal="true" aria-labelledby="leave-title" aria-describedby="leave-desc">
+          <div class="confirm-body">
+            <div class="confirm-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <h3 id="leave-title" class="confirm-title">Unsaved changes</h3>
+            <p id="leave-desc" class="confirm-text">
+              You have unsaved changes. Are you sure you want to leave?
+            </p>
+          </div>
+          <div class="modal-footer confirm-footer">
+            <button ref="stayBtn" type="button" class="modal-cancel" @click="stayOnPage">Stay</button>
+            <button type="button" class="modal-confirm modal-confirm--danger" @click="confirmLeave">
+              <i class="fa-solid fa-right-from-bracket"></i> Leave
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+    </Teleport>
   </Layout>
 </template>
 
 <script setup>
 import Layout from '@/components/Layout.vue'
 import api from '@/api/axios'
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 // Camera barcode scanning — same library/pipeline already used in POS.vue.
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 
 const router = useRouter()
 
+// NOTE: OpeningStock and ReorderLevel are no longer product-level fields.
+// They now live on each size (see `variants` below).
 const form = ref({
   ProductName: '', SKU: '', Barcode: '', Unit: '', IsReturnable: false,
   CategoryID: '', SupplierID: '', Brand: '', Description: '',
   Material: '', ProfileType: '', Color: '',
-  OpeningStock: '', ReorderLevel: '',
 })
 
 /* ────────────────────────────────────────────────────────────
-   SIZES & PRICES (variants)
+   SIZES, PRICES & STOCK (variants)
    Each variant = a list of dynamic specs (type + value + unit)
-   plus its own selling and cost price. The label (e.g.
-   "8 ft × 3 ft × 0.40 mm") is what POS shows in its dropdown.
+   plus its own selling price, cost price, opening stock and
+   reorder level. The label (e.g. "8 ft × 3 ft × 0.40 mm") is
+   what POS shows in its dropdown.
 ──────────────────────────────────────────────────────────── */
 const SPEC_TYPES = [
   { key: 'Length',    label: 'Length',    units: ['ft', 'm', 'cm', 'in', 'mm'] },
@@ -485,9 +533,21 @@ const nextUid = () => ++uidCounter
 
 const specUnits = (type) => SPEC_TYPES.find(t => t.key === type)?.units ?? []
 const newSpec = (type = 'Length') => ({ uid: nextUid(), type, value: '', unit: specUnits(type)[0] })
-const newVariant = () => ({ uid: nextUid(), specs: [], SellingPrice: '', CostPrice: '' })
+const newVariant = () => ({
+  uid: nextUid(),
+  specs: [],
+  SellingPrice: '',
+  CostPrice: '',
+  OpeningStock: '',
+  ReorderLevel: '',
+})
 
 const variants = ref([newVariant()])
+
+// Sum of every size's opening stock — shown in the Inventory Summary card.
+const totalOpeningStock = computed(() =>
+  variants.value.reduce((sum, v) => sum + (Number(v.OpeningStock) || 0), 0)
+)
 
 function addVariant()        { variants.value.push(newVariant()) }
 function removeVariant(i)    { variants.value.splice(i, 1) }
@@ -511,6 +571,13 @@ function validateVariants() {
     if (v.specs.some(s => s.value === '' || s.value === null)) return `Size ${n}: fill in or remove empty specifications.`
     if (v.SellingPrice === '' || Number(v.SellingPrice) <= 0)   return `Size ${n}: enter a selling price.`
     if (v.CostPrice === '' || Number(v.CostPrice) < 0)          return `Size ${n}: enter a cost price.`
+
+    // Stock fields are optional (blank = 0) but must be whole numbers >= 0.
+    const stock   = v.OpeningStock === '' || v.OpeningStock === null ? 0 : Number(v.OpeningStock)
+    const reorder = v.ReorderLevel === '' || v.ReorderLevel === null ? 0 : Number(v.ReorderLevel)
+    if (!Number.isInteger(stock) || stock < 0)     return `Size ${n}: opening stock must be a whole number, 0 or more.`
+    if (!Number.isInteger(reorder) || reorder < 0) return `Size ${n}: reorder level must be a whole number, 0 or more.`
+
     const label = variantLabel(v)
     if (seen.has(label)) return `Size ${n} duplicates another size ("${label}").`
     seen.add(label)
@@ -574,15 +641,47 @@ async function loadCategories() { const r = await api.get('/api/categories'); ca
 async function loadSuppliers()  { const r = await api.get('/api/suppliers');  suppliers.value  = r.data.suppliers  }
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadSuppliers()])
-  initialFormSnapshot.value = formSnapshot()
+  try {
+    await Promise.all([loadCategories(), loadSuppliers()])
+  } catch (e) {
+    console.error('load categories/suppliers error:', e)
+  } finally {
+    // Always set the baseline — otherwise a failed load would make every
+    // navigation look like "unsaved changes".
+    initialFormSnapshot.value = formSnapshot()
+  }
 })
+
+/* ────────────────────────────────────────────────────────────
+   UNSAVED-CHANGES MODAL
+   Replaces window.confirm. onBeforeRouteLeave can return a Promise,
+   so the router waits until the person picks "Stay" (false) or
+   "Leave" (true).
+──────────────────────────────────────────────────────────── */
+const showLeaveModal = ref(false)
+const stayBtn        = ref(null)
+let leaveResolver    = null
+
+function askLeaveConfirmation() {
+  leaveResolver?.(false) // settle any stale prompt
+  return new Promise(resolve => {
+    leaveResolver = resolve
+    showLeaveModal.value = true
+    nextTick(() => stayBtn.value?.focus()) // safe default: Enter stays on the page
+  })
+}
+function resolveLeave(answer) {
+  showLeaveModal.value = false
+  const resolve = leaveResolver
+  leaveResolver = null
+  resolve?.(answer)
+}
+const stayOnPage   = () => resolveLeave(false)
+const confirmLeave = () => resolveLeave(true)
 
 onBeforeRouteLeave(() => {
   if (hasSaved.value) return true
-  if (formSnapshot() !== initialFormSnapshot.value) {
-    return window.confirm('You have unsaved changes. Are you sure you want to leave?')
-  }
+  if (formSnapshot() !== initialFormSnapshot.value) return askLeaveConfirmation()
   return true
 })
 
@@ -930,11 +1029,14 @@ async function saveProduct() {
       fd.append(key, key === 'IsReturnable' ? (form.value[key] ? 1 : 0) : (form.value[key] ?? ''))
     }
 
+    // Each size carries its own price AND its own stock.
     const payload = variants.value.map(v => ({
       Label: variantLabel(v),
       Specs: v.specs.map(s => ({ Type: s.type, Value: Number(s.value), Unit: s.unit })),
       SellingPrice: Number(v.SellingPrice),
       CostPrice: Number(v.CostPrice),
+      OpeningStock: Number(v.OpeningStock) || 0,
+      ReorderLevel: Number(v.ReorderLevel) || 0,
     }))
     fd.append('Variants', JSON.stringify(payload))
     // Backward-compat: code that still reads a single price gets the first size's price.
@@ -1179,7 +1281,7 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 }
 .upload-remove:hover { opacity: .7; }
 
-/* SIZES & PRICES */
+/* SIZES, PRICES & STOCK */
 .variant-list { display: flex; flex-direction: column; gap: 16px; }
 .variant-card {
   border: 1.5px solid var(--p-border); border-radius: 14px;
@@ -1211,7 +1313,8 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
   transition: border-color .15s, color .15s, background-color .15s;
 }
 .add-spec-btn:hover { border-color: var(--p-accent); color: var(--p-accent); background: var(--p-accent-soft); }
-.variant-prices { padding-top: 14px; border-top: 1px dashed var(--p-border-strong); }
+/* Price row and stock row inside a size card share the same divider style. */
+.variant-section { padding-top: 14px; border-top: 1px dashed var(--p-border-strong); }
 .add-variant-btn { margin-top: 16px; width: 100%; justify-content: center; border-style: dashed; }
 
 /* FORM ACTIONS */
@@ -1340,6 +1443,65 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .camera-reticle-corner--tr { top:0;    right:0; border-width: 2px 2px 0 0; }
 .camera-reticle-corner--bl { bottom:0; left:0;  border-width: 0 0 2px 2px; }
 .camera-reticle-corner--br { bottom:0; right:0; border-width: 0 2px 2px 0; }
+
+/* UNSAVED-CHANGES CONFIRMATION (same look as POS.vue "Clear this sale?")
+   Teleported to <body>, so it uses --c-* tokens directly with fallbacks. */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: var(--c-overlay, rgba(0,0,0,.6)); backdrop-filter: blur(6px);
+  z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal {
+  position: relative; isolation: isolate;
+  background-color: var(--c-surface-overlay, #1e293b);
+  border: 1px solid var(--c-border, #334155);
+  border-radius: 20px; width: 100%; max-width: 480px;
+  max-height: calc(100vh - 40px);
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: var(--c-shadow-xl, 0 24px 60px rgba(0,0,0,.5));
+}
+.modal--confirm { max-width: 400px; }
+
+.confirm-body { padding: 28px 24px 8px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+.confirm-icon {
+  width: 52px; height: 52px; border-radius: 50%;
+  background: rgba(244,63,94,.14); color: #f43f5e; border: 1px solid rgba(244,63,94,.3);
+  display: flex; align-items: center; justify-content: center; font-size: 20px;
+}
+.confirm-title { margin: 4px 0 0; font-size: 17px; font-weight: 800; color: var(--c-text-primary, #f1f5f9); letter-spacing: -.01em; }
+.confirm-text  { margin: 0; font-size: 13px; line-height: 1.55; color: var(--c-text-muted, #94a3b8); max-width: 320px; }
+
+.modal-footer {
+  display: flex; gap: 10px; flex-shrink: 0;
+  padding: 14px 22px 20px; border-top: 1px solid var(--c-border, #334155);
+}
+.confirm-footer { border-top: none; padding-top: 18px; }
+.confirm-footer .modal-cancel, .confirm-footer .modal-confirm { flex: 1; }
+
+.modal-cancel {
+  height: 42px; border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 10px;
+  background: none; color: var(--c-text-muted, #94a3b8); font-size: 13.5px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.modal-cancel:hover { background: var(--c-surface-raised, #26364b); color: var(--c-text-primary, #f1f5f9); }
+.modal-confirm {
+  height: 42px; border: none; border-radius: 10px;
+  background: linear-gradient(135deg, var(--c-accent, #f97316), var(--c-accent-deep, #c2410c));
+  color: #fff; font-size: 13.5px; font-weight: 700; font-family: inherit; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: opacity .15s, transform .15s, box-shadow .15s;
+}
+.modal-confirm--danger {
+  background: linear-gradient(135deg, #f43f5e, #be123c);
+  box-shadow: 0 4px 14px rgba(244,63,94,.35);
+}
+.modal-confirm--danger:hover { opacity: .92; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(244,63,94,.45); }
+.modal-cancel:focus-visible, .modal-confirm:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--c-accent-ring, rgba(249,115,22,.25)); }
+
+.modal-fade-enter-active { transition: opacity .22s ease, transform .22s ease; }
+.modal-fade-leave-active { transition: opacity .16s ease, transform .16s ease; }
+.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; transform: scale(.97) translateY(8px); }
 
 /* RESPONSIVE */
 @media (max-width: 800px) {

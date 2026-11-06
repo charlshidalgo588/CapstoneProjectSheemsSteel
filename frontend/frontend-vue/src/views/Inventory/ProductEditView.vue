@@ -205,15 +205,15 @@
           </div>
         </div>
 
-        <!-- ══ SIZES & PRICES ══ -->
+        <!-- ══ SIZES, PRICES & STOCK ══ -->
         <div class="form-card">
           <div class="form-card-header">
             <div class="form-card-icon form-card-icon--amber">
               <i class="fa-solid fa-ruler-combined"></i>
             </div>
             <div>
-              <h2 class="form-card-title">Sizes &amp; Prices</h2>
-              <p class="form-card-sub">Each size has its own specs and price. POS shows these as a dropdown.</p>
+              <h2 class="form-card-title">Sizes, Prices &amp; Stock</h2>
+              <p class="form-card-sub">Each size has its own specs, price, stock and reorder level. POS shows these per size.</p>
             </div>
           </div>
           <div class="form-card-body">
@@ -280,38 +280,39 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- Stock for THIS size -->
+                <div class="variant-stock">
+                  <p class="variant-stock-title"><i class="fa-solid fa-boxes-stacked"></i> Stock for this size</p>
+                  <div class="form-grid-3">
+                    <template v-if="v.VariantID">
+                      <div class="form-field">
+                        <label class="form-label">Current stock</label>
+                        <div class="stock-readout" :class="stockClass(v)">{{ v.Stock }}</div>
+                      </div>
+                      <div class="form-field">
+                        <label class="form-label">Adjust stock (+/−)</label>
+                        <input v-model.number="v.StockAdjustment" type="number" step="1" class="form-input form-input--plain" placeholder="0" />
+                        <p class="form-hint">New stock: <strong>{{ newStock(v) }}</strong></p>
+                      </div>
+                    </template>
+                    <div v-else class="form-field">
+                      <label class="form-label">Opening stock</label>
+                      <input v-model.number="v.OpeningStock" type="number" min="0" step="1" class="form-input form-input--plain" placeholder="0" />
+                    </div>
+                    <div class="form-field">
+                      <label class="form-label">Reorder level</label>
+                      <input v-model.number="v.ReorderLevel" type="number" min="0" step="1" class="form-input form-input--plain" placeholder="5" />
+                      <p class="form-hint">Low-stock alert at or below this.</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
             <button type="button" class="btn btn--ghost add-variant-btn" @click="addVariant">
               <i class="fa-solid fa-plus"></i> Add Size &amp; Price
             </button>
-          </div>
-        </div>
-
-        <!-- ══ INVENTORY ══ -->
-        <div class="form-card">
-          <div class="form-card-header">
-            <div class="form-card-icon form-card-icon--teal"><i class="fa-solid fa-boxes-stacked"></i></div>
-            <div><h2 class="form-card-title">Inventory</h2><p class="form-card-sub">Stock adjustment and reorder settings.</p></div>
-          </div>
-          <div class="form-card-body">
-            <div class="form-grid-2">
-              <div class="form-field">
-                <label class="form-label">Stock Adjustment</label>
-                <input v-model.number="form.stock_adjustment" type="number" class="form-input" placeholder="0" />
-                <p class="form-hint">
-                  Current stock:
-                  <strong>{{ product?.inventory?.QuantityOnHand ?? 0 }}</strong>
-                  · shared by all sizes
-                </p>
-              </div>
-              <div class="form-field">
-                <label class="form-label">Reorder Level</label>
-                <input v-model.number="form.ReorderLevel" type="number" class="form-input" placeholder="0" />
-                <p class="form-hint">Alert triggers when stock drops below this value.</p>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -347,19 +348,23 @@ const categories = ref([])
 const suppliers  = ref([])
 const units      = ['Piece', 'Box', 'Pack', 'Set', 'Roll', 'Kg', 'g', 'L', 'mL']
 
-// Price and dimension fields now live in the Sizes & Prices section (variants).
+// Price, dimension AND stock fields now live per size in the
+// "Sizes, Prices & Stock" section (variants).
 const form = ref({
   ProductName: '', SKU: '', Barcode: '', Unit: '', IsReturnable: false,
   CategoryID: '', SupplierID: '', Brand: '', Description: '',
   Material: '', ProfileType: '', Color: '',
-  stock_adjustment: 0, ReorderLevel: 0,
 })
 
 /* ────────────────────────────────────────────────────────────
-   SIZES & PRICES (variants) — same model as ProductCreate.vue.
-   Each variant = dynamic specs (type + value + unit) + its own
-   selling and cost price. VariantID is kept for existing sizes so
-   the backend updates them in place instead of recreating them.
+   SIZES, PRICES & STOCK (variants) — same model as ProductCreate.vue.
+   Each variant = dynamic specs (type + value + unit), its own
+   selling and cost price, and its own stock:
+     - existing size : Stock (read-only) + StockAdjustment (+/-)
+     - new size      : OpeningStock
+     - both          : ReorderLevel
+   VariantID is kept for existing sizes so the backend updates them in
+   place instead of recreating them.
 ──────────────────────────────────────────────────────────── */
 const SPEC_TYPES = [
   { key: 'Length',    label: 'Length',    units: ['ft', 'm', 'cm', 'in', 'mm'] },
@@ -374,17 +379,35 @@ const nextUid = () => ++uidCounter
 
 const specUnits = (type) => SPEC_TYPES.find(t => t.key === type)?.units ?? []
 const newSpec = (type = 'Length') => ({ uid: nextUid(), type, value: '', unit: specUnits(type)[0] })
-const newVariant = () => ({ uid: nextUid(), VariantID: null, specs: [], SellingPrice: '', CostPrice: '' })
+const newVariant = () => ({
+  uid: nextUid(), VariantID: null, specs: [], SellingPrice: '', CostPrice: '',
+  Stock: 0, ReorderLevel: '', OpeningStock: '', StockAdjustment: '',
+})
 
 const variants = ref([newVariant()])
 
+const adjOf    = v => Number(v.StockAdjustment) || 0
+const newStock = v => v.VariantID ? (Number(v.Stock) || 0) + adjOf(v) : (Number(v.OpeningStock) || 0)
+const stockClass = v => {
+  const s = Number(v.Stock) || 0
+  const t = Number(v.ReorderLevel) > 0 ? Number(v.ReorderLevel) : 5
+  return s <= 0 ? 'stock-readout--oos' : s <= t ? 'stock-readout--low' : 'stock-readout--ok'
+}
+
 function addVariant()        { variants.value.push(newVariant()) }
-function removeVariant(i)    { variants.value.splice(i, 1) }
+function removeVariant(i) {
+  const v = variants.value[i]
+  if (v.VariantID && Number(v.Stock) > 0) {
+    error.value = `"${variantLabel(v)}" still has ${v.Stock} in stock. Adjust it to 0 before removing the size.`
+    return
+  }
+  variants.value.splice(i, 1)
+}
 function addSpec(v)          { v.specs.push(newSpec()) }
 function removeSpec(v, i)    { v.specs.splice(i, 1) }
 function onSpecTypeChange(s) { s.unit = specUnits(s.type)[0] }
 
-/** e.g. "8 ft × 3 ft × 0.40 mm" — shown live here and in the POS dropdown. */
+/** e.g. "8 ft × 3 ft × 0.40 mm" — shown live here and in the POS. */
 function variantLabel(v) {
   const parts = v.specs
     .filter(s => s.value !== '' && s.value !== null)
@@ -395,12 +418,22 @@ function variantLabel(v) {
 function validateVariants() {
   if (!variants.value.length) return 'Add at least one size and price.'
   const seen = new Set()
+  const isInt = x => x === '' || x === null || Number.isInteger(Number(x))
   for (let i = 0; i < variants.value.length; i++) {
     const v = variants.value[i]
     const n = i + 1
     if (v.specs.some(s => s.value === '' || s.value === null)) return `Size ${n}: fill in or remove empty specifications.`
     if (v.SellingPrice === '' || v.SellingPrice === null || Number(v.SellingPrice) <= 0) return `Size ${n}: enter a selling price.`
     if (v.CostPrice === '' || v.CostPrice === null || Number(v.CostPrice) < 0)           return `Size ${n}: enter a cost price.`
+
+    if (!isInt(v.ReorderLevel) || Number(v.ReorderLevel) < 0) return `Size ${n}: reorder level must be a whole number, 0 or more.`
+    if (v.VariantID) {
+      if (!isInt(v.StockAdjustment)) return `Size ${n}: stock adjustment must be a whole number.`
+      if (newStock(v) < 0)           return `Size ${n}: stock cannot go below 0.`
+    } else if (!isInt(v.OpeningStock) || Number(v.OpeningStock) < 0) {
+      return `Size ${n}: opening stock must be a whole number, 0 or more.`
+    }
+
     const label = variantLabel(v)
     if (seen.has(label)) return `Size ${n} duplicates another size ("${label}").`
     seen.add(label)
@@ -440,8 +473,6 @@ async function loadData() {
       SupplierID: p.data.suppliers?.[0]?.SupplierID ?? '',
       Brand: p.data.Brand ?? '', Description: p.data.Description ?? '',
       Material: p.data.Material ?? '', ProfileType: p.data.ProfileType ?? '', Color: p.data.Color ?? '',
-      stock_adjustment: 0,
-      ReorderLevel: p.data.inventory?.ReorderLevel ?? 0,
     })
 
     // Load existing sizes. Products created before sizes existed arrive
@@ -457,6 +488,10 @@ async function loadData() {
       })),
       SellingPrice: v.SellingPrice,
       CostPrice: v.CostPrice,
+      Stock: v.Stock ?? 0,
+      ReorderLevel: v.ReorderLevel ?? 0,
+      OpeningStock: '',
+      StockAdjustment: '',
     }))
     variants.value = loaded.length
       ? loaded
@@ -491,6 +526,9 @@ async function updateProduct() {
       Specs: v.specs.map(s => ({ Type: s.type, Value: Number(s.value), Unit: s.unit })),
       SellingPrice: Number(v.SellingPrice),
       CostPrice: Number(v.CostPrice),
+      ReorderLevel: (v.ReorderLevel === '' || v.ReorderLevel == null) ? null : Number(v.ReorderLevel),
+      OpeningStock: v.VariantID ? 0 : (Number(v.OpeningStock) || 0),
+      StockAdjustment: v.VariantID ? adjOf(v) : 0,
     }))
     fd.append('Variants', JSON.stringify(payload))
     // Backward-compat: code that still reads a single price gets the first size's price.
@@ -630,6 +668,7 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .form-label  { font-size: 12.5px; font-weight: 600; color: var(--p-text-secondary); letter-spacing: .01em; transition: color .22s; }
 .req  { color: var(--p-accent); }
 .form-hint { font-size: 11.5px; color: var(--p-text-faint); margin: 0; }
+.form-hint strong { color: var(--p-text-secondary); }
 
 .input-wrap { position: relative; display: flex; align-items: center; }
 .input-icon {
@@ -717,7 +756,7 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 }
 .upload-remove:hover { opacity: .7; }
 
-/* SIZES & PRICES */
+/* SIZES, PRICES & STOCK */
 .variant-list { display: flex; flex-direction: column; gap: 16px; }
 .variant-card {
   border: 1.5px solid var(--p-border); border-radius: 14px;
@@ -751,6 +790,14 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .add-spec-btn:hover { border-color: var(--p-accent); color: var(--p-accent); background: var(--p-accent-soft); }
 .variant-prices { padding-top: 14px; border-top: 1px dashed var(--p-border-strong); }
 .add-variant-btn { margin-top: 16px; width: 100%; justify-content: center; border-style: dashed; }
+
+/* per-size stock block */
+.variant-stock { padding-top: 14px; border-top: 1px dashed var(--p-border-strong); }
+.variant-stock-title { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--p-text-muted); display: flex; align-items: center; gap: 7px; }
+.stock-readout { height: 42px; display: flex; align-items: center; padding: 0 14px; border-radius: 10px; font-size: 15px; font-weight: 800; border: 1.5px solid var(--p-border); background: var(--p-surface-raised); font-variant-numeric: tabular-nums; }
+.stock-readout--ok  { color: #10b981; }
+.stock-readout--low { color: #f59e0b; }
+.stock-readout--oos { color: #f43f5e; }
 
 .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 4px; }
 

@@ -3,22 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Category;
-use App\Models\Notification;
 use App\Models\Product;
-use App\Models\Sale;
-use App\Models\SalesItem;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class POSController extends Controller
 {
-    /**
-     * Stock level at/below which a product is considered "low stock".
-     * Matches the badge cutoff used in the POS product grid on the
-     * frontend (stockStatus() in POS.vue).
-     */
-    private const LOW_STOCK_THRESHOLD = 5;
-
     public function index()
     {
         $categories = Category::all();
@@ -32,111 +22,75 @@ class POSController extends Controller
     }
 
     /**
-     * PROCESS POS CHECKOUT
-     * Saves sale, sale items & deducts stock.
+     * GET /api/pos/remnants — available leftover pieces the cashier can sell.
+     *
+     * suggested_price (the baseline) =
+     *   1. BasePrice saved when the cut was sold (list price - cut price), else
+     *   2. the proportional share of the list price (older leftovers).
+     * The cashier can still edit it in the POS.
      */
-    public function checkout(Request $request)
+    public function remnants()
     {
-        DB::beginTransaction();
-
-        try {
-            // 1. Create the sale entry
-            $sale = Sale::create([
-                'SaleDate'       => now(),
-                'CustomerID'     => null, // walk-in sale; wire up a real customer lookup if/when you add one
-                'TotalAmount'    => $request->total,
-                'DiscountAmount' => $request->discount ?? 0,
-                'AmountPaid'     => $request->amount_received,
-                'PaymentMethod'  => $request->payment_method,
-                'ClerkID'        => auth()->id(),
-            ]);
-
-            // 2. Loop through cart items
-            foreach ($request->items as $item) {
-
-                // Save item details
-                SalesItem::create([
-                    'SaleID'      => $sale->SaleID,
-                    'ProductID'   => $item['product_id'],
-                    'Quantity'    => $item['quantity'],
-                    'PriceAtSale' => $item['price'],
-                ]);
-
-                // Deduct from inventory
-                $product = Product::with('inventory')->find($item['product_id']);
-
-                if ($product && $product->inventory) {
-                    $product->inventory->QuantityOnHand -= $item['quantity'];
-                    $product->inventory->save();
-
-                    // Fire a low-stock / out-of-stock notification if this
-                    // sale just pushed the product into that territory.
-                    $this->checkStockNotification($product);
-                }
-            }
-
-            DB::commit();
-
-            return response()->json([
-                'message' => 'Sale saved successfully!',
-                'sale_id' => $sale->SaleID,
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'message' => 'Error saving sale.',
-                'error'   => $e->getMessage(),
-            ], 500);
+        if (!Schema::hasTable('product_remnants')) {
+            return response()->json([]);
         }
+
+        $vt          = $this->variantTable();
+        $hasFull     = Schema::hasColumn('product_remnants', 'FullLength');
+        $hasBase     = Schema::hasColumn('product_remnants', 'BasePrice');
+        $hasRemLabel = Schema::hasColumn('product_remnants', 'VariantLabel');
+        $hasVtLabel  = $vt && Schema::hasColumn($vt, 'Label');
+        $hasPrice    = $vt && Schema::hasColumn($vt, 'SellingPrice');
+
+        $q = DB::table('product_remnants as r')
+            ->join('products', 'r.ProductID', '=', 'products.ProductID')
+            ->where('r.Status', 'available');
+
+        if ($vt) {
+            $q->leftJoin($vt, 'r.VariantID', '=', "{$vt}.VariantID");
+        }
+
+        if ($hasVtLabel && $hasRemLabel) {
+            $labelExpr = "COALESCE(r.VariantLabel, {$vt}.Label) as VariantLabel";
+        } elseif ($hasVtLabel) {
+            $labelExpr = "{$vt}.Label as VariantLabel";
+        } elseif ($hasRemLabel) {
+            $labelExpr = 'r.VariantLabel as VariantLabel';
+        } else {
+            $labelExpr = 'NULL as VariantLabel';
+        }
+
+        // Use the variant's price when there is one, otherwise the product's own price.
+        $priceExpr = $hasPrice
+            ? "COALESCE({$vt}.SellingPrice, products.SellingPrice) as ListPrice"
+            : 'products.SellingPrice as ListPrice';
+
+        $rows = $q->select(
+            'r.RemnantID', 'r.ProductID', 'r.VariantID', 'r.Quantity', 'r.Length', 'r.Unit',
+            'products.ProductName', 'products.SKU', 'products.Product_Image as ImageURL',
+            $hasFull ? 'r.FullLength' : DB::raw('NULL as FullLength'),
+            $hasBase ? 'r.BasePrice' : DB::raw('NULL as BasePrice'),
+            DB::raw($labelExpr),
+            DB::raw($priceExpr)
+        )->orderBy('products.ProductName')->get();
+
+        return response()->json($rows->map(function ($r) {
+            if ((float) $r->BasePrice > 0) {
+                // Baseline = list price of the uncut piece minus what the cut was sold for.
+                $r->suggested_price = round((float) $r->BasePrice, 2);
+            } elseif ((float) $r->FullLength > 0 && (float) $r->ListPrice > 0) {
+                // Older leftovers without a saved baseline: same share of the list price.
+                $r->suggested_price = round($r->ListPrice * ($r->Length / $r->FullLength), 2);
+            } else {
+                $r->suggested_price = null;
+            }
+            return $r;
+        })->values());
     }
 
-    /**
-     * Creates a low-stock/out-of-stock notification for a product whose
-     * stock just changed after a sale. Reuses an existing UNREAD
-     * notification for the same product+type instead of inserting a new
-     * row every single sale, so repeat purchases of an already-low item
-     * don't spam duplicate alerts — the existing row is just "touched"
-     * so it stays near the top of the latest() list in
-     * NotificationController::index().
-     */
-    private function checkStockNotification(Product $product): void
+    /** Name of the sizes table, if the project has one. */
+    private function variantTable(): ?string
     {
-        $qty = $product->inventory->QuantityOnHand;
-
-        if ($qty > self::LOW_STOCK_THRESHOLD) {
-            return; // healthy stock, nothing to notify
-        }
-
-        $type = $qty <= 0 ? 'out_of_stock' : 'low_stock';
-
-        $title = $qty <= 0 ? 'Out of stock' : 'Low stock';
-
-        $description = $qty <= 0
-            ? "{$product->ProductName} is now out of stock."
-            : "{$product->ProductName} has only {$qty} unit(s) left.";
-
-        $existing = Notification::where('type', $type)
-            ->where('notifiable_type', Product::class)
-            ->where('notifiable_id', $product->ProductID)
-            ->whereNull('read_at')
-            ->first();
-
-        if ($existing) {
-            // Bump it back to the top of the "latest()" list instead of
-            // creating a duplicate row for the same still-low product.
-            $existing->touch();
-            return;
-        }
-
-        Notification::create([
-            'type'            => $type,
-            'title'           => $title,
-            'description'     => $description,
-            'notifiable_type' => Product::class,
-            'notifiable_id'   => $product->ProductID,
-            'user_id'         => null, // visible to all users — matches NotificationController::index()
-        ]);
+        return collect(['product_variants', 'variants'])->first(fn ($t) => Schema::hasTable($t));
     }
 }

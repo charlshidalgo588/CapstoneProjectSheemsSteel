@@ -2,292 +2,477 @@
   <Layout title="Reports">
     <div id="reports-print-area" class="reports">
 
-      <!-- Print-only letterhead — invisible on screen, shown only when printing -->
-      <div class="print-header">
-        <div class="print-header-brand">
-          <p class="print-brand-name">Sales Intelligence</p>
-          <h1 class="print-report-title">Sales Report</h1>
-        </div>
-        <div class="print-header-meta">
-          <p><span>Period</span>{{ periodLabel }}</p>
-          <p><span>Generated</span>{{ printGeneratedAt }}</p>
-        </div>
-      </div>
-
-      <!-- ── PAGE HEADER ── -->
-      <div class="page-header">
-        <div class="page-header-left">
-          <p class="page-eyebrow">Sales Intelligence</p>
+      <!-- ── PAGE HEADER: title + export actions ── -->
+      <header class="page-header">
+        <div class="page-heading">
           <h1 class="page-title">Reports</h1>
+          <p class="page-sub">
+            <span>{{ periodLabel || 'Loading…' }}</span>
+            <span v-if="isCurrentPeriod" class="chip chip--live">In progress</span>
+          </p>
         </div>
 
-        <!-- Unified period control: Month / Specific Date toggle + one picker -->
-        <div class="period-control">
-          <div class="period-mode-switch">
-            <button
-              type="button"
-              class="period-mode-btn"
-              :class="{ 'period-mode-btn--active': mode === 'month' }"
-              @click="setMode('month')"
-            >
-              By Month
-            </button>
-            <button
-              type="button"
-              class="period-mode-btn"
-              :class="{ 'period-mode-btn--active': mode === 'day' }"
-              @click="setMode('day')"
-            >
-              Specific Date
-            </button>
-          </div>
+        <div class="report-toolbar" role="group" aria-label="Export this report">
+          <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying' || loading">
+            <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
+            {{ copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy' }}
+          </button>
+          <button type="button" class="rt-btn" @click="exportCSV" :disabled="loading">
+            <i class="fa-solid" :class="csvState === 'done' ? 'fa-check' : 'fa-file-csv'"></i>
+            {{ csvState === 'done' ? 'Saved' : 'CSV' }}
+          </button>
+          <button type="button" class="rt-btn rt-btn--primary" @click="printReport" :disabled="loading || printing">
+            <i class="fa-solid" :class="printing ? 'fa-spinner fa-spin' : 'fa-print'"></i>
+            {{ printing ? 'Preparing…' : 'Print' }}
+          </button>
+        </div>
+      </header>
+
+      <!-- ── PERIOD BAR: group by + navigate ── -->
+      <div class="period-bar" role="group" aria-label="Report period">
+        <div class="seg" role="group" aria-label="Group report by">
+          <button
+            v-for="m in MODES"
+            :key="m.key"
+            type="button"
+            class="seg-btn"
+            :class="{ 'seg-btn--active': mode === m.key }"
+            :aria-pressed="mode === m.key"
+            @click="setMode(m.key)"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+
+        <div class="period-nav">
+          <button
+            type="button"
+            class="icon-btn"
+            :disabled="!canGoPrev"
+            :aria-label="`Previous ${modeNoun}`"
+            @click="shiftPeriod(-1)"
+          >
+            <i class="fa-solid fa-chevron-left"></i>
+          </button>
 
           <input
             v-if="mode === 'month'"
             type="month"
             class="period-picker-input"
+            aria-label="Select month"
             v-model="selectedMonth"
             :max="currentMonthValue"
-            @change="onMonthChange"
+            @change="onPickerChange"
           />
+          <select
+            v-else-if="mode === 'year'"
+            class="period-picker-input"
+            aria-label="Select year"
+            v-model.number="selectedYear"
+            @change="onPickerChange"
+          >
+            <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+          </select>
           <input
             v-else
             type="date"
             class="period-picker-input"
+            aria-label="Select date"
             v-model="selectedDay"
             :max="currentDayValue"
-            @change="onDayChange"
+            @change="onPickerChange"
           />
-        </div>
-      </div>
 
-      <!-- REPORT ACTIONS — Copy / CSV / Print the whole report -->
-      <div class="report-toolbar">
-        <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying'">
-          <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
-          {{ copyState === 'copied' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy' }}
-        </button>
-        <button type="button" class="rt-btn" @click="exportCSV">
-          <i class="fa-solid fa-file-csv"></i>CSV
-        </button>
-        <button type="button" class="rt-btn rt-btn--primary" @click="printReport">
-          <i class="fa-solid fa-print"></i>Print
-        </button>
-      </div>
-
-      <!-- SALES ACTIVITY -->
-      <div class="section">
-        <div class="section-header">
-          <p class="card-eyebrow">Overview</p>
-          <h2 class="section-title">Sales Activity &mdash; {{ periodLabel }}</h2>
-        </div>
-        <div class="kpi-strip">
-          <div
-            v-for="(card, idx) in salesActivityDisplay"
-            :key="card.label"
-            class="kpi-card"
-            :class="kpiAccent(idx).cardClass"
+          <button
+            type="button"
+            class="icon-btn"
+            :disabled="!canGoNext"
+            :aria-label="`Next ${modeNoun}`"
+            @click="shiftPeriod(1)"
           >
-            <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap" :class="kpiAccent(idx).iconClass">
-                <i class="fa-solid" :class="kpiAccent(idx).icon"></i>
-              </div>
-              <div class="kpi-body">
-                <p class="kpi-label">{{ card.label }}</p>
-                <p class="kpi-value" :class="kpiAccent(idx).valueClass">{{ formatKpiValue(card) }}</p>
-              </div>
-            </div>
-            <div class="kpi-accent-bar" :class="kpiAccent(idx).barClass"></div>
-          </div>
+            <i class="fa-solid fa-chevron-right"></i>
+          </button>
         </div>
-      </div>
 
-      <!-- INVENTORY SUMMARY -->
-      <div class="section">
-        <div class="section-header">
-          <p class="card-eyebrow">Stock Status</p>
-          <h2 class="section-title">Inventory Summary</h2>
-        </div>
-        <div class="kpi-strip">
-          <div
-            v-for="box in inventoryDisplay"
-            :key="box.label"
-            class="kpi-card"
-            :class="box.isRed ? 'kpi-card--alert' : ''"
+        <button v-if="!isCurrentPeriod" type="button" class="link-btn" @click="goCurrent">{{ currentLabel }}</button>
+
+        <div class="period-status" aria-live="polite">
+          <span v-if="loading" class="period-status-text period-status-text--busy">
+            <i class="fa-solid fa-spinner fa-spin"></i> Updating…
+          </span>
+          <span v-else-if="lastUpdated" class="period-status-text">Updated {{ lastUpdated }}</span>
+          <button
+            type="button"
+            class="icon-btn icon-btn--sm"
+            aria-label="Refresh report"
+            title="Refresh"
+            :disabled="loading"
+            @click="loadReports"
           >
-            <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap" :class="box.isRed ? 'kpi-icon-wrap--red' : 'kpi-icon-wrap--violet'">
-                <i class="fa-solid" :class="box.isRed ? 'fa-triangle-exclamation' : 'fa-boxes-stacked'"></i>
-              </div>
-              <div class="kpi-body">
-                <p class="kpi-label">{{ box.label }}</p>
-                <p class="kpi-value" :class="box.isRed ? 'kpi-value--red' : 'kpi-value--violet'">{{ formatNumber(box.num) }}</p>
-              </div>
-            </div>
-            <div class="kpi-accent-bar" :class="box.isRed ? 'kpi-accent-bar--red' : 'kpi-accent-bar--violet'"></div>
-          </div>
+            <i class="fa-solid fa-rotate"></i>
+          </button>
         </div>
       </div>
 
-      <!-- TOP SELLING ITEMS — now a ranked bar-list, matching Home dashboard -->
-      <div class="section">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <p class="card-eyebrow">Performance</p>
-              <h2 class="card-title">Top Selling Items &mdash; {{ periodLabel }}</h2>
-            </div>
-            <div class="ts-controls">
-              <div class="metric-toggle">
-                <button
-                  type="button"
-                  class="metric-toggle-btn"
-                  :class="{ 'metric-toggle-btn--active': topMetric === 'sales' }"
-                  @click="setTopMetric('sales')"
-                >
-                  <i class="fa-solid fa-peso-sign"></i>Sales
-                </button>
-                <button
-                  type="button"
-                  class="metric-toggle-btn"
-                  :class="{ 'metric-toggle-btn--active': topMetric === 'qty' }"
-                  @click="setTopMetric('qty')"
-                >
-                  <i class="fa-solid fa-box"></i>Qty
-                </button>
-              </div>
-            </div>
-          </div>
-          <p class="chart-hint">Hover an item for the full breakdown · Click to pin it below</p>
-
-          <div class="top-list">
-            <div
-              v-for="item in rankedTopItems"
-              :key="item.ProductName"
-              class="top-row"
-              :class="[
-                `top-row--rank${item.rank <= 3 ? item.rank : 'default'}`,
-                { 'top-row--pinned': selectedTopItem && selectedTopItem.ProductName === item.ProductName },
-              ]"
-              :style="{ transitionDelay: (item.rank - 1) * 40 + 'ms' }"
-              @click="toggleSelectedTopItem(item)"
-            >
-              <div class="top-row-rank" :class="`top-row-rank--${item.rank <= 3 ? item.rank : 'default'}`">
-                <i v-if="item.rank === 1" class="fa-solid fa-crown"></i>
-                <span v-else>{{ item.rank }}</span>
-              </div>
-
-              <div class="top-row-main">
-                <div class="top-row-head">
-                  <span class="top-row-name">{{ item.ProductName }}</span>
-                  <span class="top-row-value">
-                    {{ topMetric === 'sales' ? '₱' + formatNumber(item.total_sales) : formatNumber(item.total_quantity) + ' units' }}
-                  </span>
-                </div>
-                <div class="top-row-bar-track">
-                  <div
-                    class="top-row-bar-fill"
-                    :class="`top-row-bar-fill--rank${item.rank <= 3 ? item.rank : 'default'}`"
-                    :style="{ width: (barsReady ? item.barPct : 0) + '%' }"
-                  ></div>
-                </div>
-              </div>
-
-              <div class="top-row-tooltip">
-                <div class="trt-row"><span>Total Sales</span><strong>₱{{ formatNumber(item.total_sales) }}</strong></div>
-                <div class="trt-row"><span>Qty Sold</span><strong>{{ formatNumber(item.total_quantity) }}</strong></div>
-                <div class="trt-row"><span>Avg. Price</span><strong>₱{{ formatNumber(avgPrice(item)) }}</strong></div>
-                <div class="trt-row"><span>Category</span><strong>{{ item.CategoryName || '—' }}</strong></div>
-              </div>
-            </div>
-
-            <p v-if="!rankedTopItems.length" class="top-empty">No sales recorded for this period yet.</p>
-          </div>
-
-          <transition name="fade">
-            <div v-if="selectedTopItem" class="top-item-detail">
-              <button class="tid-close" @click="selectedTopItem = null" aria-label="Close details">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
-              <div class="tid-row tid-row--head">
-                <span class="tid-rank">#{{ selectedTopItem.rank }}</span>
-                <strong class="tid-name">{{ selectedTopItem.ProductName }}</strong>
-              </div>
-              <div class="tid-stats">
-                <div class="tid-stat">
-                  <span class="tid-label">Total Sales</span>
-                  <strong>₱{{ formatNumber(selectedTopItem.total_sales) }}</strong>
-                </div>
-                <div class="tid-stat">
-                  <span class="tid-label">Qty Sold</span>
-                  <strong>{{ formatNumber(selectedTopItem.total_quantity) }}</strong>
-                </div>
-                <div class="tid-stat">
-                  <span class="tid-label">Avg. Price</span>
-                  <strong>₱{{ formatNumber(avgPrice(selectedTopItem)) }}</strong>
-                </div>
-              </div>
-            </div>
-          </transition>
-        </div>
+      <!-- ── ERROR NOTICE ── -->
+      <div v-if="loadError" class="notice" role="alert">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>{{ loadError }}</span>
+        <button type="button" class="link-btn" @click="loadReports">Try again</button>
       </div>
 
-      <!-- SALES CHART -->
-      <div class="section">
-        <div class="card">
-          <div class="card-header">
+      <div class="report-body" :class="{ 'is-loading': loading }" :aria-busy="loading">
+
+        <!-- ── 1. SUMMARY ── -->
+        <section class="section" aria-labelledby="rp-summary">
+          <h2 id="rp-summary" class="section-title">Summary</h2>
+
+          <div class="summary-grid">
+            <!-- Hero: sales + profit + margin -->
+            <article class="stat stat--hero">
+              <div class="hero-cols">
+                <div class="hero-col">
+                  <p class="stat-label">Total sales</p>
+                  <p class="stat-value stat-value--xl">₱{{ price(animated.sales) }}</p>
+                  <p v-if="salesTrend.available" class="trend-line">
+                    <span class="trend-badge" :class="salesTrend.direction">
+                      <i :class="trendIcon"></i>{{ salesTrend.text }}
+                    </span>
+                    <span>vs {{ comparisonLabel }}</span>
+                  </p>
+                  <p v-else class="stat-note">No earlier period to compare.</p>
+                </div>
+
+                <div class="hero-col hero-col--profit">
+                  <p class="stat-label">Profit</p>
+                  <p class="stat-value stat-value--xl stat-value--green">₱{{ price(animated.profit) }}</p>
+                  <p class="stat-note">{{ profitMarginPct }}% of sales</p>
+                </div>
+              </div>
+
+              <div class="margin-meter">
+                <div class="margin-head">
+                  <span>Profit margin</span>
+                  <strong>{{ profitMarginPct }}%</strong>
+                </div>
+                <div class="margin-track" role="img" :aria-label="`Profit margin ${profitMarginPct} percent`">
+                  <div class="margin-fill" :style="{ width: marginBarPct + '%' }"></div>
+                </div>
+              </div>
+            </article>
+
+            <!-- Secondary KPIs -->
+            <article v-for="s in secondaryStats" :key="s.key" class="stat">
+              <span class="stat-icon" :class="`stat-icon--${s.tone}`"><i class="fa-solid" :class="s.icon"></i></span>
+              <div class="stat-body">
+                <p class="stat-label">{{ s.label }}</p>
+                <p class="stat-value" :class="{ 'stat-value--text': s.text }" :title="s.value">{{ s.value }}</p>
+                <p class="stat-sub" :title="s.sub">{{ s.sub }}</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── 2. TREND ── -->
+        <section class="card" aria-labelledby="rp-trend">
+          <header class="card-head">
             <div>
-              <p class="card-eyebrow">Trend Analysis</p>
-              <h2 class="card-title">
-                {{ mode === 'month' ? 'Daily Sales' : 'Hourly Sales' }} &mdash; {{ periodLabel }}
-              </h2>
+              <h2 id="rp-trend" class="card-title">{{ seriesWord }} sales and profit</h2>
+              <p class="card-sub">Hover for exact values and margin. Click a legend item to hide it.</p>
             </div>
             <div class="legend-row">
-              <span
+              <button
+                type="button"
                 class="legend-chip legend-chip--orange"
                 :class="{ 'legend-chip--off': legendState[0] }"
+                :aria-pressed="!legendState[0]"
                 @click="toggleDataset(0)"
               >
-                <span class="legend-dot"></span>{{ mode === 'month' ? 'Daily Sales' : 'Hourly Sales' }}
-              </span>
-              <span
+                <span class="legend-dot"></span>Sales
+              </button>
+              <button
+                type="button"
                 class="legend-chip legend-chip--green"
                 :class="{ 'legend-chip--off': legendState[1] }"
+                :aria-pressed="!legendState[1]"
                 @click="toggleDataset(1)"
               >
-                <span class="legend-dot"></span>{{ mode === 'month' ? 'Daily Profit' : 'Hourly Profit' }}
-              </span>
+                <span class="legend-dot"></span>Profit
+              </button>
             </div>
-          </div>
+          </header>
 
-          <div class="trend-totals">
-            <div class="monthly-total">
-              <span class="monthly-total-label">
-                Total Sales<span v-if="salesTrend.available"> · vs {{ comparisonLabel }}</span>
-              </span>
-              <span class="monthly-total-value">
-                ₱{{ price(displayedMonthlyTotal) }}
-                <span
-                  v-if="salesTrend.available"
-                  class="trend-badge"
-                  :class="salesTrend.direction"
-                  :title="`vs ${comparisonLabel}`"
+          <div class="chart-area">
+            <canvas id="salesTrendChart"></canvas>
+            <p v-if="!chartRows.length && !loading" class="chart-empty">
+              <i class="fa-solid fa-chart-line"></i>
+              No sales recorded for this period.
+            </p>
+          </div>
+        </section>
+
+        <!-- ── 3. TOP SELLERS + INVENTORY ── -->
+        <div class="content-grid">
+
+          <section class="card" aria-labelledby="rp-top">
+            <header class="card-head">
+              <div>
+                <h2 id="rp-top" class="card-title">Top sellers</h2>
+                <p class="card-sub">Ranked by {{ topMetric === 'sales' ? 'sales amount' : 'units sold' }}. Select an item for details.</p>
+              </div>
+              <div class="seg seg--sm ts-controls" role="group" aria-label="Rank by">
+                <button type="button" class="seg-btn" :class="{ 'seg-btn--active': topMetric === 'sales' }" :aria-pressed="topMetric === 'sales'" @click="setTopMetric('sales')">Sales</button>
+                <button type="button" class="seg-btn" :class="{ 'seg-btn--active': topMetric === 'qty' }" :aria-pressed="topMetric === 'qty'" @click="setTopMetric('qty')">Quantity</button>
+              </div>
+            </header>
+
+            <ol v-if="visibleTopItems.length" class="top-list">
+              <li
+                v-for="item in visibleTopItems"
+                :key="rowKey(item)"
+                class="top-row"
+                :class="{ 'top-row--open': openKey === rowKey(item) }"
+              >
+                <button
+                  type="button"
+                  class="top-row-btn"
+                  :aria-expanded="openKey === rowKey(item)"
+                  @click="toggleOpen(item)"
                 >
-                  <i :class="trendIcon"></i>{{ salesTrend.percent }}%
-                </span>
-              </span>
-            </div>
-            <div class="monthly-total">
-              <span class="monthly-total-label">Total Profit · {{ profitMarginPct }}% margin</span>
-              <span class="monthly-total-value monthly-total-value--green">₱{{ price(displayedMonthlyProfit) }}</span>
-            </div>
-          </div>
+                  <span class="top-rank" :class="{ 'top-rank--lead': item.rank === 1 }">{{ item.rank }}</span>
+                  <span class="top-main">
+                    <span class="top-head">
+                      <span class="top-name">{{ item.ProductName }}</span>
+                      <span class="top-value">
+                        {{ topMetric === 'sales' ? '₱' + price(item.total_sales) : formatNumber(item.total_quantity) + ' units' }}
+                      </span>
+                    </span>
+                    <span class="top-bar">
+                      <span
+                        class="top-bar-fill"
+                        :class="{ 'top-bar-fill--lead': item.rank === 1 }"
+                        :style="{ width: (barsReady ? item.barPct : 0) + '%' }"
+                      ></span>
+                    </span>
+                  </span>
+                  <span class="top-share">{{ item.sharePct }}%</span>
+                  <i class="fa-solid fa-chevron-down top-chevron"></i>
+                </button>
 
-          <p class="chart-hint">Hover the chart for exact values, date, and margin · Click a legend chip to isolate a series</p>
-          <div class="chart-area chart-area--tall">
-            <canvas id="monthlySalesChart"></canvas>
-          </div>
+                <dl class="top-detail">
+                  <div class="td-item"><dt>Total sales</dt><dd>₱{{ price(item.total_sales) }}</dd></div>
+                  <div class="td-item"><dt>Quantity sold</dt><dd>{{ formatNumber(item.total_quantity) }}</dd></div>
+                  <div class="td-item"><dt>Average price</dt><dd>₱{{ price(avgPrice(item)) }}</dd></div>
+                  <div class="td-item"><dt>Category</dt><dd>{{ item.CategoryName || '—' }}</dd></div>
+                </dl>
+              </li>
+            </ol>
+            <p v-else class="empty">
+              <i class="fa-solid fa-box-open"></i>
+              No sales recorded for this period.
+            </p>
+
+            <button
+              v-if="rankedTopItems.length > TOP_PREVIEW"
+              type="button"
+              class="link-btn link-btn--block"
+              @click="toggleShowAll"
+            >
+              {{ showAllTop ? 'Show fewer' : `Show all ${rankedTopItems.length} items` }}
+            </button>
+          </section>
+
+          <aside class="card" aria-labelledby="rp-inv">
+            <header class="card-head">
+              <div>
+                <h2 id="rp-inv" class="card-title">Inventory</h2>
+                <p class="card-sub">Current stock. Not affected by the period above.</p>
+              </div>
+            </header>
+
+            <ul class="inv-list">
+              <li
+                v-for="(box, idx) in inventorySummary"
+                :key="box.label"
+                class="inv-row"
+                :class="{ 'inv-row--alert': box.isRed && num(box.value) > 0 }"
+              >
+                <span class="inv-icon"><i class="fa-solid" :class="inventoryIcon(box, idx)"></i></span>
+                <span class="inv-label">{{ box.label }}</span>
+                <strong class="inv-value">{{ formatNumber(box.value) }}</strong>
+              </li>
+            </ul>
+
+            <div v-if="stockCoverage" class="coverage">
+              <div class="coverage-head">
+                <span>{{ formatNumber(stockCoverage.active) }} of {{ formatNumber(stockCoverage.total) }} items in stock</span>
+                <strong>{{ stockCoverage.pct }}%</strong>
+              </div>
+              <div class="coverage-track"><div class="coverage-fill" :style="{ width: stockCoverage.pct + '%' }"></div></div>
+            </div>
+          </aside>
         </div>
+
+      </div>
+
+      <!-- ══════════════════════════════════════════════════════
+           PRINT SHEET — hidden on screen, the only thing printed.
+      ══════════════════════════════════════════════════════ -->
+      <div class="print-sheet" aria-hidden="true">
+
+        <header class="ps-head">
+          <div class="ps-band"></div>
+          <div class="ps-head-row">
+            <div class="ps-brand">
+              <p class="ps-brand-name">{{ BUSINESS_NAME }}</p>
+              <p class="ps-brand-tag">{{ BUSINESS_TAGLINE }}</p>
+            </div>
+            <div class="ps-meta">
+              <p><span>Report</span>{{ reportTypeLabel }}</p>
+              <p><span>Period</span>{{ periodLabel }}</p>
+              <p><span>Generated</span>{{ printGeneratedAt }}</p>
+              <p><span>Currency</span>Philippine Peso (₱)</p>
+            </div>
+          </div>
+          <div class="ps-title-row">
+            <h1 class="ps-title">{{ reportTypeLabel }}</h1>
+            <p class="ps-period">
+              {{ periodLabel }}
+              <span v-if="isCurrentPeriod" class="ps-chip">In progress</span>
+            </p>
+          </div>
+        </header>
+
+        <section class="ps-section">
+          <h2 class="ps-h2">Key performance indicators</h2>
+          <div class="ps-kpis">
+            <div v-for="k in printKpis" :key="k.key" class="ps-kpi" :class="`ps-kpi--${k.tone}`">
+              <p class="ps-kpi-label">{{ k.label }}</p>
+              <p class="ps-kpi-value" :class="{ 'ps-kpi-value--text': k.text }">{{ k.value }}</p>
+              <p class="ps-kpi-sub">{{ k.sub }}</p>
+            </div>
+          </div>
+          <p v-if="trendPlain" class="ps-trend" :class="`ps-trend--${salesTrend.direction}`">
+            Sales trend: <strong>{{ trendPlain }}</strong>
+          </p>
+        </section>
+
+        <section class="ps-section ps-section--keep">
+          <h2 class="ps-h2">{{ seriesWord }} sales and profit</h2>
+          <div v-if="printChartImg && chartRows.length">
+            <div class="ps-legend">
+              <span><i class="ps-dot ps-dot--orange"></i>Sales</span>
+              <span><i class="ps-dot ps-dot--green"></i>Profit</span>
+            </div>
+            <img :src="printChartImg" class="ps-chart" alt="Sales and profit trend chart" />
+          </div>
+          <p v-else class="ps-empty">No sales recorded for this period.</p>
+        </section>
+
+        <section class="ps-section">
+          <h2 class="ps-h2">Top selling items <small>ranked by {{ topMetric === 'sales' ? 'sales amount' : 'units sold' }}</small></h2>
+          <table v-if="rankedTopItems.length" class="ps-table">
+            <thead>
+              <tr>
+                <th class="c-rank">#</th>
+                <th>Product</th>
+                <th>Category</th>
+                <th class="num">Qty</th>
+                <th class="num">Avg. price</th>
+                <th class="num">Sales</th>
+                <th class="c-share">Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in rankedTopItems" :key="rowKey(item)">
+                <td class="c-rank"><span class="ps-rank" :class="{ 'ps-rank--lead': item.rank === 1 }">{{ item.rank }}</span></td>
+                <td class="ps-strong">{{ item.ProductName }}</td>
+                <td>{{ item.CategoryName || '—' }}</td>
+                <td class="num">{{ formatNumber(item.total_quantity) }}</td>
+                <td class="num">₱{{ price(avgPrice(item)) }}</td>
+                <td class="num ps-strong">₱{{ price(item.total_sales) }}</td>
+                <td class="c-share">
+                  <span class="ps-share">
+                    <span class="ps-share-bar"><i :class="{ 'ps-share-bar--lead': item.rank === 1 }" :style="{ width: item.barPct + '%' }"></i></span>
+                    <b>{{ item.sharePct }}%</b>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td></td>
+                <td colspan="2">Total</td>
+                <td class="num">{{ formatNumber(topTotals.qty) }}</td>
+                <td></td>
+                <td class="num">₱{{ price(topTotals.sales) }}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+          <p v-else class="ps-empty">No sales recorded for this period.</p>
+        </section>
+
+        <section class="ps-section">
+          <h2 class="ps-h2">{{ seriesWord }} breakdown <small>periods with sales only</small></h2>
+          <table v-if="breakdownRows.length" class="ps-table">
+            <thead>
+              <tr>
+                <th>{{ bucketWord }}</th>
+                <th class="num">Sales</th>
+                <th class="num">Profit</th>
+                <th class="num">Margin</th>
+                <th class="num">% of period sales</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in breakdownRows" :key="row.date">
+                <td class="ps-strong">{{ formatPointTitle(row.date) }}</td>
+                <td class="num">₱{{ price(row.total) }}</td>
+                <td class="num">₱{{ price(row.profit) }}</td>
+                <td class="num" :class="row.profit >= 0 ? 'ps-pos' : 'ps-neg'">{{ rowMargin(row) }}%</td>
+                <td class="num">{{ rowShare(row) }}%</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td>Total</td>
+                <td class="num">₱{{ price(salesTotal) }}</td>
+                <td class="num">₱{{ price(profitTotal) }}</td>
+                <td class="num">{{ profitMarginPct }}%</td>
+                <td class="num">100%</td>
+              </tr>
+            </tfoot>
+          </table>
+          <p v-else class="ps-empty">No sales recorded for this period.</p>
+        </section>
+
+        <section class="ps-section ps-section--keep">
+          <h2 class="ps-h2">Inventory snapshot <small>current stock, not period-based</small></h2>
+          <div class="ps-inv">
+            <div
+              v-for="box in inventorySummary"
+              :key="box.label"
+              class="ps-inv-box"
+              :class="{ 'ps-inv-box--alert': box.isRed && num(box.value) > 0 }"
+            >
+              <p>{{ box.label }}</p>
+              <strong>{{ formatNumber(box.value) }}</strong>
+            </div>
+          </div>
+          <div v-if="stockCoverage" class="ps-cover">
+            <div class="ps-cover-head">
+              <span>{{ formatNumber(stockCoverage.active) }} of {{ formatNumber(stockCoverage.total) }} items in stock</span>
+              <strong>{{ stockCoverage.pct }}%</strong>
+            </div>
+            <div class="ps-cover-track"><i :style="{ width: stockCoverage.pct + '%' }"></i></div>
+          </div>
+        </section>
+
+        <footer class="ps-end">
+          <span>{{ BUSINESS_NAME }} · {{ reportTypeLabel }} · {{ periodLabel }}</span>
+          <span>Generated {{ printGeneratedAt }}</span>
+        </footer>
       </div>
 
     </div>
@@ -295,11 +480,9 @@
 </template>
 
 <script>
-// Module-level (shared across instances, executed once) — same pattern
-// as the Home dashboard: a uniquely namespaced plugin id avoids
-// colliding with any other same-named plugin elsewhere in the app, and
-// every hook is wrapped in try/catch so a decorative overlay can never
-// crash the chart's render loop.
+// Module-level (executed once): uniquely namespaced plugin id so it can't
+// collide with another chart plugin elsewhere in the app. Wrapped in
+// try/catch so a decorative overlay can never break the chart render loop.
 const reportsCrosshairPlugin = {
   id: 'reportsCrosshair',
   afterDraw(chart) {
@@ -327,325 +510,393 @@ export default { name: 'ReportsView' }
 </script>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import Layout from '@/components/Layout.vue'
 import Chart from 'chart.js/auto'
 import api from '@/api/axios'
 
-/* ── mode + period state ── */
-// "month" or "day" — a single source of truth for which lens the whole
-// page is viewed through. Everything (KPIs, Top Selling, chart) reflects
-// whichever mode is active; there is only ever ONE picker visible at a
-// time, matching whichever mode button is selected.
-const mode = ref('month')
+/* ════════════════════════════════════════════════════════════
+   BRANDING  (shown on the printout, Copy and CSV)
+════════════════════════════════════════════════════════════ */
+const BUSINESS_NAME    = 'Sheem Steel'
+const BUSINESS_TAGLINE = 'POS & Inventory'
 
-function currentMonthStr() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+/* ════════════════════════════════════════════════════════════
+   HELPERS
+════════════════════════════════════════════════════════════ */
+function num(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
 }
-function currentDayStr() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const price = (v) => num(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const peso = (v) => '₱' + price(v)
+const formatNumber = (n) => Math.round(num(n)).toLocaleString('en-US')
+const round2 = (v) => Math.round(num(v) * 100) / 100
+
+const pad = (n) => String(n).padStart(2, '0')
+const toDayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const toMonthStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
+
+// "₱12,345.00" -> 12345 ; plain numbers pass straight through.
+function parseDisplayNumber(v) {
+  if (typeof v === 'number') return v
+  const n = Number(String(v ?? '').replace(/[^\d.-]/g, ''))
+  return Number.isFinite(n) ? n : 0
 }
 
-const currentMonthValue = currentMonthStr() // <input type="month"> max= — no picking a future month
-const currentDayValue   = currentDayStr()   // <input type="date">  max= — no picking a future day
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-const selectedMonth = ref(currentMonthStr())
-const selectedDay   = ref(currentDayStr())
+const formatStamp = (d = new Date()) => d.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
 
-const periodLabel = ref('') // human-readable label from the API, e.g. "June 2026" or "June 14, 2026"
+/* ════════════════════════════════════════════════════════════
+   PERIOD STATE  (Day / Month / Year)
+════════════════════════════════════════════════════════════ */
+const MODES = [
+  { key: 'day',   label: 'Day' },
+  { key: 'month', label: 'Month' },
+  { key: 'year',  label: 'Year' },
+]
 
-// Timestamp shown in the print-only letterhead — computed fresh each
-// time printReport() is invoked so it reflects when the report was
-// actually generated, not when the page first loaded.
+const today             = new Date()
+const currentDayValue   = toDayStr(today)    // <input type="date">  max
+const currentMonthValue = toMonthStr(today)  // <input type="month"> max
+const currentYear       = today.getFullYear()
+const yearOptions       = Array.from({ length: 10 }, (_, i) => currentYear - i)
+const minYear           = yearOptions[yearOptions.length - 1]
+
+const mode          = ref('month')
+const selectedDay   = ref(currentDayValue)
+const selectedMonth = ref(currentMonthValue)
+const selectedYear  = ref(currentYear)
+
+const periodLabel      = ref('')
 const printGeneratedAt = ref('')
+const lastUpdated      = ref('')
 
-/* ── reactive data (shared shape across both modes) ── */
-// "Raw" copies hold exactly what the API sends (label + pre-formatted
-// value, e.g. "₱12,345.00") — used for Copy/CSV export, where the
-// original formatting should be reproduced verbatim.
+const modeNoun        = computed(() => ({ day: 'day', month: 'month', year: 'year' }[mode.value]))
+const currentLabel    = computed(() => ({ day: 'Today', month: 'This month', year: 'This year' }[mode.value]))
+const seriesWord      = computed(() => ({ day: 'Hourly', month: 'Daily', year: 'Monthly' }[mode.value]))
+const bucketWord      = computed(() => ({ day: 'Hour', month: 'Day', year: 'Month' }[mode.value]))
+const peakWord        = computed(() => ({ day: 'Peak hour', month: 'Best day', year: 'Best month' }[mode.value]))
+const reportTypeLabel = computed(() => ({ day: 'Daily Sales Report', month: 'Monthly Sales Report', year: 'Annual Sales Report' }[mode.value]))
+
+const canGoNext = computed(() => {
+  if (mode.value === 'year')  return selectedYear.value < currentYear
+  if (mode.value === 'month') return !!selectedMonth.value && selectedMonth.value < currentMonthValue
+  return !!selectedDay.value && selectedDay.value < currentDayValue
+})
+const canGoPrev = computed(() => {
+  if (mode.value === 'year')  return selectedYear.value > minYear
+  if (mode.value === 'month') return !!selectedMonth.value
+  return !!selectedDay.value
+})
+const isCurrentPeriod = computed(() => !canGoNext.value)
+
+// Request params + a human label for the selected period (offset 0) or the
+// one right before it (offset -1), whichever mode is active.
+function periodParams(offset = 0) {
+  if (mode.value === 'year') {
+    const y = selectedYear.value + offset
+    return { params: { mode: 'year', year: y }, label: String(y) }
+  }
+  if (mode.value === 'month') {
+    const [yy, mm] = selectedMonth.value.split('-').map(Number)
+    const d = new Date(yy, mm - 1 + offset, 1)
+    return {
+      params: { mode: 'month', year: d.getFullYear(), month: d.getMonth() + 1 },
+      label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+    }
+  }
+  const d = new Date(`${selectedDay.value}T00:00:00`)
+  d.setDate(d.getDate() + offset)
+  return {
+    params: { mode: 'day', date: toDayStr(d) },
+    label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+  }
+}
+
+// Keeps the three pickers pointing at the same moment in time when the
+// person switches Day / Month / Year, instead of jumping back to "now".
+function syncPickers(from) {
+  if (from === 'day' && selectedDay.value) {
+    selectedMonth.value = selectedDay.value.slice(0, 7)
+    selectedYear.value  = Number(selectedDay.value.slice(0, 4))
+  } else if (from === 'month' && selectedMonth.value) {
+    selectedYear.value = Number(selectedMonth.value.slice(0, 4))
+    selectedDay.value  = selectedMonth.value === currentMonthValue ? currentDayValue : `${selectedMonth.value}-01`
+  } else if (from === 'year') {
+    const y = selectedYear.value
+    selectedMonth.value = y === currentYear ? currentMonthValue : `${y}-01`
+    selectedDay.value   = y === currentYear ? currentDayValue   : `${y}-01-01`
+  }
+}
+
+async function setMode(next) {
+  if (mode.value === next) return
+  syncPickers(mode.value)
+  mode.value = next
+  await loadReports()
+}
+
+async function shiftPeriod(delta) {
+  if (delta > 0 && !canGoNext.value) return
+  if (delta < 0 && !canGoPrev.value) return
+
+  if (mode.value === 'year') {
+    selectedYear.value += delta
+  } else if (mode.value === 'month') {
+    const [yy, mm] = selectedMonth.value.split('-').map(Number)
+    selectedMonth.value = toMonthStr(new Date(yy, mm - 1 + delta, 1))
+  } else {
+    const d = new Date(`${selectedDay.value}T00:00:00`)
+    d.setDate(d.getDate() + delta)
+    selectedDay.value = toDayStr(d)
+  }
+  await loadReports()
+}
+
+async function goCurrent() {
+  selectedDay.value   = currentDayValue
+  selectedMonth.value = currentMonthValue
+  selectedYear.value  = currentYear
+  await loadReports()
+}
+
+async function onPickerChange() {
+  // A cleared <input> yields '' — ignore it rather than request garbage.
+  if (mode.value === 'month' && !selectedMonth.value) return
+  if (mode.value === 'day' && !selectedDay.value) return
+  await loadReports()
+}
+
+/* ════════════════════════════════════════════════════════════
+   REPORT DATA
+════════════════════════════════════════════════════════════ */
+const loading   = ref(false)
+const loadError = ref('')
+
+// Raw API copies — used verbatim by Copy / CSV.
 const salesActivityRaw = ref([
-  { label: "This Month's Sales",      value: '₱0.00' },
-  { label: 'Items Sold This Month',   value: 0 },
-  { label: 'Transactions This Month', value: 0 },
-  { label: 'Monthly Profit',          value: '₱0.00' },
+  { label: 'Sales',        value: '₱0.00' },
+  { label: 'Items sold',   value: 0 },
+  { label: 'Transactions', value: 0 },
+  { label: 'Profit',       value: '₱0.00' },
 ])
-const inventorySummaryRaw = ref([
+const inventorySummary = ref([
   { label: 'Quantity in Hand', value: 0 },
   { label: 'Low Stock Items',  value: 0, isRed: true },
   { label: 'Total Items',      value: 0 },
   { label: 'Active Items',     value: 0 },
 ])
 
-// "Display" copies drive the KPI cards on screen. Each entry holds a
-// plain numeric `num` that eases from its old value to the new one
-// whenever the period changes (see animateListTo), so the cards stay
-// perfectly still — only the digits move, the same way Home's headline
-// KPIs behave — instead of the whole card fading/shifting.
-const salesActivityDisplay = ref([
-  { label: "This Month's Sales",      format: 'currency', num: 0 },
-  { label: 'Items Sold This Month',   format: 'number',   num: 0 },
-  { label: 'Transactions This Month', format: 'number',   num: 0 },
-  { label: 'Monthly Profit',          format: 'currency', num: 0 },
-])
-const inventoryDisplay = ref([
-  { label: 'Quantity in Hand', isRed: false, num: 0 },
-  { label: 'Low Stock Items',  isRed: true,  num: 0 },
-  { label: 'Total Items',      isRed: false, num: 0 },
-  { label: 'Active Items',     isRed: false, num: 0 },
-])
+const topSellingItems      = ref([])
+const monthlySales         = ref([])
+const monthlyProfitSeries  = ref([])
+const salesTotal           = ref(0)
+const profitTotal          = ref(0)
+const itemsSold            = ref(0)
+const txCount              = ref(0)
 
-const topSellingItems = ref([])
-const monthlySales    = ref([])
-const monthlyTotal    = ref(0)
+const previousTotal   = ref(null) // null = no comparison available
+const comparisonLabel = ref('')
 
-// Profit series for the trend chart's second line. Tries a couple of
-// likely field names since this endpoint's payload shape wasn't fully
-// documented for profit-by-day — falls back to an empty series (profit
-// line just renders flat at 0) rather than breaking anything.
-const monthlyProfitSeries = ref([])
+// Animated "counting" numbers for the summary cards.
+const animated = reactive({ sales: 0, profit: 0, items: 0, tx: 0 })
+let animFrame   = 0
+let animTargets = null
 
-// Merges monthlySales + monthlyProfitSeries by date into one row set,
-// the same way the Home dashboard merges its sales/profit arrays.
+function animateTo(targets, duration = 700) {
+  cancelAnimationFrame(animFrame)
+  animTargets = { ...targets }
+
+  if (prefersReducedMotion()) {
+    Object.assign(animated, animTargets)
+    return
+  }
+
+  const from  = { ...animated }
+  const start = performance.now()
+  const tick = (now) => {
+    const p = Math.min((now - start) / duration, 1)
+    if (p >= 1) {
+      Object.assign(animated, animTargets)
+      return
+    }
+    const e = 1 - Math.pow(1 - p, 3)
+    for (const k of Object.keys(animTargets)) {
+      animated[k] = from[k] + (animTargets[k] - from[k]) * e
+    }
+    animFrame = requestAnimationFrame(tick)
+  }
+  animFrame = requestAnimationFrame(tick)
+}
+
+// Jump straight to the final values (used before printing).
+function snapAnimation() {
+  cancelAnimationFrame(animFrame)
+  if (animTargets) Object.assign(animated, animTargets)
+}
+
+/* ── Derived KPIs ── */
+const avgTransaction = computed(() => (txCount.value ? num(salesTotal.value) / txCount.value : 0))
+const basketSize = computed(() =>
+  txCount.value ? (itemsSold.value / txCount.value).toFixed(1).replace(/\.0$/, '') : '0'
+)
+
+const profitMarginPct = computed(() => {
+  const total = num(salesTotal.value)
+  return total ? ((num(profitTotal.value) / total) * 100).toFixed(1) : '0.0'
+})
+const marginBarPct = computed(() => Math.min(100, Math.max(0, Number(profitMarginPct.value))))
+
+const salesTrend = computed(() => {
+  if (previousTotal.value === null) return { direction: 'flat', percent: '0.0', text: '', available: false, isNew: false }
+  const prev = num(previousTotal.value)
+  const current = num(salesTotal.value)
+  // Nothing to compare against: a % change would be meaningless.
+  if (!prev) {
+    return current > 0
+      ? { direction: 'up', percent: null, text: 'New', available: true, isNew: true }
+      : { direction: 'flat', percent: '0.0', text: '0.0%', available: true, isNew: false }
+  }
+  const change = ((current - prev) / prev) * 100
+  if (!Number.isFinite(change)) return { direction: 'flat', percent: '0.0', text: '0.0%', available: true, isNew: false }
+  const percent = Math.abs(change).toFixed(1)
+  return {
+    direction: change > 0.5 ? 'up' : change < -0.5 ? 'down' : 'flat',
+    percent,
+    text: `${percent}%`,
+    available: true,
+    isNew: false,
+  }
+})
+const trendIcon = computed(() =>
+  salesTrend.value.direction === 'up' ? 'fa-solid fa-arrow-trend-up'
+  : salesTrend.value.direction === 'down' ? 'fa-solid fa-arrow-trend-down'
+  : 'fa-solid fa-minus'
+)
+// Plain-text trend for Copy / CSV / Print.
+const trendPlain = computed(() => {
+  const t = salesTrend.value
+  if (!t.available) return ''
+  if (t.isNew) return `New sales (none recorded in ${comparisonLabel.value})`
+  const sym = t.direction === 'up' ? '▲' : t.direction === 'down' ? '▼' : '▬'
+  return `${sym} ${t.percent}% vs ${comparisonLabel.value}`
+})
+
+// Sales + profit merged by bucket (hour / day / month).
 const chartRows = computed(() => {
   const profitMap = {}
   monthlyProfitSeries.value.forEach((p) => { profitMap[p.date] = num(p.profit ?? p.total) })
   return monthlySales.value.map((s) => ({
     date: s.date,
     total: num(s.total),
-    profit: profitMap[s.date] ?? num(s.profit) ?? 0,
+    profit: profitMap[s.date] ?? num(s.profit),
   }))
 })
+// Only buckets that actually had activity (keeps printed/copied tables tidy).
+const breakdownRows = computed(() => chartRows.value.filter((r) => r.total || r.profit))
+const rowMargin = (r) => (r.total ? ((r.profit / r.total) * 100).toFixed(1) : '0.0')
+const rowShare  = (r) => (num(salesTotal.value) ? ((r.total / num(salesTotal.value)) * 100).toFixed(1) : '0.0')
 
-const monthlyProfitTotal = computed(() => chartRows.value.reduce((s, r) => s + r.profit, 0))
-
-const profitMarginPct = computed(() => {
-  const total = num(monthlyTotal.value)
-  if (!total) return '0.0'
-  return ((monthlyProfitTotal.value / total) * 100).toFixed(1)
+// Highest-selling bucket: peak hour / best day / best month.
+const peak = computed(() => {
+  let best = null
+  for (const r of chartRows.value) {
+    if (r.total > 0 && (!best || r.total > best.total)) best = r
+  }
+  return best ? { label: formatPointLabel(best.date), title: formatPointTitle(best.date), total: best.total } : null
 })
 
-// Animated "counting up" copy of monthlyProfitTotal — same treatment as
-// displayedMonthlyTotal below.
-const displayedMonthlyProfit = ref(0)
+// Best seller by sales amount (independent of the Top sellers toggle).
+const bestSeller = computed(() => {
+  const list = topSellingItems.value.map((i) => ({
+    ...i, total_sales: num(i.total_sales), total_quantity: num(i.total_quantity),
+  }))
+  if (!list.length) return null
+  const top = list.reduce((a, b) => (b.total_sales > a.total_sales ? b : a))
+  if (top.total_sales <= 0) return null
+  const total = num(salesTotal.value)
+  const sharePct = total ? Math.min(100, (top.total_sales / total) * 100).toFixed(1) : '0.0'
+  return { ...top, sharePct }
+})
 
-// Which trend-chart datasets are currently hidden via the legend chips
-// (keyed by dataset index) — mirrors Home's toggleDataset legend state.
-const legendState = ref({})
-
-// Animated "counting up" copy of monthlyTotal, so switching periods
-// feels alive instead of the number just snapping to place.
-const displayedMonthlyTotal = ref(0)
-
-// Period-over-period comparison for the Total Sales trend badge.
-// null means "no comparison available yet."
-const previousPeriodTotal = ref(null)
-const comparisonLabel     = ref('')
-
-// Top Selling leaderboard: which metric drives the bar/ranking, the
-// item currently pinned by a click, and whether bars are allowed to be
-// at their real width yet (toggled false→true to trigger the "grow in"
-// animation — mirrors the Home dashboard leaderboard).
-const topMetric       = ref('sales')
-const barsReady       = ref(false)
-const selectedTopItem = ref(null)
-
-// Report actions (Copy / CSV / Print): 'idle' | 'copying' | 'copied' | 'error'
-const copyState = ref('idle')
-
-let chartInstance  = null
-let themeObserver  = null
-
-/* ── accent map ── */
-function kpiAccent(idx) {
+const secondaryStats = computed(() => {
+  const hasTx = txCount.value > 0
+  const p = peak.value
+  const b = bestSeller.value
   return [
-    { icon: 'fa-peso-sign',      iconClass: 'kpi-icon-wrap--orange', valueClass: '',                  barClass: 'kpi-accent-bar--orange', cardClass: 'kpi-card--featured' },
-    { icon: 'fa-box-open',       iconClass: 'kpi-icon-wrap--violet', valueClass: 'kpi-value--violet', barClass: 'kpi-accent-bar--violet', cardClass: '' },
-    { icon: 'fa-receipt',        iconClass: 'kpi-icon-wrap--blue',   valueClass: 'kpi-value--blue',   barClass: 'kpi-accent-bar--blue',   cardClass: '' },
-    { icon: 'fa-arrow-trend-up', iconClass: 'kpi-icon-wrap--green',  valueClass: 'kpi-value--green',  barClass: 'kpi-accent-bar--green',  cardClass: '' },
-  ][idx % 4]
-}
-
-/* ── numeric helpers ── */
-// The API can send currency figures as strings (e.g. "1234.50"). Using
-// "+" or "-" directly on those either concatenates or produces NaN —
-// every arithmetic touchpoint below routes through this first.
-function num(v) {
-  const n = Number(v)
-  return Number.isFinite(n) ? n : 0
-}
-
-// Eases a ref from `from` to `to` over `duration` ms.
-function animateValue(targetRef, from, to, duration = 750) {
-  const start = performance.now()
-  const tick = (now) => {
-    const progress = Math.min((now - start) / duration, 1)
-    const eased = 1 - Math.pow(1 - progress, 3)
-    targetRef.value = from + (to - from) * eased
-    if (progress < 1) requestAnimationFrame(tick)
-    else targetRef.value = to
-  }
-  requestAnimationFrame(tick)
-}
-
-/* ── KPI display helpers ──
-   Sales Activity arrives pre-formatted from the API (e.g. "₱12,345.00").
-   To animate it we pull the raw number back out, ease it, then
-   reformat for display — same visual result, just alive in between. */
-function parseDisplayNumber(v) {
-  if (typeof v === 'number') return v
-  const cleaned = String(v ?? '').replace(/[^\d.-]/g, '')
-  const n = Number(cleaned)
-  return Number.isFinite(n) ? n : 0
-}
-function isCurrencyString(v) {
-  return typeof v === 'string' && v.trim().startsWith('₱')
-}
-function formatKpiValue(card) {
-  return card.format === 'currency' ? '₱' + price(card.num) : formatNumber(card.num)
-}
-
-// Eases every entry in a reactive list of {..., num} objects from its
-// current value to a new target in lockstep — used for both KPI strips
-// so the cards themselves never re-render, only the numbers inside them.
-function animateListTo(displayArray, toValues, duration = 750) {
-  const start = performance.now()
-  const fromValues = displayArray.map((item) => item.num)
-  const tick = (now) => {
-    const progress = Math.min((now - start) / duration, 1)
-    const eased = 1 - Math.pow(1 - progress, 3)
-    for (let i = 0; i < displayArray.length; i++) {
-      displayArray[i].num = fromValues[i] + (toValues[i] - fromValues[i]) * eased
-    }
-    if (progress < 1) requestAnimationFrame(tick)
-    else {
-      for (let i = 0; i < displayArray.length; i++) displayArray[i].num = toValues[i]
-    }
-  }
-  requestAnimationFrame(tick)
-}
-
-// Rebuilds salesActivityDisplay to match the labels/order the API just
-// sent, carrying over each card's current animated number as the
-// starting point (matched by label) so a period switch eases smoothly
-// rather than snapping — then animates every entry to its new target.
-function updateSalesActivityDisplay(items) {
-  const prevByLabel = {}
-  salesActivityDisplay.value.forEach((item) => { prevByLabel[item.label] = item })
-
-  const targets = items.map((item) => ({
-    label: item.label,
-    format: isCurrencyString(item.value) ? 'currency' : 'number',
-    to: parseDisplayNumber(item.value),
-  }))
-
-  salesActivityDisplay.value = targets.map((t) => ({
-    label: t.label,
-    format: t.format,
-    num: prevByLabel[t.label]?.num ?? t.to,
-  }))
-
-  animateListTo(salesActivityDisplay.value, targets.map((t) => t.to))
-}
-
-// Same idea for the Inventory Summary boxes, whose values are already
-// plain numbers from the API (no currency parsing needed).
-function updateInventoryDisplay(items) {
-  const prevByLabel = {}
-  inventoryDisplay.value.forEach((item) => { prevByLabel[item.label] = item })
-
-  const targets = items.map((item) => ({
-    label: item.label,
-    isRed: !!item.isRed,
-    to: num(item.value),
-  }))
-
-  inventoryDisplay.value = targets.map((t) => ({
-    label: t.label,
-    isRed: t.isRed,
-    num: prevByLabel[t.label]?.num ?? t.to,
-  }))
-
-  animateListTo(inventoryDisplay.value, targets.map((t) => t.to))
-}
-
-/* ── period-over-period comparison ── */
-// Works out the request params + a human label for "the period right
-// before the one currently selected": the previous calendar month in
-// Month mode, the previous calendar day in Day mode. Because both modes
-// use an arbitrary date picker (not a fixed preset list), this is
-// well-defined no matter which month/day is currently selected.
-function previousParams() {
-  if (mode.value === 'month') {
-    const [year, month] = selectedMonth.value.split('-').map(Number)
-    let py = year, pm = month - 1
-    if (pm < 1) { pm = 12; py -= 1 }
-    const label = new Date(py, pm - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-    return { params: { mode: 'month', year: py, month: pm }, label }
-  }
-  const d = new Date(`${selectedDay.value}T00:00:00`)
-  d.setDate(d.getDate() - 1)
-  const prevDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  return { params: { mode: 'day', date: prevDateStr }, label }
-}
-
-async function fetchPreviousPeriodTotal() {
-  try {
-    const { params, label } = previousParams()
-    const res = await api.get('/api/reports', { params })
-    previousPeriodTotal.value = num(res.data?.monthly_total)
-    comparisonLabel.value = label
-  } catch (err) {
-    console.error('Previous period fetch error:', err)
-    previousPeriodTotal.value = null
-    comparisonLabel.value = ''
-  }
-}
-
-const salesTrend = computed(() => {
-  if (previousPeriodTotal.value === null) {
-    return { direction: 'flat', percent: '0.0', available: false }
-  }
-  const prev = num(previousPeriodTotal.value)
-  const current = num(monthlyTotal.value)
-  if (!prev) {
-    return { direction: current > 0 ? 'up' : 'flat', percent: '0.0', available: true }
-  }
-  const change = ((current - prev) / prev) * 100
-  if (!Number.isFinite(change)) return { direction: 'flat', percent: '0.0', available: true }
-  return {
-    direction: change > 0.5 ? 'up' : change < -0.5 ? 'down' : 'flat',
-    percent: Math.abs(change).toFixed(1),
-    available: true,
-  }
+    {
+      key: 'items', label: 'Items sold', icon: 'fa-box-open', tone: 'violet',
+      value: formatNumber(animated.items),
+      sub: hasTx ? `${basketSize.value} items per transaction` : 'No transactions yet',
+    },
+    {
+      key: 'tx', label: 'Transactions', icon: 'fa-receipt', tone: 'blue',
+      value: formatNumber(animated.tx),
+      sub: hasTx ? `${peso(avgTransaction.value)} average sale` : 'No transactions yet',
+    },
+    {
+      key: 'peak', label: peakWord.value, tone: 'orange', text: true,
+      icon: mode.value === 'day' ? 'fa-clock' : 'fa-fire',
+      value: p ? p.label : '—',
+      sub: p ? `${peso(p.total)} in sales` : 'No sales yet',
+    },
+    {
+      key: 'best', label: 'Best seller', icon: 'fa-trophy', tone: 'green', text: true,
+      value: b ? b.ProductName : '—',
+      sub: b ? `${formatNumber(b.total_quantity)} units · ${b.sharePct}% of sales` : 'No sales yet',
+    },
+  ]
 })
 
-const trendIcon = computed(() => {
-  if (salesTrend.value.direction === 'up') return 'fa-solid fa-arrow-trend-up'
-  if (salesTrend.value.direction === 'down') return 'fa-solid fa-arrow-trend-down'
-  return 'fa-solid fa-minus'
+// Eight tiles for the printed "Key performance indicators" block.
+const printKpis = computed(() => {
+  const p = peak.value
+  const b = bestSeller.value
+  return [
+    { key: 'sales',  label: 'Total sales',            value: peso(salesTotal.value),   sub: 'Gross sales for the period', tone: 'orange' },
+    { key: 'profit', label: 'Profit',                 value: peso(profitTotal.value),  sub: `${profitMarginPct.value}% of sales`, tone: 'green' },
+    { key: 'margin', label: 'Profit margin',          value: `${profitMarginPct.value}%`, sub: 'Profit ÷ total sales', tone: 'teal' },
+    { key: 'avg',    label: 'Avg. per transaction',   value: peso(avgTransaction.value), sub: `${basketSize.value} items per transaction`, tone: 'amber' },
+    { key: 'items',  label: 'Items sold',             value: formatNumber(itemsSold.value), sub: 'Units across all sales', tone: 'violet' },
+    { key: 'tx',     label: 'Transactions',           value: formatNumber(txCount.value),   sub: 'Completed sales', tone: 'blue' },
+    { key: 'peak',   label: peakWord.value,           value: p ? p.label : '—', sub: p ? `${peso(p.total)} in sales` : 'No sales yet', tone: 'rose', text: true },
+    { key: 'best',   label: 'Best seller',            value: b ? b.ProductName : '—', sub: b ? `${formatNumber(b.total_quantity)} units · ${b.sharePct}% of sales` : 'No sales yet', tone: 'cyan', text: true },
+  ]
 })
 
-/* ── Top Selling leaderboard (mirrors Home dashboard) ── */
-// Builds the ranked leaderboard rows: sorts by whichever metric is
-// active, caps at 8, and precomputes the bar width (relative to the
-// leader) and each item's share of the displayed total so the template
-// stays free of per-render math.
+/* ── Inventory card ── */
+const INVENTORY_ICONS = ['fa-boxes-stacked', 'fa-triangle-exclamation', 'fa-tags', 'fa-circle-check']
+const inventoryIcon = (box, idx) => (box.isRed ? 'fa-triangle-exclamation' : INVENTORY_ICONS[idx % INVENTORY_ICONS.length])
+
+const stockCoverage = computed(() => {
+  const total  = inventorySummary.value.find((b) => b.label === 'Total Items')
+  const active = inventorySummary.value.find((b) => b.label === 'Active Items')
+  if (!total || !active || !num(total.value)) return null
+  const pct = Math.min(100, Math.round((num(active.value) / num(total.value)) * 100))
+  return { total: num(total.value), active: num(active.value), pct }
+})
+
+/* ── Top sellers ── */
+const TOP_PREVIEW = 8
+const topMetric   = ref('sales')
+const showAllTop  = ref(false)
+const barsReady   = ref(false)
+const openKey     = ref(null)
+
+const rowKey = (item) => item.ProductID ?? item.ProductName
+
 const rankedTopItems = computed(() => {
-  const metric = topMetric.value
-  const items = topSellingItems.value
-    .map((i) => ({
-      ...i,
-      total_sales: num(i.total_sales),
-      total_quantity: num(i.total_quantity),
-    }))
-    .sort((a, b) => (metric === 'sales' ? b.total_sales - a.total_sales : b.total_quantity - a.total_quantity))
-    .slice(0, 8)
-
+  const metric  = topMetric.value
   const valueOf = (i) => (metric === 'sales' ? i.total_sales : i.total_quantity)
-  const maxVal = Math.max(...items.map(valueOf), 1)
+
+  const items = topSellingItems.value
+    .map((i) => ({ ...i, total_sales: num(i.total_sales), total_quantity: num(i.total_quantity) }))
+    .sort((a, b) => valueOf(b) - valueOf(a))
+
+  const maxVal   = Math.max(...items.map(valueOf), 1)
   const totalVal = items.reduce((s, i) => s + valueOf(i), 0) || 1
 
   return items.map((i, idx) => ({
@@ -655,135 +906,275 @@ const rankedTopItems = computed(() => {
     sharePct: ((valueOf(i) / totalVal) * 100).toFixed(1),
   }))
 })
+const visibleTopItems = computed(() =>
+  showAllTop.value ? rankedTopItems.value : rankedTopItems.value.slice(0, TOP_PREVIEW)
+)
+const topTotals = computed(() => ({
+  qty:   rankedTopItems.value.reduce((s, i) => s + i.total_quantity, 0),
+  sales: rankedTopItems.value.reduce((s, i) => s + i.total_sales, 0),
+}))
 
-function formatNumber(n) {
-  return Math.round(num(n)).toLocaleString()
-}
+const avgPrice = (item) => (item && item.total_quantity ? item.total_sales / item.total_quantity : 0)
 
-function avgPrice(item) {
-  if (!item || !item.total_quantity) return 0
-  return item.total_sales / item.total_quantity
-}
-
-// Drops every leaderboard bar to 0 width, then flips them to their real
-// width on the next paint so the CSS width transition actually has
-// something to animate from — without this they'd just appear at full
-// size with no motion.
+// Bars start at 0 width and grow to their real width on the next paint.
 function animateBarsIn() {
   barsReady.value = false
-  nextTick(() => {
-    requestAnimationFrame(() => {
-      barsReady.value = true
-    })
-  })
+  nextTick(() => requestAnimationFrame(() => { barsReady.value = true }))
 }
-
-// Switches which metric ranks/sizes the leaderboard and replays the bar
-// "grow in" animation so the change reads clearly.
 function setTopMetric(metric) {
   if (topMetric.value === metric) return
   topMetric.value = metric
-  selectedTopItem.value = null
+  openKey.value = null
+  animateBarsIn()
+}
+function toggleOpen(item) {
+  const key = rowKey(item)
+  openKey.value = openKey.value === key ? null : key
+}
+function toggleShowAll() {
+  showAllTop.value = !showAllTop.value
   animateBarsIn()
 }
 
-// Clicking a pinned row again un-pins it; clicking a different row
-// swaps the pin.
-function toggleSelectedTopItem(item) {
-  selectedTopItem.value = selectedTopItem.value?.ProductName === item.ProductName ? null : item
+/* ════════════════════════════════════════════════════════════
+   API
+════════════════════════════════════════════════════════════ */
+// Guards against out-of-order responses when the person clicks quickly.
+let requestSeq = 0
+
+// Lightweight call: only the previous period's total, for the trend badge.
+async function fetchPrevious() {
+  try {
+    const { params, label } = periodParams(-1)
+    const res = await api.get('/api/reports', { params: { ...params, totals_only: 1 } })
+    return { total: num(res.data?.monthly_total), label }
+  } catch (err) {
+    console.error('Previous period fetch error:', err)
+    return null
+  }
 }
 
-/* ── report actions: Copy / CSV / Print ── */
-// Renders a small plain-text/table snapshot of everything currently on
-// screen (KPIs, inventory, top selling, and the trend series) so the
-// person can paste it into an email, chat, or spreadsheet without
-// needing to screenshot the page.
+async function loadReports() {
+  const seq = ++requestSeq
+  loading.value = true
+  loadError.value = ''
+
+  try {
+    const { params, label } = periodParams(0)
+
+    const [res, prev] = await Promise.all([
+      api.get('/api/reports', { params: { ...params, include_sales: 0 } }),
+      fetchPrevious(),
+    ])
+    if (seq !== requestSeq) return
+
+    const d = res.data
+    salesActivityRaw.value     = d.sales_activity    ?? salesActivityRaw.value
+    inventorySummary.value     = d.inventory_summary ?? inventorySummary.value
+    topSellingItems.value      = d.top_selling       ?? []
+    monthlySales.value         = d.monthly_sales     ?? []
+    monthlyProfitSeries.value  = d.monthly_profit    ?? d.daily_profit ?? []
+    salesTotal.value           = num(d.monthly_total)
+    periodLabel.value          = d.selected_period?.label ?? label
+
+    previousTotal.value   = prev ? prev.total : null
+    comparisonLabel.value = prev ? prev.label : ''
+
+    // Summary cards are index-based because the API labels change per mode.
+    const act = salesActivityRaw.value
+    itemsSold.value   = parseDisplayNumber(act[1]?.value)
+    txCount.value     = parseDisplayNumber(act[2]?.value)
+    profitTotal.value = parseDisplayNumber(act[3]?.value)
+
+    animateTo({
+      sales: salesTotal.value,
+      profit: profitTotal.value,
+      items: itemsSold.value,
+      tx: txCount.value,
+    })
+
+    lastUpdated.value = new Date().toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
+    openKey.value = null
+    buildChart()
+    await nextTick()
+    animateBarsIn()
+  } catch (err) {
+    if (seq !== requestSeq) return
+    console.error('Reports API error:', err)
+    loadError.value = err?.response?.data?.message || 'Could not load this report. Check your connection and try again.'
+  } finally {
+    if (seq === requestSeq) loading.value = false
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   COPY  (organised plain-text report)
+════════════════════════════════════════════════════════════ */
+const LINE_W = 64
+const heavyRule = () => '═'.repeat(LINE_W)
+const lightRule = () => '─'.repeat(LINE_W)
+const kv = (label, value, w = 26) => `  ${String(label).padEnd(w, ' ')}${value}`
+const section = (title) => ['', title.toUpperCase(), lightRule()]
+const clip = (s, n) => (String(s).length > n ? String(s).slice(0, n - 1) + '…' : String(s))
+
 function buildReportText() {
-  const lines = []
-  lines.push(`Sales Report — ${periodLabel.value || ''}`)
-  lines.push('')
+  const L = []
+  const generated = formatStamp()
+  const status = isCurrentPeriod.value ? ' (in progress)' : ''
 
-  lines.push('Sales Activity')
-  salesActivityRaw.value.forEach((item) => lines.push(`  ${item.label}: ${item.value}`))
-  lines.push('')
+  /* Header */
+  L.push(heavyRule())
+  L.push(`${BUSINESS_NAME.toUpperCase()} — ${BUSINESS_TAGLINE}`)
+  L.push(reportTypeLabel.value.toUpperCase())
+  L.push(heavyRule())
+  L.push(kv('Period', `${periodLabel.value || ''}${status}`, 12))
+  L.push(kv('Generated', generated, 12))
+  L.push(kv('Currency', 'Philippine Peso (₱)', 12))
 
-  lines.push('Inventory Summary')
-  inventorySummaryRaw.value.forEach((item) => lines.push(`  ${item.label}: ${item.value}`))
-  lines.push('')
+  /* Executive summary */
+  L.push(...section('Executive summary'))
+  L.push(kv('Total sales', peso(salesTotal.value)))
+  L.push(kv('Profit', `${peso(profitTotal.value)}  (${profitMarginPct.value}% margin)`))
+  if (trendPlain.value) L.push(kv('Sales trend', trendPlain.value))
+  L.push(kv('Items sold', formatNumber(itemsSold.value)))
+  L.push(kv('Transactions', formatNumber(txCount.value)))
+  L.push(kv('Avg. per transaction', peso(avgTransaction.value)))
+  L.push(kv('Items per transaction', basketSize.value))
+  if (peak.value) L.push(kv(peakWord.value, `${peak.value.title}  (${peso(peak.value.total)})`))
+  if (bestSeller.value) L.push(kv('Best seller', `${bestSeller.value.ProductName}  (${bestSeller.value.sharePct}% of sales)`))
 
-  lines.push('Top Selling Items')
+  /* Top sellers */
+  L.push(...section(`Top selling items — by ${topMetric.value === 'sales' ? 'sales amount' : 'units sold'}`))
   if (rankedTopItems.value.length) {
-    rankedTopItems.value.forEach((item) => {
-      lines.push(
-        `  ${item.rank}. ${item.ProductName} — ₱${formatNumber(item.total_sales)} sales, ${formatNumber(item.total_quantity)} units${item.CategoryName ? ` (${item.CategoryName})` : ''}`
+    const items = rankedTopItems.value
+    const nameW = Math.min(30, Math.max(7, ...items.map((i) => String(i.ProductName).length)))
+    const qtyW  = Math.max(3, ...items.map((i) => formatNumber(i.total_quantity).length))
+    const salW  = Math.max(5, ...items.map((i) => peso(i.total_sales).length))
+    L.push(`  ${'#'.padStart(3)}  ${'Product'.padEnd(nameW)}  ${'Qty'.padStart(qtyW)}  ${'Sales'.padStart(salW)}  Share`)
+    items.forEach((i) => {
+      L.push(
+        `  ${String(i.rank).padStart(3)}  ${clip(i.ProductName, nameW).padEnd(nameW)}  ${formatNumber(i.total_quantity).padStart(qtyW)}  ${peso(i.total_sales).padStart(salW)}  ${i.sharePct}%`
       )
     })
+    L.push(`  ${' '.repeat(3)}  ${'TOTAL'.padEnd(nameW)}  ${formatNumber(topTotals.value.qty).padStart(qtyW)}  ${peso(topTotals.value.sales).padStart(salW)}`)
   } else {
-    lines.push('  No sales recorded for this period.')
+    L.push('  No sales recorded for this period.')
   }
-  lines.push('')
 
-  lines.push(mode.value === 'month' ? 'Daily Sales' : 'Hourly Sales')
-  chartRows.value.forEach((row) => {
-    lines.push(`  ${row.date}: Sales ₱${formatNumber(row.total)} · Profit ₱${formatNumber(row.profit)}`)
+  /* Breakdown */
+  L.push(...section(`${seriesWord.value} breakdown`))
+  if (breakdownRows.value.length) {
+    const rows  = breakdownRows.value
+    const perW  = Math.max(bucketWord.value.length, ...rows.map((r) => formatPointTitle(r.date).length))
+    const salW  = Math.max(5, ...rows.map((r) => peso(r.total).length), peso(salesTotal.value).length)
+    const proW  = Math.max(6, ...rows.map((r) => peso(r.profit).length), peso(profitTotal.value).length)
+    L.push(`  ${bucketWord.value.padEnd(perW)}  ${'Sales'.padStart(salW)}  ${'Profit'.padStart(proW)}  Margin`)
+    rows.forEach((r) => {
+      L.push(`  ${formatPointTitle(r.date).padEnd(perW)}  ${peso(r.total).padStart(salW)}  ${peso(r.profit).padStart(proW)}  ${rowMargin(r)}%`)
+    })
+    L.push(`  ${'TOTAL'.padEnd(perW)}  ${peso(salesTotal.value).padStart(salW)}  ${peso(profitTotal.value).padStart(proW)}  ${profitMarginPct.value}%`)
+  } else {
+    L.push('  No sales recorded for this period.')
+  }
+
+  /* Inventory */
+  L.push(...section('Inventory snapshot (current stock)'))
+  inventorySummary.value.forEach((item) => {
+    const flag = item.isRed && num(item.value) > 0 ? '   ⚠ needs attention' : ''
+    L.push(kv(item.label, `${formatNumber(item.value)}${flag}`))
   })
-  lines.push('')
-
-  lines.push(`Total Sales This Period: ₱${price(monthlyTotal.value)}`)
-  if (salesTrend.value.available) {
-    lines.push(`vs ${comparisonLabel.value}: ${salesTrend.value.direction === 'up' ? '+' : salesTrend.value.direction === 'down' ? '-' : ''}${salesTrend.value.percent}%`)
+  if (stockCoverage.value) {
+    L.push(kv('Stock coverage', `${stockCoverage.value.active} of ${stockCoverage.value.total} items (${stockCoverage.value.pct}%)`))
   }
-  lines.push(`Total Profit This Period: ₱${price(monthlyProfitTotal.value)} (${profitMarginPct.value}% margin)`)
 
-  return lines.join('\n')
+  L.push('')
+  L.push(heavyRule())
+  L.push(`End of report · ${BUSINESS_NAME} · ${generated}`)
+
+  return L.join('\n')
 }
 
-// Copies the same snapshot as CSV, but as a CSV file download instead
-// of clipboard text — handy for opening straight in Excel/Sheets.
+/* ════════════════════════════════════════════════════════════
+   CSV  (sectioned, spreadsheet-friendly)
+════════════════════════════════════════════════════════════ */
+// Quotes when needed, and neutralises spreadsheet-formula injection
+// (a product named "=HYPERLINK(...)" would otherwise execute in Excel).
 function csvEscape(value) {
-  const s = String(value ?? '')
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  let s = value === null || value === undefined ? '' : String(value)
+  if (typeof value === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 function buildReportCSV() {
   const rows = []
-  rows.push(['Sales Report', periodLabel.value || ''])
-  rows.push([])
+  const blank = () => rows.push([])
+  const head  = (title) => { blank(); rows.push([title.toUpperCase()]) }
 
-  rows.push(['Sales Activity'])
-  salesActivityRaw.value.forEach((item) => rows.push([item.label, item.value]))
-  rows.push([])
+  /* Report information */
+  rows.push([`${BUSINESS_NAME} — ${reportTypeLabel.value}`])
+  rows.push(['Report information'])
+  rows.push(['Business', BUSINESS_NAME])
+  rows.push(['Report type', reportTypeLabel.value])
+  rows.push(['Period', periodLabel.value || ''])
+  rows.push(['Status', isCurrentPeriod.value ? 'In progress' : 'Closed'])
+  rows.push(['Grouped by', bucketWord.value])
+  rows.push(['Generated', formatStamp()])
+  rows.push(['Currency', 'PHP (Philippine Peso)'])
 
-  rows.push(['Inventory Summary'])
-  inventorySummaryRaw.value.forEach((item) => rows.push([item.label, item.value]))
-  rows.push([])
+  /* Summary */
+  head('Summary')
+  rows.push(['Metric', 'Value', 'Notes'])
+  rows.push(['Total sales (PHP)', round2(salesTotal.value), trendPlain.value])
+  rows.push(['Profit (PHP)', round2(profitTotal.value), ''])
+  rows.push(['Profit margin (%)', Number(profitMarginPct.value), 'Profit ÷ total sales'])
+  rows.push(['Items sold', Math.round(itemsSold.value), ''])
+  rows.push(['Transactions', Math.round(txCount.value), ''])
+  rows.push(['Avg. per transaction (PHP)', round2(avgTransaction.value), ''])
+  rows.push(['Items per transaction', Number(basketSize.value), ''])
+  rows.push([peakWord.value, peak.value ? peak.value.title : '', peak.value ? `PHP ${price(peak.value.total)} in sales` : ''])
+  rows.push(['Best seller', bestSeller.value ? bestSeller.value.ProductName : '', bestSeller.value ? `${bestSeller.value.sharePct}% of sales` : ''])
 
-  rows.push(['Top Selling Items'])
-  rows.push(['Rank', 'Product', 'Category', 'Total Sales', 'Qty Sold', 'Avg. Price'])
-  rankedTopItems.value.forEach((item) => {
-    rows.push([item.rank, item.ProductName, item.CategoryName || '', item.total_sales, item.total_quantity, avgPrice(item).toFixed(2)])
+  /* Top sellers */
+  head(`Top selling items (ranked by ${topMetric.value === 'sales' ? 'sales amount' : 'units sold'})`)
+  rows.push(['Rank', 'Product', 'Category', 'Quantity sold', 'Avg. price (PHP)', 'Total sales (PHP)', 'Share (%)'])
+  rankedTopItems.value.forEach((i) => {
+    rows.push([i.rank, i.ProductName, i.CategoryName || '', i.total_quantity, round2(avgPrice(i)), round2(i.total_sales), Number(i.sharePct)])
   })
-  rows.push([])
-
-  rows.push([mode.value === 'month' ? 'Daily Sales' : 'Hourly Sales'])
-  rows.push(['Date', 'Sales', 'Profit'])
-  chartRows.value.forEach((row) => rows.push([row.date, row.total, row.profit]))
-  rows.push([])
-
-  rows.push(['Total Sales This Period', num(monthlyTotal.value)])
-  if (salesTrend.value.available) {
-    rows.push([`vs ${comparisonLabel.value}`, `${salesTrend.value.direction === 'up' ? '+' : salesTrend.value.direction === 'down' ? '-' : ''}${salesTrend.value.percent}%`])
+  if (rankedTopItems.value.length) {
+    rows.push(['', 'TOTAL', '', topTotals.value.qty, '', round2(topTotals.value.sales), ''])
   }
-  rows.push(['Total Profit This Period', monthlyProfitTotal.value])
-  rows.push(['Profit Margin', `${profitMarginPct.value}%`])
 
-  return rows.map((r) => r.map(csvEscape).join(',')).join('\n')
+  /* Breakdown */
+  head(`${seriesWord.value} breakdown`)
+  rows.push([bucketWord.value, 'Sales (PHP)', 'Profit (PHP)', 'Margin (%)', 'Share of period sales (%)'])
+  chartRows.value.forEach((r) => {
+    rows.push([formatPointTitle(r.date), round2(r.total), round2(r.profit), Number(rowMargin(r)), Number(rowShare(r))])
+  })
+  if (chartRows.value.length) {
+    rows.push(['TOTAL', round2(salesTotal.value), round2(profitTotal.value), Number(profitMarginPct.value), 100])
+  }
+
+  /* Inventory */
+  head('Inventory snapshot (current stock)')
+  rows.push(['Metric', 'Value'])
+  inventorySummary.value.forEach((item) => rows.push([item.label, item.value]))
+  if (stockCoverage.value) rows.push(['Stock coverage (%)', stockCoverage.value.pct])
+
+  blank()
+  rows.push(['End of report'])
+
+  return rows.map((r) => r.map(csvEscape).join(',')).join('\r\n')
 }
 
 function reportFileSlug() {
-  const base = periodLabel.value || (mode.value === 'month' ? selectedMonth.value : selectedDay.value)
-  return `sales-report-${String(base).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+  const fallback = mode.value === 'year' ? selectedYear.value : mode.value === 'month' ? selectedMonth.value : selectedDay.value
+  const base = periodLabel.value || fallback
+  const biz = BUSINESS_NAME.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+  return `${biz}-sales-report-${String(base).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
 }
+
+const copyState = ref('idle') // 'idle' | 'copying' | 'copied' | 'error'
+const csvState  = ref('idle') // 'idle' | 'done'
 
 async function copyReport() {
   if (copyState.value === 'copying') return
@@ -793,7 +1184,6 @@ async function copyReport() {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text)
     } else {
-      // Fallback for browsers/contexts without the async Clipboard API
       const textarea = document.createElement('textarea')
       textarea.value = text
       textarea.style.position = 'fixed'
@@ -814,8 +1204,8 @@ async function copyReport() {
 
 function exportCSV() {
   try {
-    const csv = buildReportCSV()
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    // BOM so Excel reads ₱ / — / ▲ correctly as UTF-8.
+    const blob = new Blob(['\uFEFF' + buildReportCSV()], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -824,94 +1214,26 @@ function exportCSV() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+    csvState.value = 'done'
+    setTimeout(() => { csvState.value = 'idle' }, 1800)
   } catch (err) {
     console.error('CSV export failed:', err)
   }
 }
 
-function printReport() {
-  printGeneratedAt.value = new Date().toLocaleString('en-PH', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
-  nextTick(() => window.print())
-}
+/* ════════════════════════════════════════════════════════════
+   CHART
+════════════════════════════════════════════════════════════ */
+let chartInstance = null
+let themeObserver = null
+const legendState = ref({})
 
-/* ── API ── */
-// FIX: previously hardcoded to December 2025 with no way to change it.
-// Now a single endpoint (?mode=month|day) drives every section of the
-// page — KPIs, Top Selling Items, and the chart — based on whichever
-// mode + period is currently selected.
-async function loadReports() {
-  try {
-    const params = mode.value === 'month'
-      ? (() => {
-          const [year, month] = selectedMonth.value.split('-').map(Number)
-          return { mode: 'month', year, month }
-        })()
-      : { mode: 'day', date: selectedDay.value }
-
-    const prevDisplayed = displayedMonthlyTotal.value
-    const prevDisplayedProfit = displayedMonthlyProfit.value
-
-    // Main period + comparison period load in parallel so the trend
-    // badge doesn't add extra wait time on top of the normal fetch.
-    const [res] = await Promise.all([
-      api.get('/api/reports', { params }),
-      fetchPreviousPeriodTotal(),
-    ])
-
-    salesActivityRaw.value      = res.data.sales_activity    ?? salesActivityRaw.value
-    inventorySummaryRaw.value   = res.data.inventory_summary ?? inventorySummaryRaw.value
-    updateSalesActivityDisplay(salesActivityRaw.value)
-    updateInventoryDisplay(inventorySummaryRaw.value)
-    topSellingItems.value       = res.data.top_selling       ?? []
-    monthlySales.value          = res.data.monthly_sales     ?? []
-    monthlyProfitSeries.value   = res.data.monthly_profit ?? res.data.daily_profit ?? []
-    monthlyTotal.value          = res.data.monthly_total     ?? 0
-    periodLabel.value           = res.data.selected_period?.label ?? ''
-
-    selectedTopItem.value = null
-
-    animateValue(displayedMonthlyTotal, prevDisplayed, num(monthlyTotal.value))
-    animateValue(displayedMonthlyProfit, prevDisplayedProfit, monthlyProfitTotal.value)
-
-    buildChart()
-
-    await nextTick()
-    animateBarsIn()
-  } catch (err) {
-    console.error('Reports API error:', err)
-  }
-}
-
-async function setMode(next) {
-  if (mode.value === next) return
-  mode.value = next
-  await loadReports()
-}
-
-async function onMonthChange() {
-  if (!selectedMonth.value) return
-  await loadReports()
-}
-
-async function onDayChange() {
-  if (!selectedDay.value) return
-  await loadReports()
-}
-
-const price = (v) => num(v).toLocaleString('en-PH', { minimumFractionDigits: 2 })
-
-/* ── theme helpers ── */
-function isDark() {
-  return document.documentElement.getAttribute('data-theme') === 'dark'
-}
-function chartColors() {
-  const dark = isDark()
+const isDark = () => document.documentElement.getAttribute('data-theme') === 'dark'
+function chartColors(forceLight = false) {
+  const dark = !forceLight && isDark()
   return {
-    grid:     dark ? 'rgba(255,255,255,0.05)' : 'rgba(168,162,158,0.10)',
-    tick:     dark ? '#8B90A8'                : '#A8A29E',
+    grid:     dark ? 'rgba(255,255,255,0.05)' : forceLight ? '#E2E8F0' : 'rgba(168,162,158,0.12)',
+    tick:     dark ? '#8B90A8'                : forceLight ? '#475569' : '#78716C',
     ttBg:     dark ? '#1E2130'                : '#1C1917',
     ttTitle:  dark ? '#8B90A8'                : '#A8A29E',
     ttBody:   dark ? '#E8EAF0'                : '#F5F5F4',
@@ -919,34 +1241,39 @@ function chartColors() {
   }
 }
 
-// Formats an x-axis point label. Hourly buckets sometimes arrive as
-// bare "HH:MM" strings (not a parseable date) — left as-is. Everything
-// else is parsed and formatted per the active mode.
-function formatPointLabel(raw) {
-  if (!raw) return ''
-  if (/^\d{1,2}:\d{2}$/.test(String(raw))) return raw
-  const d = new Date(raw)
-  if (Number.isNaN(d.getTime())) return String(raw)
-  return mode.value === 'month'
-    ? d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' })
-    : d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+// Bucket keys arrive as "HH:00" (day), "YYYY-MM-DD" (month) or "YYYY-MM" (year).
+function parseBucket(raw) {
+  const s = String(raw ?? '')
+  let m = s.match(/^(\d{1,2}):\d{2}$/)
+  if (m) return { kind: 'hour', date: new Date(2000, 0, 1, Number(m[1])) }
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) return { kind: 'day', date: new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) }
+  m = s.match(/^(\d{4})-(\d{2})$/)
+  if (m) return { kind: 'month', date: new Date(Number(m[1]), Number(m[2]) - 1, 1) }
+  return null
 }
 
-// Shared onHover so the chart shows a pointer cursor over hoverable
-// points — a small cue that the data underneath is inspectable.
+function formatPointLabel(raw) {
+  const b = parseBucket(raw)
+  if (!b) return String(raw ?? '')
+  if (b.kind === 'hour')  return b.date.toLocaleTimeString('en-US', { hour: 'numeric' })
+  if (b.kind === 'month') return b.date.toLocaleDateString('en-US', { month: 'short' })
+  return b.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+function formatPointTitle(raw) {
+  const b = parseBucket(raw)
+  if (!b) return String(raw ?? '')
+  if (b.kind === 'hour')  return b.date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  if (b.kind === 'month') return b.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  return b.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
 function hoverCursor(evt, elements) {
   try {
-    if (evt?.native?.target) {
-      evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'
-    }
-  } catch (e) {
-    /* no-op */
-  }
+    if (evt?.native?.target) evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'
+  } catch (e) { /* no-op */ }
 }
 
-// Shows/hides a trend-chart dataset on click, so the legend chips
-// double as real controls instead of static labels — same pattern as
-// the Home dashboard's toggleDataset.
 function toggleDataset(datasetIndex) {
   if (!chartInstance) return
   const meta = chartInstance.getDatasetMeta(datasetIndex)
@@ -955,134 +1282,185 @@ function toggleDataset(datasetIndex) {
   legendState.value = { ...legendState.value, [datasetIndex]: meta.hidden }
 }
 
-/* ── chart ── */
+// One config for both the live chart and the print snapshot.
+//   print: static, no tooltip, light palette, fixed size (rendered off-screen)
+function makeChartConfig(ctx, { print = false } = {}) {
+  const c = chartColors(print)
+  const gh = print ? 300 : 280
+  const salesGradient = ctx.createLinearGradient(0, 0, 0, gh)
+  salesGradient.addColorStop(0, 'rgba(234,88,12,0.24)')
+  salesGradient.addColorStop(1, 'rgba(234,88,12,0)')
+  const profitGradient = ctx.createLinearGradient(0, 0, 0, gh)
+  profitGradient.addColorStop(0, 'rgba(16,185,129,0.22)')
+  profitGradient.addColorStop(1, 'rgba(16,185,129,0)')
+
+  const rows  = chartRows.value
+  const total = num(salesTotal.value)
+  // With only a handful of points, visible markers read better than a bare line.
+  const dotRadius = rows.length <= 24 ? 3 : 0
+
+  const tooltip = print
+    ? { enabled: false }
+    : {
+        backgroundColor: c.ttBg,
+        titleColor: c.ttTitle,
+        titleFont: { size: 11, weight: '600', family: 'Inter' },
+        bodyColor: c.ttBody,
+        bodyFont: { size: 12.5, weight: '600', family: 'Inter' },
+        footerColor: c.ttTitle,
+        footerFont: { size: 10.5, weight: '500', family: 'Inter' },
+        footerMarginTop: 6,
+        padding: 12, cornerRadius: 10, caretSize: 6,
+        borderColor: c.ttBorder, borderWidth: 1,
+        displayColors: true, boxWidth: 8, boxHeight: 8, boxPadding: 4,
+        callbacks: {
+          title: (items) => formatPointTitle(rows[items[0]?.dataIndex]?.date),
+          label: (tt) => ` ${tt.dataset.label}: ₱${price(tt.raw)}`,
+          footer: (items) => {
+            const row = rows[items[0]?.dataIndex]
+            if (!row) return ''
+            const lines = []
+            if (total) lines.push(`${((row.total / total) * 100).toFixed(1)}% of period sales`)
+            if (row.total) lines.push(`Margin: ${((row.profit / row.total) * 100).toFixed(1)}%`)
+            return lines
+          },
+        },
+      }
+
+  const options = {
+    responsive: !print,
+    maintainAspectRatio: false,
+    animation: print || prefersReducedMotion() ? false : { duration: 800, easing: 'easeOutQuart' },
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false }, tooltip },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: c.tick, font: { size: 11, family: 'Inter' }, maxRotation: 0, autoSkipPadding: 12 },
+        border: { display: false },
+      },
+      y: {
+        beginAtZero: true,
+        grid: { color: c.grid },
+        ticks: { color: c.tick, font: { size: 11, family: 'Inter' }, callback: (v) => '₱' + Number(v).toLocaleString('en-US') },
+        border: { display: false },
+      },
+    },
+  }
+  if (print) options.devicePixelRatio = 2
+  else options.onHover = hoverCursor
+
+  const line = (label, key, color, gradient) => ({
+    label,
+    data: rows.map((x) => x[key]),
+    borderColor: color,
+    backgroundColor: gradient,
+    borderWidth: 2.5, tension: 0.4, fill: true,
+    pointRadius: dotRadius, pointBackgroundColor: color,
+    pointHoverRadius: 6, pointHitRadius: 14,
+    pointHoverBackgroundColor: color,
+    pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2,
+  })
+
+  return {
+    type: 'line',
+    data: {
+      labels: rows.map((x) => formatPointLabel(x.date)),
+      datasets: [
+        line('Sales', 'total', '#EA580C', salesGradient),
+        line('Profit', 'profit', '#10b981', profitGradient),
+      ],
+    },
+    plugins: print ? [] : [reportsCrosshairPlugin],
+    options,
+  }
+}
+
 function buildChart() {
-  const el = document.getElementById('monthlySalesChart')
+  const el = document.getElementById('salesTrendChart')
   if (!el) return
 
   try {
-    // Safety net: destroy both our tracked instance and any orphaned
-    // Chart.js instance still attached to this canvas internally (can
-    // happen if a previous build threw partway through and never
-    // reached the `chartInstance = new Chart(...)` assignment).
     if (chartInstance) { chartInstance.destroy(); chartInstance = null }
     const orphan = Chart.getChart(el)
     if (orphan) orphan.destroy()
     legendState.value = {}
 
-    const c   = chartColors()
-    const ctx = el.getContext('2d')
-    const salesGradient = ctx.createLinearGradient(0, 0, 0, 280)
-    salesGradient.addColorStop(0, 'rgba(234,88,12,0.24)')
-    salesGradient.addColorStop(1, 'rgba(234,88,12,0)')
-
-    const profitGradient = ctx.createLinearGradient(0, 0, 0, 280)
-    profitGradient.addColorStop(0, 'rgba(16,185,129,0.22)')
-    profitGradient.addColorStop(1, 'rgba(16,185,129,0)')
-
-    const rows  = chartRows.value
-    const total = num(monthlyTotal.value)
-    const salesLabel  = mode.value === 'month' ? 'Daily Sales'  : 'Hourly Sales'
-    const profitLabel = mode.value === 'month' ? 'Daily Profit' : 'Hourly Profit'
-
-    chartInstance = new Chart(el, {
-      type: 'line',
-      data: {
-        labels: rows.map((x) => formatPointLabel(x.date)),
-        datasets: [
-          {
-            label: salesLabel,
-            data:  rows.map((x) => x.total),
-            borderColor: '#EA580C',
-            backgroundColor: salesGradient,
-            borderWidth: 2.5, tension: 0.42, fill: true,
-            pointRadius: 0, pointHoverRadius: 6, pointHitRadius: 14,
-            pointHoverBackgroundColor: '#EA580C',
-            pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2,
-          },
-          {
-            label: profitLabel,
-            data:  rows.map((x) => x.profit),
-            borderColor: '#10b981',
-            backgroundColor: profitGradient,
-            borderWidth: 2.5, tension: 0.42, fill: true,
-            pointRadius: 0, pointHoverRadius: 6, pointHitRadius: 14,
-            pointHoverBackgroundColor: '#10b981',
-            pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2,
-          },
-        ],
-      },
-      plugins: [reportsCrosshairPlugin],
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        animation: { duration: 800, easing: 'easeOutQuart' },
-        interaction: { mode: 'index', intersect: false },
-        onHover: hoverCursor,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: c.ttBg,
-            titleColor: c.ttTitle,
-            titleFont: { size: 11, weight: '600', family: 'Inter' },
-            bodyColor: c.ttBody,
-            bodyFont: { size: 12.5, weight: '600', family: 'Inter' },
-            footerColor: c.ttTitle,
-            footerFont: { size: 10.5, weight: '500', family: 'Inter' },
-            footerMarginTop: 6,
-            padding: 12, cornerRadius: 10, caretSize: 6,
-            borderColor: c.ttBorder, borderWidth: 1,
-            displayColors: true,
-            boxWidth: 8, boxHeight: 8, boxPadding: 4,
-            callbacks: {
-              title: (items) => formatPointLabel(rows[items[0]?.dataIndex]?.date),
-              label: (ctx) => ` ${ctx.dataset.label}: ₱${Number(ctx.raw).toLocaleString()}`,
-              footer: (items) => {
-                const idx = items[0]?.dataIndex
-                const row = rows[idx]
-                if (!row) return ''
-                const lines = []
-                if (total) lines.push(`${((row.total / total) * 100).toFixed(1)}% of period sales`)
-                if (row.total) lines.push(`Margin: ${((row.profit / row.total) * 100).toFixed(1)}%`)
-                return lines
-              },
-            },
-          },
-        },
-        scales: {
-          x: {
-            grid: { display: false },
-            ticks: { color: c.tick, font: { size: 11, family: 'Inter' }, maxRotation: 0 },
-            border: { display: false },
-          },
-          y: {
-            grid: { color: c.grid, drawBorder: false },
-            ticks: { color: c.tick, font: { size: 11, family: 'Inter' }, callback: (v) => '₱' + Number(v).toLocaleString() },
-            border: { display: false },
-          },
-        },
-      },
-    })
+    chartInstance = new Chart(el, makeChartConfig(el.getContext('2d')))
   } catch (err) {
     console.error('Chart render failed:', err)
   }
 }
 
+/* ════════════════════════════════════════════════════════════
+   PRINT
+   The printout is a dedicated sheet (see .print-sheet). The chart is
+   rendered off-screen in a light palette and handed over as an image,
+   so it's always legible on paper — even when the app is in dark mode.
+════════════════════════════════════════════════════════════ */
+const printing      = ref(false)
+const printChartImg = ref('')
+
+async function captureChartForPrint() {
+  if (!chartRows.value.length) return ''
+
+  const holder = document.createElement('div')
+  holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:720px;height:300px;pointer-events:none;'
+  const canvas = document.createElement('canvas')
+  canvas.width = 720
+  canvas.height = 300
+  holder.appendChild(canvas)
+  document.body.appendChild(holder)
+
+  let img = ''
+  let tmp = null
+  try {
+    tmp = new Chart(canvas, makeChartConfig(canvas.getContext('2d'), { print: true }))
+    await new Promise((r) => requestAnimationFrame(r))
+    img = tmp.toBase64Image('image/png', 1)
+  } catch (err) {
+    console.error('Print chart capture failed:', err)
+  } finally {
+    if (tmp) tmp.destroy()
+    holder.remove()
+  }
+  return img
+}
+
+async function printReport() {
+  if (printing.value) return
+  printing.value = true
+  try {
+    snapAnimation()
+    barsReady.value = true
+    printGeneratedAt.value = formatStamp()
+    printChartImg.value = await captureChartForPrint()
+    await nextTick()
+    // One extra frame so the image is decoded before the print dialog opens.
+    await new Promise((r) => requestAnimationFrame(r))
+    window.print()
+  } finally {
+    printing.value = false
+  }
+}
+
 onMounted(async () => {
   await loadReports()
-
-  /* Re-build chart on theme toggle */
-  themeObserver = new MutationObserver(buildChart)
+  // Rebuild the chart when the app theme toggles so its colours follow.
+  themeObserver = new MutationObserver(() => buildChart())
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 
 onBeforeUnmount(() => {
+  requestSeq++
+  cancelAnimationFrame(animFrame)
   if (themeObserver) themeObserver.disconnect()
   if (chartInstance) chartInstance.destroy()
 })
 </script>
 
 <!-- ══════════════════════════════════════════════════════
-     SCOPED styles — Vue component layout only.
+     SCOPED styles — component layout only.
 ══════════════════════════════════════════════════════ -->
 <style scoped>
 .reports {
@@ -1110,7 +1488,6 @@ onBeforeUnmount(() => {
   --rp-red:         #f43f5e;
   --rp-red-soft:    rgba(244,63,94,0.12);
 
-  /* icon bg — light mode pastels */
   --rp-green-icon:  #D1FAE5;
   --rp-blue-icon:   #DBEAFE;
   --rp-violet-icon: #E0E7FF;
@@ -1122,11 +1499,10 @@ onBeforeUnmount(() => {
   background: var(--rp-bg);
   padding: 28px 28px 56px;
   font-family: 'Inter', system-ui, sans-serif;
-  display: flex; flex-direction: column; gap: 28px;
+  display: flex; flex-direction: column; gap: 18px;
   transition: background-color 0.22s ease;
 }
 
-/* icon bg — dark mode */
 html[data-theme="dark"] .reports {
   --rp-green-icon:  rgba(16,185,129,0.18);
   --rp-blue-icon:   rgba(59,130,246,0.18);
@@ -1136,740 +1512,519 @@ html[data-theme="dark"] .reports {
   --rp-red-soft:    rgba(244,63,94,0.16);
 }
 
-/* PRINT-ONLY LETTERHEAD — hidden on screen, shown at the top of the
-   printed page only (see @media print below). */
-.print-header { display: none; }
+/* Visible keyboard focus everywhere */
+.reports button:focus-visible,
+.reports select:focus-visible,
+.reports input:focus-visible { outline: 2px solid var(--rp-accent); outline-offset: 2px; }
 
-/* PAGE HEADER */
+/* Print sheet — hidden on screen */
+.print-sheet { display: none; }
+
+/* ── PAGE HEADER ── */
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
-.page-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--rp-accent); text-transform: uppercase; margin: 0 0 5px; }
-.page-title   { font-size: 26px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.03em; margin: 0; transition: color 0.22s ease; }
+.page-title  { font-size: 26px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.03em; margin: 0; }
+.page-sub    { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--rp-text-secondary); }
+.chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 20px; }
+.chip--live { color: var(--rp-green); background: var(--rp-green-soft); }
 
-/* REPORT ACTIONS — Copy / CSV / Print toolbar */
-.report-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-}
+.report-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rt-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: flex; align-items: center; gap: 8px;
   border: 1px solid var(--rp-border-strong);
   background: var(--rp-surface-sunken);
   color: var(--rp-text-secondary);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 9px 16px;
-  border-radius: 11px;
-  cursor: pointer;
-  transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .12s ease, box-shadow .16s ease;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  padding: 8px 15px; border-radius: 11px; cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
 }
 .rt-btn i { font-size: 12px; }
-.rt-btn:hover:not(:disabled) {
-  background: var(--rp-surface-raised);
-  border-color: var(--rp-accent-border);
-  color: var(--rp-text-primary);
-  transform: translateY(-1px);
-}
-.rt-btn:disabled { opacity: .65; cursor: default; }
-.rt-btn--primary {
-  background: var(--rp-accent);
-  border-color: var(--rp-accent);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(234,88,12,0.28);
-}
-.rt-btn--primary:hover {
-  background: #FB923C;
-  border-color: #FB923C;
-  color: #fff;
-}
+.rt-btn:hover:not(:disabled) { background: var(--rp-surface-raised); border-color: var(--rp-accent-border); color: var(--rp-text-primary); }
+.rt-btn:disabled { opacity: .6; cursor: default; }
+.rt-btn--primary { background: var(--rp-accent); border-color: var(--rp-accent); color: #fff; }
+.rt-btn--primary:hover:not(:disabled) { background: #FB923C; border-color: #FB923C; color: #fff; }
 
-.fade-enter-active, .fade-leave-active { transition: opacity .18s ease, transform .18s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(-4px); }
-
-/* PERIOD CONTROL — mode switch + single picker, side by side */
-.period-control {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+/* ── PERIOD BAR ── */
+.period-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--rp-surface);
+  border: 1px solid var(--rp-border);
+  border-radius: 14px;
+  box-shadow: var(--rp-shadow);
 }
+.period-nav { display: flex; align-items: center; gap: 6px; }
+.period-status { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.period-status-text { font-size: 12px; font-weight: 600; color: var(--rp-text-muted); white-space: nowrap; }
+.period-status-text--busy { color: var(--rp-accent); }
 
-.period-mode-switch {
-  display: flex;
+.seg {
+  display: inline-flex; gap: 2px; padding: 3px;
   background: var(--rp-surface-sunken);
   border: 1px solid var(--rp-border);
   border-radius: 11px;
-  padding: 3px;
-  gap: 2px;
 }
-.period-mode-btn {
-  border: none;
-  background: transparent;
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 12.5px;
-  font-weight: 600;
+.seg-btn {
+  border: none; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
   color: var(--rp-text-muted);
-  padding: 7px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background-color .18s ease, color .18s ease;
-  white-space: nowrap;
+  padding: 7px 14px; border-radius: 8px; white-space: nowrap;
+  transition: background-color .16s ease, color .16s ease;
 }
-.period-mode-btn:hover { color: var(--rp-text-secondary); }
-.period-mode-btn--active {
-  background: var(--rp-accent);
-  color: #fff;
+.seg-btn:hover:not(.seg-btn--active) { color: var(--rp-text-primary); }
+.seg-btn--active { background: var(--rp-accent); color: #fff; }
+.seg--sm .seg-btn { padding: 5px 12px; font-size: 12px; }
+
+.icon-btn {
+  width: 36px; height: 36px; border-radius: 10px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--rp-border-strong);
+  background: var(--rp-surface-sunken);
+  color: var(--rp-text-secondary);
+  font-size: 12px;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
 }
-.period-mode-btn--active:hover { color: #fff; }
+.icon-btn--sm { width: 32px; height: 32px; border-radius: 9px; }
+.icon-btn:hover:not(:disabled) { border-color: var(--rp-accent-border); color: var(--rp-text-primary); background: var(--rp-surface-raised); }
+.icon-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 .period-picker-input {
   border: 1.5px solid var(--rp-border-strong);
   background: var(--rp-surface);
   border-radius: 11px;
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 13.5px;
-  font-weight: 600;
+  font-family: inherit; font-size: 13.5px; font-weight: 600;
   color: var(--rp-text-primary);
-  outline: none;
   cursor: pointer;
-  padding: 8px 12px;
-  box-shadow: var(--rp-shadow);
+  padding: 7px 12px; min-width: 150px;
   transition: border-color .15s ease;
 }
 .period-picker-input:hover,
 .period-picker-input:focus { border-color: var(--rp-accent-border); }
-.period-picker-input::-webkit-calendar-picker-indicator {
-  cursor: pointer;
-  border-radius: 4px;
-  padding: 2px;
+.period-picker-input::-webkit-calendar-picker-indicator { cursor: pointer; border-radius: 4px; padding: 2px; }
+html[data-theme="dark"] .period-picker-input::-webkit-calendar-picker-indicator { filter: invert(1) brightness(1.6); }
+
+.link-btn {
+  border: none; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 700;
+  color: var(--rp-accent); padding: 6px 8px; border-radius: 8px;
 }
-html[data-theme="dark"] .period-picker-input::-webkit-calendar-picker-indicator {
-  filter: invert(1) brightness(1.6);
+.link-btn:hover { background: var(--rp-accent-soft); }
+.link-btn--block { display: block; width: 100%; margin-top: 12px; text-align: center; }
+
+/* ── NOTICE ── */
+.notice {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: 12px;
+  font-size: 13px; font-weight: 600; color: var(--rp-red);
+  background: var(--rp-red-soft);
+  border: 1px solid rgba(244,63,94,0.28);
 }
+.notice span { flex: 1; min-width: 200px; }
 
-/* SECTIONS */
-.section        { display: flex; flex-direction: column; gap: 14px; }
-.section-header { display: flex; flex-direction: column; }
-.section-title  { font-size: 17px; font-weight: 700; color: var(--rp-text-primary); margin: 0; letter-spacing: -.01em; transition: color 0.22s ease; }
-.card-eyebrow   { font-size: 10.5px; font-weight: 700; letter-spacing: .12em; color: var(--rp-accent); text-transform: uppercase; margin: 0 0 4px; }
+/* ── BODY ── */
+.report-body { display: flex; flex-direction: column; gap: 20px; transition: opacity .15s ease; }
+.report-body.is-loading { opacity: .55; pointer-events: none; }
 
-/* KPI STRIP */
-.kpi-strip { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
+.section { display: flex; flex-direction: column; gap: 12px; }
+.section-title { font-size: 17px; font-weight: 700; color: var(--rp-text-primary); margin: 0; letter-spacing: -.01em; }
 
-.kpi-card {
+/* ── SUMMARY ──
+   4-column grid: the hero card spans 2 columns × 2 rows on the left and the
+   four KPI cards tile 2 × 2 beside it. Every card is a size container so the
+   numbers scale with their card and always stay on ONE line. */
+.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+
+.stat {
+  display: flex; align-items: center; gap: 14px;
   background: var(--rp-surface);
+  border: 1px solid var(--rp-border);
   border-radius: var(--radius);
-  border: 1px solid var(--rp-border);
   box-shadow: var(--rp-shadow);
-  padding: 20px 20px 16px;
-  position: relative; overflow: hidden;
-  transition: transform .2s ease, box-shadow .2s ease, background-color 0.22s ease, border-color 0.22s ease;
+  padding: 18px 20px;
+  min-width: 0;
 }
-.kpi-card:hover { transform: translateY(-2px); box-shadow: var(--rp-shadow-lg); }
-.kpi-card--featured { background: var(--rp-accent-soft); border-color: var(--rp-accent-border); }
-.kpi-card--alert    { background: rgba(244,63,94,0.07); border-color: rgba(244,63,94,0.22); }
-html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.12); border-color: rgba(244,63,94,0.30); }
-
-.kpi-card-inner { display: flex; align-items: flex-start; gap: 12px; }
-
-.kpi-icon-wrap {
-  width: 38px; height: 38px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 15px; flex-shrink: 0;
-  transition: background-color 0.22s ease;
-}
-.kpi-icon-wrap--orange { background: var(--rp-accent-soft);  color: var(--rp-accent); }
-.kpi-icon-wrap--green  { background: var(--rp-green-icon);   color: var(--rp-green); }
-.kpi-icon-wrap--blue   { background: var(--rp-blue-icon);    color: var(--rp-blue); }
-.kpi-icon-wrap--violet { background: var(--rp-violet-icon);  color: var(--rp-violet); }
-.kpi-icon-wrap--red    { background: var(--rp-red-icon);     color: var(--rp-red); }
-
-.kpi-body  { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.kpi-label { font-size: 11px; font-weight: 600; color: var(--rp-text-muted); text-transform: uppercase; letter-spacing: .07em; }
-.kpi-value { font-size: 22px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.04em; line-height: 1.1; transition: color 0.22s ease; }
-.kpi-value--green  { color: var(--rp-green); }
-.kpi-value--blue   { color: var(--rp-blue); }
-.kpi-value--violet { color: var(--rp-violet); }
-.kpi-value--red    { color: var(--rp-red); }
-
-.kpi-accent-bar {
-  position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
-  border-radius: 0 0 var(--radius) var(--radius);
-}
-.kpi-accent-bar--orange { background: linear-gradient(90deg, var(--rp-accent), #FB923C); }
-.kpi-accent-bar--green  { background: var(--rp-green); }
-.kpi-accent-bar--blue   { background: var(--rp-blue); }
-.kpi-accent-bar--violet { background: var(--rp-violet); }
-.kpi-accent-bar--red    { background: var(--rp-red); }
-
-/* CARDS */
-.card {
-  background: var(--rp-surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--rp-border);
-  box-shadow: var(--rp-shadow);
-  padding: 22px 24px 20px;
-  transition: background-color 0.22s ease, border-color 0.22s ease;
-}
-.card-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  margin-bottom: 8px; gap: 12px; flex-wrap: wrap;
-}
-.card-title { font-size: 15.5px; font-weight: 700; color: var(--rp-text-primary); margin: 0; letter-spacing: -.01em; transition: color 0.22s ease; }
-
-/* Small caption telling people the chart/list responds to hover */
-.chart-hint {
-  font-size: 11px;
-  color: var(--rp-text-faint);
-  margin: 10px 0 16px;
-}
-
-/* ── TREND CHART — LEGEND ── */
-.legend-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.legend-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--rp-text-muted);
-  background: var(--rp-surface-raised);
-  border: 1px solid var(--rp-border);
-  border-radius: 20px;
-  padding: 4px 10px 4px 8px;
-  cursor: pointer;
-  user-select: none;
-  transition: background-color .18s ease, border-color .18s ease, opacity .18s ease, transform .12s ease;
-}
-.legend-chip:hover { transform: translateY(-1px); border-color: var(--rp-accent-border); }
-.legend-chip--off { opacity: .42; }
-.legend-dot { width: 8px; height: 8px; border-radius: 50%; }
-.legend-chip--orange .legend-dot { background: var(--rp-accent); }
-.legend-chip--green .legend-dot  { background: var(--rp-green); }
-
-/* ── TREND CHART — TOTALS ROW (Sales + Profit side by side) ── */
-.trend-totals {
-  display: flex;
-  justify-content: flex-end;
-  gap: 28px;
-  flex-wrap: wrap;
-  margin-bottom: 4px;
-}
-.monthly-total-value--green { color: var(--rp-green); }
-
-/* ── TOP SELLING — METRIC TOGGLE ── */
-.ts-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.metric-toggle {
-  display: flex;
-  gap: 2px;
-  background: var(--rp-surface-sunken);
-  border: 1px solid var(--rp-border);
-  border-radius: 10px;
-  padding: 3px;
-}
-.metric-toggle-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  background: transparent;
-  color: var(--rp-text-muted);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: -.01em;
-  padding: 6px 13px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background-color .16s ease, color .16s ease;
-}
-.metric-toggle-btn i { font-size: 9.5px; }
-.metric-toggle-btn:hover:not(.metric-toggle-btn--active) { color: var(--rp-text-primary); }
-.metric-toggle-btn--active {
-  background: var(--rp-accent);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(234,88,12,0.28);
-}
-
-/* ── TOP SELLING — RANKED LEADERBOARD ── */
-.top-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.top-row {
-  position: relative;
-  /* Base stacking level for every row — bumped on hover (below) so the
-     hovered row's downward tooltip paints above the row that follows
-     it in the DOM, instead of being covered by it. */
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
-  background: var(--rp-surface-raised);
-  border: 1px solid var(--rp-border);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: background-color .18s ease, border-color .18s ease, transform .16s ease, box-shadow .16s ease;
-}
-.top-row:hover {
-  transform: translateY(-1px);
+.stat--hero {
+  grid-column: span 2; grid-row: span 2;
+  flex-direction: column; align-items: stretch; justify-content: space-between; gap: 20px;
+  background: var(--rp-accent-soft);
   border-color: var(--rp-accent-border);
-  box-shadow: var(--rp-shadow);
-  z-index: 30;
+  padding: 22px 24px;
 }
-.top-row--pinned {
-  background: var(--rp-accent-soft);
-  border-color: var(--rp-accent);
-}
-/* Subtle tint per rank tier, kept faint so the row list still reads as
-   one cohesive set rather than three different card styles */
-.top-row--rank1 { background: linear-gradient(90deg, rgba(245,158,11,0.08), var(--rp-surface-raised) 55%); }
-.top-row--rank2 { background: linear-gradient(90deg, rgba(148,163,184,0.10), var(--rp-surface-raised) 55%); }
-.top-row--rank3 { background: linear-gradient(90deg, rgba(194,112,61,0.10), var(--rp-surface-raised) 55%); }
+.hero-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.hero-col  { display: flex; flex-direction: column; gap: 6px; min-width: 0; container-type: inline-size; }
+.hero-col--profit { padding-left: 24px; border-left: 1px solid var(--rp-accent-border); }
 
-.top-row-rank {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 800;
-  background: var(--rp-surface-sunken);
-  color: var(--rp-text-secondary);
+.stat-icon {
+  width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
 }
-.top-row-rank--1 {
-  background: linear-gradient(135deg, #FCD34D, #F59E0B);
-  color: #78350F;
-  box-shadow: 0 0 0 3px rgba(245,158,11,0.18);
-  font-size: 12.5px;
-}
-.top-row-rank--2 {
-  background: linear-gradient(135deg, #E2E8F0, #94A3B8);
-  color: #334155;
-}
-.top-row-rank--3 {
-  background: linear-gradient(135deg, #FDBA74, #C2703D);
-  color: #431407;
-}
+.stat-icon--orange { background: var(--rp-accent-soft); color: var(--rp-accent); }
+.stat-icon--blue   { background: var(--rp-blue-icon);   color: var(--rp-blue); }
+.stat-icon--violet { background: var(--rp-violet-icon); color: var(--rp-violet); }
+.stat-icon--green  { background: var(--rp-green-icon);  color: var(--rp-green); }
 
-.top-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
-.top-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.top-row-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--rp-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.top-row-value {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--rp-text-secondary);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
+.stat-body  { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; container-type: inline-size; }
+.stat-label { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--rp-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.top-row-bar-track {
-  position: relative;
-  height: 7px;
-  border-radius: 6px;
-  background: var(--rp-surface-sunken);
-  overflow: hidden;
+/* One line, always. The font scales with the card width (cqw) and any
+   extreme overflow falls back to an ellipsis (full value is in the title). */
+.stat-value {
+  margin: 0; font-size: 22px; font-weight: 800; color: var(--rp-text-primary);
+  letter-spacing: -.03em; line-height: 1.15;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
-.top-row-bar-fill {
-  position: absolute;
-  inset: 0;
-  width: 0;
-  border-radius: 6px;
-  transition: width .8s cubic-bezier(.16, 1, .3, 1);
-}
-.top-row-bar-fill--rank1   { background: linear-gradient(90deg, #F59E0B, #FCD34D); }
-.top-row-bar-fill--rank2   { background: linear-gradient(90deg, #94A3B8, #CBD5E1); }
-.top-row-bar-fill--rank3   { background: linear-gradient(90deg, #C2703D, #FDBA74); }
-.top-row-bar-fill--default { background: linear-gradient(90deg, #6366F1, #818CF8); }
+.stat-body .stat-value { font-size: clamp(17px, 10cqw, 24px); }
+.stat-value--text { font-size: 17px; letter-spacing: -.015em; }
+.stat-body .stat-value--text { font-size: clamp(15px, 7.5cqw, 19px); }
+.hero-col .stat-value--xl { font-size: clamp(20px, 10.5cqw, 36px); color: var(--rp-accent); }
+.hero-col .stat-value--green { color: var(--rp-green); }
+.stat-sub  { margin: 0; font-size: 12px; color: var(--rp-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-note { margin: 0; font-size: 12px; color: var(--rp-text-muted); }
 
-/* Rich hover tooltip anchored to the row. Positioned BELOW the row.
-   Because a later sibling in the DOM otherwise paints over an earlier
-   row's absolutely-positioned children, .top-row gets a low base
-   z-index and bumps itself above its siblings on :hover — so the
-   downward-opening tooltip is never hidden under the next row. */
-.top-row-tooltip {
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  top: calc(100% + 8px);
-  z-index: 20;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px 18px;
-  background: var(--rp-surface);
-  border: 1px solid var(--rp-border);
-  border-radius: 10px;
-  box-shadow: var(--rp-shadow-lg);
-  padding: 10px 12px;
-  opacity: 0;
-  transform: translateY(-4px);
-  pointer-events: none;
-  transition: opacity .15s ease, transform .15s ease;
-}
-.top-row:hover .top-row-tooltip { opacity: 1; transform: translateY(0); }
-.trt-row { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--rp-text-muted); }
-.trt-row strong { color: var(--rp-text-primary); font-weight: 700; }
-
-.top-empty {
-  text-align: center;
-  padding: 28px 12px;
-  font-size: 12.5px;
-  color: var(--rp-text-faint);
-}
-
-.top-item-detail {
-  position: relative;
-  margin-top: 16px;
-  padding: 14px 44px 14px 16px;
-  background: var(--rp-surface-raised);
-  border: 1px solid var(--rp-accent-border);
-  border-radius: 12px;
-}
-.tid-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--rp-text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  transition: background-color .15s ease, color .15s ease;
-}
-.tid-close:hover { background: var(--rp-border); color: var(--rp-text-primary); }
-.tid-row--head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.tid-rank {
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--rp-accent);
-  background: var(--rp-accent-soft);
-  border-radius: 8px;
-  padding: 2px 7px;
-}
-.tid-name { font-size: 13.5px; color: var(--rp-text-primary); }
-.tid-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-}
-.tid-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.tid-stat strong { font-size: 13.5px; color: var(--rp-text-primary); }
-.tid-label {
-  font-size: 10.5px;
-  color: var(--rp-text-faint);
-  text-transform: uppercase;
-  letter-spacing: .06em;
-}
-
-/* MONTHLY TOTAL */
-.monthly-total { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-.monthly-total-label { font-size: 11px; font-weight: 600; color: var(--rp-text-muted); text-transform: uppercase; letter-spacing: .07em; }
-.monthly-total-value {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--rp-accent);
-  letter-spacing: -.03em;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Momentum badge next to the period total */
+.trend-line { display: flex; align-items: center; gap: 8px; margin: 2px 0 0; font-size: 12.5px; color: var(--rp-text-secondary); font-weight: 600; flex-wrap: wrap; }
 .trend-badge {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: -.01em;
-  padding: 2px 8px;
-  border-radius: 20px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: default;
+  font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+  display: inline-flex; align-items: center; gap: 4px;
 }
-.trend-badge i { font-size: 9.5px; }
+.trend-badge i { font-size: 10px; }
 .trend-badge.up   { color: var(--rp-green); background: var(--rp-green-soft); }
 .trend-badge.down { color: var(--rp-red);   background: var(--rp-red-soft); }
 .trend-badge.flat { color: var(--rp-text-muted); background: var(--rp-surface-raised); }
 
-/* CHART */
-.chart-area { position: relative; width: 100%; }
-.chart-area--tall { height: 280px; }
+.margin-meter { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--rp-accent-border); }
+.margin-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 12.5px; font-weight: 600; color: var(--rp-text-muted); }
+.margin-head strong { font-size: 14px; font-weight: 800; color: var(--rp-text-primary); font-variant-numeric: tabular-nums; }
+.margin-track { height: 8px; border-radius: 8px; background: var(--rp-surface-sunken); overflow: hidden; }
+.margin-fill { height: 100%; border-radius: 8px; background: var(--rp-green); transition: width .7s cubic-bezier(.16, 1, .3, 1); }
 
-/* RESPONSIVE */
-@media (max-width: 1100px) { .kpi-strip { grid-template-columns: repeat(2,1fr); } }
+/* ── CARDS ── */
+.card {
+  background: var(--rp-surface);
+  border: 1px solid var(--rp-border);
+  border-radius: var(--radius);
+  box-shadow: var(--rp-shadow);
+  padding: 22px 24px 20px;
+  min-width: 0;
+}
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.card-title { font-size: 16px; font-weight: 700; color: var(--rp-text-primary); margin: 0; letter-spacing: -.01em; }
+.card-sub   { margin: 4px 0 0; font-size: 12.5px; color: var(--rp-text-muted); line-height: 1.45; }
+
+/* ── TREND CHART ── */
+.legend-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.legend-chip {
+  display: flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  color: var(--rp-text-secondary);
+  background: var(--rp-surface-raised);
+  border: 1px solid var(--rp-border);
+  border-radius: 20px; padding: 5px 12px 5px 9px;
+  cursor: pointer;
+  transition: opacity .18s ease, border-color .18s ease;
+}
+.legend-chip:hover { border-color: var(--rp-accent-border); }
+.legend-chip--off { opacity: .45; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+.legend-chip--orange .legend-dot { background: var(--rp-accent); }
+.legend-chip--green .legend-dot  { background: var(--rp-green); }
+
+.chart-area { position: relative; width: 100%; height: 300px; }
+.chart-empty {
+  position: absolute; inset: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--rp-text-muted); pointer-events: none;
+}
+.chart-empty i { font-size: 22px; color: var(--rp-text-faint); }
+
+/* ── TOP SELLERS + INVENTORY ── */
+.content-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+
+.top-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.top-row {
+  background: var(--rp-surface-raised);
+  border: 1px solid var(--rp-border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color .16s ease, background-color .16s ease;
+}
+.top-row:hover { border-color: var(--rp-accent-border); }
+.top-row--open { background: var(--rp-accent-soft); border-color: var(--rp-accent-border); }
+
+.top-row-btn {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  padding: 12px 14px; border: none; background: transparent;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.top-rank {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800;
+  background: var(--rp-surface-sunken); color: var(--rp-text-secondary);
+}
+.top-rank--lead { background: var(--rp-accent); color: #fff; }
+
+.top-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.top-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.top-name { font-size: 13.5px; font-weight: 600; color: var(--rp-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-value { font-size: 13px; font-weight: 700; color: var(--rp-text-secondary); flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.top-bar { display: block; height: 6px; border-radius: 6px; background: var(--rp-surface-sunken); overflow: hidden; }
+.top-bar-fill {
+  display: block; height: 100%; width: 0; border-radius: 6px;
+  background: var(--rp-violet); opacity: .55;
+  transition: width .8s cubic-bezier(.16, 1, .3, 1);
+}
+.top-bar-fill--lead { background: var(--rp-accent); opacity: 1; }
+
+.top-share { width: 46px; flex-shrink: 0; text-align: right; font-size: 12px; font-weight: 600; color: var(--rp-text-muted); font-variant-numeric: tabular-nums; }
+.top-chevron { font-size: 10px; color: var(--rp-text-faint); transition: transform .18s ease; }
+.top-row--open .top-chevron { transform: rotate(180deg); }
+
+.top-detail {
+  display: none; margin: 0; padding: 2px 14px 14px 56px;
+  grid-template-columns: repeat(4, 1fr); gap: 10px;
+}
+.top-row--open .top-detail { display: grid; }
+.td-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.td-item dt { font-size: 11.5px; color: var(--rp-text-muted); }
+.td-item dd { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--rp-text-primary); overflow-wrap: anywhere; }
+
+.empty {
+  margin: 0; padding: 32px 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  text-align: center; font-size: 13px; color: var(--rp-text-muted);
+}
+.empty i { font-size: 22px; color: var(--rp-text-faint); }
+
+/* Inventory */
+.inv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.inv-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--rp-border); }
+.inv-row:last-child { border-bottom: none; }
+.inv-icon {
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+  background: var(--rp-violet-icon); color: var(--rp-violet);
+}
+.inv-label { flex: 1; font-size: 13.5px; font-weight: 600; color: var(--rp-text-secondary); }
+.inv-value { font-size: 17px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.inv-row--alert .inv-icon  { background: var(--rp-red-icon); color: var(--rp-red); }
+.inv-row--alert .inv-value { color: var(--rp-red); }
+
+.coverage { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--rp-border); }
+.coverage-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--rp-text-muted); margin-bottom: 8px; }
+.coverage-head strong { color: var(--rp-text-primary); font-weight: 700; }
+.coverage-track { height: 6px; border-radius: 6px; background: var(--rp-surface-sunken); overflow: hidden; }
+.coverage-fill { height: 100%; border-radius: 6px; background: var(--rp-green); transition: width .6s ease; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 1100px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat--hero { grid-column: 1 / -1; grid-row: auto; }
+  .content-grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 700px) {
   .reports { padding: 16px 16px 40px; }
-  .kpi-strip { grid-template-columns: 1fr; }
-  .card-header { flex-direction: column; align-items: stretch; }
-  .monthly-total { align-items: flex-start; }
-  .trend-totals { justify-content: flex-start; gap: 16px; }
   .page-header { flex-direction: column; align-items: stretch; }
-  .period-control { flex-direction: column; align-items: stretch; }
-  .period-mode-switch { justify-content: stretch; }
-  .period-mode-btn { flex: 1; text-align: center; }
   .report-toolbar { justify-content: stretch; }
   .rt-btn { flex: 1; justify-content: center; }
-  .top-row-tooltip { display: none; }
-  .tid-stats { grid-template-columns: 1fr; }
+  .period-bar { flex-direction: column; align-items: stretch; }
+  .seg { width: 100%; }
+  .seg-btn { flex: 1; text-align: center; }
+  .period-nav { width: 100%; }
+  .period-picker-input { flex: 1; min-width: 0; }
+  .period-status { margin-left: 0; justify-content: space-between; }
+  .stat--hero { padding: 18px 16px; }
+  .hero-cols { gap: 14px; }
+  .hero-col--profit { padding-left: 14px; }
+  /* KPI cards: icon above the text so the numbers get the full width */
+  .stat:not(.stat--hero) { flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px; }
+  .stat:not(.stat--hero) .stat-body { width: 100%; flex: none; }
+  .card { padding: 18px 16px 16px; }
+  .chart-area { height: 240px; }
+  .top-share { display: none; }
+  .top-detail { grid-template-columns: 1fr 1fr; padding-left: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reports * { transition: none !important; }
 }
 </style>
 
 <!-- ══════════════════════════════════════════════════════
      GLOBAL (unscoped) — print rules only.
+     Prints ONLY .print-sheet: a purpose-built, always-light,
+     colour-coded report (not a restyled copy of the screen UI).
 ══════════════════════════════════════════════════════ -->
 <style>
 @media print {
   @page {
     size: auto;
-    margin: 16mm 18mm;
+    margin: 13mm 13mm 16mm;
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font: 600 8.5px 'Inter', Arial, sans-serif;
+      color: #64748b;
+    }
   }
 
-  /* The app shell often gives html/body (or a scroll wrapper) a fixed
-     height with overflow hidden so the sidebar layout can scroll
-     internally. That's invisible on screen but means print only
-     captures whatever fit in the viewport — everything below the fold
-     got silently cut. Forcing every element back to natural height/
-     overflow here is what makes the rest of the page actually print. */
-  html, body {
-    height: auto !important;
-    overflow: visible !important;
-    background: #ffffff !important;
-  }
-  body * {
-    overflow: visible !important;
-  }
+  /* The app shell often fixes html/body height with overflow hidden so the
+     sidebar layout can scroll internally; print would then only capture the
+     visible viewport. Force natural height/overflow so the whole report prints. */
+  html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+  body * { overflow: visible !important; }
 
   body * { visibility: hidden !important; }
   #reports-print-area,
   #reports-print-area * { visibility: visible !important; }
 
-  /* visibility:hidden keeps every hidden element's layout box in place
-     (sidebar, nav, app shell columns, etc. still reserve their normal
-     width/height even though invisible) — that's what was squeezing
-     the report into a small corner of the page. Taking the report out
-     of that flow with position:absolute means it no longer cares how
-     much space its hidden siblings claim, and can use the full sheet. */
+  /* Pull the report out of the app shell's flow so hidden sidebar/nav boxes
+     can't squeeze it into a corner of the page. */
   #reports-print-area {
     position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    background: #ffffff !important;
+    top: 0 !important; left: 0 !important;
+    width: 100% !important; max-width: 100% !important;
+    padding: 0 !important; margin: 0 !important;
+    background: #fff !important;
     display: block !important;
-    gap: 0 !important;
     font-family: 'Inter', Arial, Helvetica, sans-serif !important;
-    color: #1a1a1a !important;
+    color: #0f172a !important;
   }
 
-  /* Interactive-only chrome has no place on paper */
-  .period-control,
-  .ts-controls,
-  .report-toolbar,
-  .chart-hint,
-  .page-header,
-  .legend-row {
-    display: none !important;
+  /* Hide every interactive piece; show only the print sheet */
+  #reports-print-area > :not(.print-sheet) { display: none !important; }
+  #reports-print-area .print-sheet { display: block !important; }
+
+  .print-sheet,
+  .print-sheet * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-sizing: border-box;
+  }
+  .print-sheet { font-size: 10.5px; line-height: 1.45; color: #0f172a; }
+  .print-sheet p, .print-sheet h1, .print-sheet h2 { margin: 0; }
+
+  /* ── Letterhead ── */
+  .ps-band { height: 9px; border-radius: 2px; background: linear-gradient(90deg, #EA580C 0%, #F59E0B 60%, #10b981 100%); }
+  .ps-head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; padding: 14px 0 12px; }
+  .ps-brand-name { font-size: 20px; font-weight: 800; letter-spacing: -.02em; color: #EA580C; }
+  .ps-brand-tag  { margin-top: 2px; font-size: 10px; font-weight: 600; color: #64748b; }
+  .ps-meta { display: flex; flex-direction: column; gap: 3px; text-align: right; font-size: 10.5px; color: #334155; }
+  .ps-meta span {
+    display: inline-block; min-width: 64px; margin-right: 8px;
+    font-size: 8.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #94a3b8;
+  }
+  .ps-title-row {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+    padding: 12px 16px; border-radius: 8px;
+    background: #0f172a; color: #fff;
+  }
+  .ps-title  { font-size: 20px; font-weight: 800; letter-spacing: -.02em; color: #fff; }
+  .ps-period { font-size: 13px; font-weight: 600; color: #fdba74; }
+  .ps-chip {
+    margin-left: 8px; padding: 2px 8px; border-radius: 10px;
+    font-size: 9px; font-weight: 700; color: #064e3b; background: #6ee7b7; vertical-align: middle;
   }
 
-  /* ── LETTERHEAD ── */
-  .print-header {
-    display: flex !important;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 24px;
-    padding-bottom: 18px;
-    margin-bottom: 28px;
-    border-bottom: 3px solid #1a1a1a;
+  /* ── Sections ── */
+  .ps-section { margin-top: 20px; }
+  .ps-section--keep { break-inside: avoid; page-break-inside: avoid; }
+  .ps-h2 {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 0 0 6px 10px; margin-bottom: 10px;
+    font-size: 13px; font-weight: 800; letter-spacing: -.01em; color: #0f172a;
+    border-left: 4px solid #EA580C; border-bottom: 1px solid #e2e8f0;
+    break-after: avoid; page-break-after: avoid;
   }
-  .print-header-brand { display: flex; flex-direction: column; gap: 5px; }
-  .print-brand-name {
-    margin: 0;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: .16em;
-    text-transform: uppercase;
-    color: #EA580C !important;
-  }
-  .print-report-title {
-    margin: 0;
-    font-size: 30px;
-    font-weight: 800;
-    letter-spacing: -.02em;
-    color: #111 !important;
-  }
-  .print-header-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    text-align: right;
-  }
-  .print-header-meta p {
-    margin: 0;
-    font-size: 12px;
-    color: #444 !important;
-  }
-  .print-header-meta span {
-    display: inline-block;
-    min-width: 66px;
-    margin-right: 6px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    font-size: 9.5px;
-    color: #888 !important;
-  }
+  .ps-h2 small { font-size: 9.5px; font-weight: 600; color: #94a3b8; }
+  .ps-empty { padding: 14px; text-align: center; color: #94a3b8; border: 1px dashed #cbd5e1; border-radius: 6px; }
 
-  /* ── DOCUMENT FLOW ── */
-  /* Give each major block real breathing room and let sections start on
-     a fresh page rather than splitting mid-way whenever possible. */
-  .section { margin-bottom: 32px; page-break-inside: avoid; break-inside: avoid; }
-  .section:last-child { margin-bottom: 0; }
-  .section-header { margin-bottom: 14px; }
-  .card-eyebrow {
-    font-size: 10px !important;
-    letter-spacing: .12em;
-    color: #888 !important;
+  /* ── KPI tiles ── */
+  .ps-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .ps-kpi {
+    --t: #EA580C; --ts: #FFF1E8;
+    padding: 9px 11px 10px; border-radius: 6px;
+    background: var(--ts); border: 1px solid var(--ts); border-top: 3px solid var(--t);
+    break-inside: avoid; page-break-inside: avoid;
   }
-  .section-title, .card-title {
-    color: #111 !important;
-    font-size: 16px !important;
-    border-bottom: 1px solid #ddd;
-    padding-bottom: 8px;
+  .ps-kpi--orange { --t: #EA580C; --ts: #FFF1E8; }
+  .ps-kpi--green  { --t: #059669; --ts: #E7F8F0; }
+  .ps-kpi--teal   { --t: #0D9488; --ts: #E4F6F4; }
+  .ps-kpi--amber  { --t: #D97706; --ts: #FEF3E2; }
+  .ps-kpi--violet { --t: #6D5BD0; --ts: #EFEDFC; }
+  .ps-kpi--blue   { --t: #2563EB; --ts: #E8F0FE; }
+  .ps-kpi--rose   { --t: #DB2777; --ts: #FDEBF3; }
+  .ps-kpi--cyan   { --t: #0891B2; --ts: #E3F5F9; }
+  .ps-kpi-label { font-size: 8.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--t); }
+  .ps-kpi-value { margin-top: 3px !important; font-size: 16px; font-weight: 800; letter-spacing: -.02em; color: #0f172a; white-space: nowrap; }
+  .ps-kpi-value--text { font-size: 12.5px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; letter-spacing: -.01em; }
+  .ps-kpi-sub { margin-top: 2px !important; font-size: 9px; color: #64748b; }
+  .ps-trend { margin-top: 10px !important; padding: 7px 12px; border-radius: 6px; font-size: 10.5px; border-left: 4px solid; }
+  .ps-trend--up   { color: #065f46; background: #E7F8F0; border-color: #059669; }
+  .ps-trend--down { color: #9f1239; background: #FFE4E6; border-color: #e11d48; }
+  .ps-trend--flat { color: #475569; background: #f1f5f9; border-color: #94a3b8; }
+
+  /* ── Chart ── */
+  .ps-legend { display: flex; gap: 14px; margin-bottom: 6px; font-size: 9.5px; font-weight: 600; color: #475569; }
+  .ps-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .ps-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+  .ps-dot--orange { background: #EA580C; }
+  .ps-dot--green  { background: #10b981; }
+  .ps-chart { display: block; width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; }
+
+  /* ── Tables ── */
+  .ps-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  .ps-table thead { display: table-header-group; }
+  .ps-table tfoot { display: table-footer-group; }
+  .ps-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .ps-table th {
+    padding: 7px 8px; text-align: left;
+    font-size: 8.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    color: #fff; background: #0f172a;
   }
-
-  /* Let sections flow naturally so page 1 is actually used instead of
-     leaving it mostly blank — .card already has page-break-inside:
-     avoid below, so the chart still won't be sliced across two pages,
-     it'll just start wherever it naturally fits. */
-
-  /* ── CARDS / KPI TILES — flatten to a clean, borderable print look ── */
-  .card, .kpi-card {
-    background: #fff !important;
-    box-shadow: none !important;
-    border: 1px solid #ddd !important;
-    border-radius: 6px !important;
+  .ps-table th:first-child { border-top-left-radius: 5px; }
+  .ps-table th:last-child  { border-top-right-radius: 5px; }
+  .ps-table td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+  .ps-table tbody tr:nth-child(even) td { background: #f8fafc; }
+  .ps-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ps-table .c-rank { width: 30px; text-align: center; }
+  .ps-table .c-share { width: 120px; }
+  .ps-table tfoot td {
+    padding: 7px 8px; font-weight: 800; color: #0f172a;
+    background: #FFF1E8; border-top: 2px solid #EA580C; border-bottom: none;
   }
-  .kpi-card:hover { transform: none !important; }
-  .kpi-strip { grid-template-columns: repeat(4, 1fr) !important; gap: 16px !important; }
-  .kpi-card { padding: 18px 18px 16px !important; }
-  .kpi-accent-bar { display: none !important; }
-  .kpi-icon-wrap { width: 32px !important; height: 32px !important; font-size: 13px !important; border: 1px solid #e5e5e5; }
-  .kpi-value { font-size: 20px !important; color: #111 !important; }
-  .kpi-label { font-size: 9.5px !important; color: #888 !important; }
-  .kpi-card--featured, .kpi-card--alert { background: #fff !important; }
-  .card { padding: 20px 22px 18px !important; }
+  .ps-strong { font-weight: 700; color: #0f172a; }
+  .ps-pos { color: #047857; font-weight: 700; }
+  .ps-neg { color: #be123c; font-weight: 700; }
 
-  /* ── TOP SELLING — read as a plain ranked table on paper ── */
-  .top-list { gap: 4px !important; }
-
-  /* .top-row is a flex row on screen (rank | name+bar | tooltip). On
-     paper the "tooltip" becomes a permanent breakdown line, and a flex
-     row with no wrap would squeeze it into the same line as the name,
-     which is what produced the overlapping/garbled text. flex-wrap
-     lets it drop to its own full-width line underneath instead. */
-  .top-row {
-    display: flex !important;
-    flex-wrap: wrap !important;
-    align-items: center !important;
-    background: #fff !important;
-    border: none !important;
-    border-bottom: 1px solid #eee !important;
-    border-radius: 0 !important;
-    padding: 10px 2px !important;
-    transform: none !important;
-    box-shadow: none !important;
+  .ps-rank {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    font-size: 9px; font-weight: 800; color: #334155; background: #e2e8f0;
   }
-  .top-row:first-child { border-top: 1px solid #eee !important; }
-  .top-row-rank {
-    background: #f3f3f3 !important;
-    color: #333 !important;
-    box-shadow: none !important;
-    width: 24px !important;
-    height: 24px !important;
-    font-size: 11px !important;
-  }
-  .top-row-rank--1, .top-row-rank--2, .top-row-rank--3 { background: #f3f3f3 !important; color: #333 !important; }
-  .top-row-main { flex: 1 1 auto !important; min-width: 0; }
-  .top-row-bar-track { display: none !important; }
-  .top-row-name { color: #111 !important; font-size: 12.5px !important; }
-  .top-row-value { color: #333 !important; font-size: 12.5px !important; }
+  .ps-rank--lead { color: #fff; background: #EA580C; }
+  .ps-share { display: flex; align-items: center; gap: 6px; }
+  .ps-share-bar { flex: 1; height: 5px; border-radius: 5px; background: #e2e8f0; display: block; }
+  .ps-share-bar i { display: block; height: 100%; border-radius: 5px; background: #6D5BD0; }
+  .ps-share-bar i.ps-share-bar--lead { background: #EA580C; }
+  .ps-share b { width: 34px; text-align: right; font-size: 9.5px; color: #475569; font-variant-numeric: tabular-nums; }
 
-  /* Hover doesn't exist on paper — always show the breakdown as its
-     own full-width line under the row, indented to align under the
-     product name, instead of a floating hover card. */
-  .top-row-tooltip {
-    position: static !important;
-    opacity: 1 !important;
-    transform: none !important;
-    pointer-events: none !important;
-    box-shadow: none !important;
-    border: none !important;
-    background: transparent !important;
-    display: grid !important;
-    grid-template-columns: repeat(4, 1fr) !important;
-    flex: 1 1 100% !important;
-    order: 3;
-    width: auto !important;
-    margin: 6px 0 0 34px !important;
-    padding: 6px 0 0 !important;
-    border-top: 1px dashed #ddd !important;
-  }
-  .trt-row { color: #888 !important; font-size: 10.5px !important; }
-  .trt-row strong { color: #222 !important; font-size: 11px !important; }
-  .top-item-detail { display: none !important; }
+  /* ── Inventory ── */
+  .ps-inv { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .ps-inv-box { padding: 9px 11px; border-radius: 6px; background: #EFEDFC; border-top: 3px solid #6D5BD0; }
+  .ps-inv-box p { font-size: 8.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #6D5BD0; }
+  .ps-inv-box strong { display: block; margin-top: 3px; font-size: 16px; font-weight: 800; color: #0f172a; }
+  .ps-inv-box--alert { background: #FFE4E6; border-top-color: #e11d48; }
+  .ps-inv-box--alert p, .ps-inv-box--alert strong { color: #be123c; }
+  .ps-cover { margin-top: 10px; }
+  .ps-cover-head { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 9.5px; color: #64748b; }
+  .ps-cover-head strong { color: #0f172a; }
+  .ps-cover-track { height: 6px; border-radius: 6px; background: #e2e8f0; }
+  .ps-cover-track i { display: block; height: 100%; border-radius: 6px; background: #10b981; }
 
-  /* ── TREND CHART ── */
-  .trend-totals { justify-content: flex-start !important; gap: 40px !important; margin-bottom: 14px !important; }
-  .monthly-total { align-items: flex-start !important; }
-  .monthly-total-value { color: #111 !important; font-size: 24px !important; }
-  .monthly-total-value--green { color: #0f766e !important; }
-  .trend-badge { border: 1px solid currentColor; background: transparent !important; }
-  .chart-area--tall { height: 320px !important; }
-  canvas { max-width: 100% !important; }
-
-  /* ── FOOTER — page numbers via @page counters ── */
-  @page {
-    @bottom-center {
-      content: "Page " counter(page) " of " counter(pages);
-      font-size: 9px;
-      color: #999;
-    }
+  /* ── End of report ── */
+  .ps-end {
+    display: flex; justify-content: space-between; gap: 12px;
+    margin-top: 24px; padding-top: 8px;
+    font-size: 8.5px; color: #94a3b8; border-top: 2px solid #EA580C;
   }
 }
 </style>

@@ -16,6 +16,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Middleware\UpdateLastActive;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\POSController;
 
 
 
@@ -51,8 +52,8 @@ Route::get('/products/{id}/stock', [ProductController::class, 'getStock']);
 // 🟦 Auto SKU Generator
 Route::get('/generate-sku/{name}', [ProductController::class, 'generateSku']);
 
-// 🟦 POS Sale Processing
-Route::post('/sales/process', [SaleController::class, 'processSale']);
+// 🟦 Best Sellers (login page, public)
+Route::get('/public/best-sellers', [SaleController::class, 'bestSellers']);
 
 // 🟦 Sales List (Read-only)
 Route::get('/sales', [SaleController::class, 'apiList']);
@@ -60,14 +61,11 @@ Route::get('/sales', [SaleController::class, 'apiList']);
 // 🟦 View Single Sale
 Route::get('/sales/{id}', [SaleController::class, 'apiShow']);
 
-// 🟦 Delete Sales (Admin validation inside controller)
-Route::post('/sales/bulk-delete', [SaleController::class, 'bulkDelete']);
-
 // 🟦 Reports JSON
 Route::get('/reports', [ReportsController::class, 'index']);
 
-// 🟦 Inventory Logs JSON
-Route::get('/inventory/logs', [InventoryLogController::class, 'index']);
+// NOTE: /inventory/logs was moved to the protected group below. It returns
+// service worker/owner splits and leftover stock, so it needs a login.
 
 /*
 |--------------------------------------------------------------------------
@@ -98,6 +96,31 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::
 
     /*
     |--------------------------------------------------------------------------
+    | SALES (REQUIRE LOGIN)
+    |--------------------------------------------------------------------------
+    */
+
+    // 🟦 POS Sale Processing (moved here so the real clerk is recorded)
+    Route::post('/sales/process', [SaleController::class, 'processSale']);
+
+    // 🟦 Delete Sales (re-checks the logged-in user's password in the controller)
+    Route::post('/sales/bulk-delete', [SaleController::class, 'bulkDelete']);
+
+    Route::get('/pos/remnants', [POSController::class, 'remnants']);
+    /*
+    |--------------------------------------------------------------------------
+    | INVENTORY LOGS + LEFTOVER (CUT) PIECES
+    |--------------------------------------------------------------------------
+    */
+
+    // 🟦 Inventory Logs JSON (logs, summary, services, leftover pieces)
+    Route::get('/inventory/logs', [InventoryLogController::class, 'index']);
+
+    // 🟦 Leftover pieces: mark used / scrapped / available (also writes a history row)
+    Route::patch('/inventory/remnants/{id}', [InventoryLogController::class, 'updateRemnant']);
+
+    /*
+    |--------------------------------------------------------------------------
     | USER SETTINGS / PROFILE
     |--------------------------------------------------------------------------
     */
@@ -116,8 +139,7 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::
     |--------------------------------------------------------------------------
     */
     Route::post('/categories', [CategoryController::class, 'store']);
-        Route::put('/categories/{id}', [CategoryController::class, 'update']);
-
+    Route::put('/categories/{id}', [CategoryController::class, 'update']);
     Route::post('/categories/{id}', [CategoryController::class, 'update']);
     Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
 
@@ -153,8 +175,7 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::
     // ✅ Product History Tab
     Route::get('/products/{id}/history', [TransactionController::class, 'apiProductHistory']);
 
-
-        /*
+    /*
     |--------------------------------------------------------------------------
     | CUSTOMERS (repeat buyer tracking)
     |--------------------------------------------------------------------------
@@ -184,9 +205,8 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
-    
 
-        /*
+    /*
     |--------------------------------------------------------------------------
     | TEAM / USER MANAGEMENT
     |--------------------------------------------------------------------------

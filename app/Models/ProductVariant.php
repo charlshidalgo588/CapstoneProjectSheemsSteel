@@ -9,14 +9,19 @@ class ProductVariant extends Model
     protected $table      = 'product_variants';
     protected $primaryKey = 'VariantID';
 
+    // NOTE: QuantityOnHand is intentionally NOT fillable. Change it only
+    // through App\Services\StockService so the product total stays in sync.
     protected $fillable = [
         'ProductID', 'Label', 'Specs', 'SellingPrice', 'CostPrice',
+        'ReorderLevel',                       // <-- added
     ];
 
     protected $casts = [
-        'Specs'        => 'array',
-        'SellingPrice' => 'float',
-        'CostPrice'    => 'float',
+        'Specs'          => 'array',
+        'SellingPrice'   => 'float',
+        'CostPrice'      => 'float',
+        'QuantityOnHand' => 'integer',        // <-- added
+        'ReorderLevel'   => 'integer',        // <-- added
     ];
 
     public function product()
@@ -25,15 +30,14 @@ class ProductVariant extends Model
     }
 }
 
-/* ─────────────────────────────────────────────────────────────
-   ADD THIS METHOD INSIDE YOUR EXISTING App\Models\Product CLASS:
+/* Keep these two from your notes (not part of this file):
 
-    public function variants()
-    {
-        return $this->hasMany(ProductVariant::class, 'ProductID', 'ProductID')
-                    ->orderBy('VariantID');
-    }
+   1) In App\Models\Product:
+        public function variants()
+        {
+            return $this->hasMany(ProductVariant::class, 'ProductID', 'ProductID')
+                        ->orderBy('VariantID');
+        }
 
-   ALSO: if your SalesItem model uses $fillable, add
-   'VariantID' and 'VariantLabel' to it.
-───────────────────────────────────────────────────────────── */
+   2) In App\Models\SalesItem $fillable: 'VariantID', 'VariantLabel'
+*/

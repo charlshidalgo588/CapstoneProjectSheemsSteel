@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Product;
+use App\Models\ProductVariant;
 use App\Models\Notification;
+use App\Services\StockService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -17,7 +19,14 @@ class ProductController extends Controller
      * VARIANT HELPERS
      * =========================================================
      * ProductCreate.vue sends `Variants` as a JSON string:
-     *   [{ Label, Specs:[{Type,Value,Unit}], SellingPrice, CostPrice }, ...]
+     *   [{
+     *      VariantID?,            // present when editing an existing size
+     *      Label, Specs:[{Type,Value,Unit}],
+     *      SellingPrice, CostPrice,
+     *      ReorderLevel?,         // per-size reorder level
+     *      OpeningStock?,         // stock for a NEW size
+     *      StockAdjustment?       // +/- change for an EXISTING size
+     *   }, ...]
      * parseVariants() decodes + validates it; syncVariants() writes it.
      */
     private function parseVariants(Request $request): ?array
@@ -38,7 +47,12 @@ class ProductController extends Controller
         $seen = [];
         $clean = [];
         foreach ($list as $i => $v) {
-            $n     = $i + 1;
+            $n = $i + 1;
+
+            if (!is_array($v)) {
+                throw ValidationException::withMessages(['Variants' => "Size {$n}: invalid data."]);
+            }
+
             $label = trim((string) ($v['Label'] ?? ''));
             $sell  = $v['SellingPrice'] ?? null;
             $cost  = $v['CostPrice'] ?? 0;
@@ -55,12 +69,31 @@ class ProductController extends Controller
             }
             $seen[mb_strtolower($label)] = true;
 
+            // ── per-size stock fields ──────────────────────────────
+            // ReorderLevel: null means "not sent" → keep the stored value.
+            $reorder = (array_key_exists('ReorderLevel', $v) && $v['ReorderLevel'] !== '' && $v['ReorderLevel'] !== null)
+                ? $v['ReorderLevel'] : null;
+            $opening = (isset($v['OpeningStock']) && $v['OpeningStock'] !== '') ? $v['OpeningStock'] : 0;
+            $adjust  = (isset($v['StockAdjustment']) && $v['StockAdjustment'] !== '') ? $v['StockAdjustment'] : 0;
+
+            foreach (['Reorder level' => $reorder, 'Opening stock' => $opening, 'Stock adjustment' => $adjust] as $name => $val) {
+                if ($val !== null && filter_var($val, FILTER_VALIDATE_INT) === false) {
+                    throw ValidationException::withMessages(['Variants' => "Size {$n}: {$name} must be a whole number."]);
+                }
+            }
+            if (($reorder !== null && (int) $reorder < 0) || (int) $opening < 0) {
+                throw ValidationException::withMessages(['Variants' => "Size {$n}: stock and reorder level cannot be negative."]);
+            }
+
             $clean[] = [
-                'VariantID'    => $v['VariantID'] ?? null,
-                'Label'        => mb_substr($label, 0, 150),
-                'Specs'        => array_values($v['Specs'] ?? []),
-                'SellingPrice' => round((float) $sell, 2),
-                'CostPrice'    => round((float) $cost, 2),
+                'VariantID'       => $v['VariantID'] ?? null,
+                'Label'           => mb_substr($label, 0, 150),
+                'Specs'           => array_values($v['Specs'] ?? []),
+                'SellingPrice'    => round((float) $sell, 2),
+                'CostPrice'       => round((float) $cost, 2),
+                'ReorderLevel'    => $reorder === null ? null : (int) $reorder,
+                'OpeningStock'    => (int) $opening,
+                'StockAdjustment' => (int) $adjust,
             ];
         }
 
@@ -68,32 +101,105 @@ class ProductController extends Controller
     }
 
     /**
-     * Replaces the product's variants with the submitted list.
+     * Replaces the product's sizes with the submitted list, and applies the
+     * per-size stock rules:
+     *   - NEW size       → OpeningStock becomes its starting stock (+ stock_in log)
+     *   - EXISTING size  → StockAdjustment is added (+ stock_in / stock_out log),
+     *                      and may not push stock below zero
+     *   - REMOVED size   → blocked while it still has stock
      * Sales keep their own VariantLabel snapshot, so history is safe.
+     * Must run inside a DB transaction (it uses lockForUpdate).
      */
     private function syncVariants(Product $product, array $variants): void
     {
         $keep = [];
+
         foreach ($variants as $v) {
-            $id = $v['VariantID'] ?? null;
-            unset($v['VariantID']);
+            $id      = $v['VariantID'] ?? null;
+            $opening = $v['OpeningStock'];
+            $adjust  = $v['StockAdjustment'];
+
+            $attrs = [
+                'Label'        => $v['Label'],
+                'Specs'        => $v['Specs'],
+                'SellingPrice' => $v['SellingPrice'],
+                'CostPrice'    => $v['CostPrice'],
+            ];
+            if ($v['ReorderLevel'] !== null) {
+                $attrs['ReorderLevel'] = $v['ReorderLevel'];
+            }
 
             // Existing size (belongs to THIS product) → update in place so its
             // VariantID stays stable. Otherwise it's a new size → create it.
             $existing = $id
-                ? $product->variants()->where('VariantID', $id)->first()
+                ? $product->variants()->where('VariantID', $id)->lockForUpdate()->first()
                 : null;
 
             if ($existing) {
-                $existing->update($v);
+                $existing->update($attrs);
+
+                if ($adjust !== 0) {
+                    $newQty = $existing->QuantityOnHand + $adjust;
+                    if ($newQty < 0) {
+                        throw ValidationException::withMessages([
+                            'Variants' => "\"{$existing->Label}\": stock cannot go below 0.",
+                        ]);
+                    }
+                    $existing->QuantityOnHand = $newQty;
+                    $existing->save();
+
+                    $this->logStock(
+                        $product, $existing,
+                        $adjust > 0 ? 'stock_in' : 'stock_out',
+                        abs($adjust),
+                        'Manual adjustment'
+                    );
+                }
+
                 $keep[] = $existing->VariantID;
             } else {
-                $keep[] = $product->variants()->create($v)->VariantID;
+                $created = $product->variants()->create($attrs);
+
+                if ($opening > 0) {
+                    $created->QuantityOnHand = $opening;
+                    $created->save();
+
+                    $this->logStock(
+                        $product, $created, 'stock_in', $opening,
+                        $product->wasRecentlyCreated ? 'New product added' : 'New size added'
+                    );
+                }
+
+                $keep[] = $created->VariantID;
             }
         }
 
-        // Sizes the person removed in the form.
+        // Sizes the person removed in the form. Never silently destroy stock.
+        $removed = $product->variants()->whereNotIn('VariantID', $keep)->get();
+        foreach ($removed as $r) {
+            if ($r->QuantityOnHand > 0) {
+                throw ValidationException::withMessages([
+                    'Variants' => "\"{$r->Label}\" still has {$r->QuantityOnHand} in stock. Set it to 0 before removing the size.",
+                ]);
+            }
+        }
         $product->variants()->whereNotIn('VariantID', $keep)->delete();
+    }
+
+    /** One inventory_logs row, tagged with the size it belongs to. */
+    private function logStock(Product $product, ProductVariant $variant, string $type, int $qty, string $note): void
+    {
+        DB::table('inventory_logs')->insert([
+            'ProductID'    => $product->ProductID,
+            'VariantID'    => $variant->VariantID,
+            'VariantLabel' => $variant->Label,
+            'type'         => $type,
+            'quantity'     => $qty,
+            'notes'        => $note,
+            'created_by'   => auth()->id() ?? null,
+            'created_at'   => now(),
+            'updated_at'   => now(),
+        ]);
     }
 
     /**
@@ -128,10 +234,13 @@ class ProductController extends Controller
 
             // SIZES & PRICES — what the POS dropdown is built from.
             // CostPrice is intentionally NOT exposed here.
+            // Stock / ReorderLevel are PER SIZE.
             'variants' => $p->variants->map(fn ($v) => [
                 'VariantID'    => $v->VariantID,
                 'Label'        => $v->Label,
                 'SellingPrice' => (float) $v->SellingPrice,
+                'Stock'        => (int) $v->QuantityOnHand,
+                'ReorderLevel' => (int) $v->ReorderLevel,
             ])->values(),
 
             // CATEGORY
@@ -140,13 +249,13 @@ class ProductController extends Controller
                 'CategoryName' => $p->category->CategoryName ?? null,
             ],
 
-            // INVENTORY
+            // INVENTORY (product total = sum of its sizes)
             'inventory' => [
                 'QuantityOnHand' => $p->inventory->QuantityOnHand ?? 0,
                 'ReorderLevel'   => $p->inventory->ReorderLevel ?? 0,
             ],
 
-            // FLAT STOCK
+            // FLAT STOCK (product total)
             'Stock' => $p->inventory->QuantityOnHand ?? 0,
 
             // IMAGE — always a full URL, never a bare storage path
@@ -186,7 +295,7 @@ class ProductController extends Controller
             ->with([
                 'category:CategoryID,CategoryName',
                 'inventory:ProductID,QuantityOnHand,ReorderLevel',
-                'variants:VariantID,ProductID,Label,SellingPrice',
+                'variants:VariantID,ProductID,Label,SellingPrice,QuantityOnHand,ReorderLevel',
             ])
             ->orderBy('ProductID', 'desc')
             ->get()
@@ -217,7 +326,7 @@ class ProductController extends Controller
             ->with([
                 'category:CategoryID,CategoryName',
                 'inventory:ProductID,QuantityOnHand',
-                'variants:VariantID,ProductID,Label,SellingPrice,CostPrice',
+                'variants:VariantID,ProductID,Label,SellingPrice,CostPrice,QuantityOnHand,ReorderLevel',
             ])
             ->orderBy('ProductID', 'desc')
             ->paginate($perPage)
@@ -232,12 +341,14 @@ class ProductController extends Controller
                     'CategoryName' => $p->category->CategoryName ?? null,
                     'CategoryID'   => $p->CategoryID,
 
-                    // SIZES & PRICES (management view includes cost)
+                    // SIZES & PRICES (management view includes cost + stock)
                     'variants' => $p->variants->map(fn ($v) => [
                         'VariantID'    => $v->VariantID,
                         'Label'        => $v->Label,
                         'SellingPrice' => (float) $v->SellingPrice,
                         'CostPrice'    => (float) $v->CostPrice,
+                        'Stock'        => (int) $v->QuantityOnHand,
+                        'ReorderLevel' => (int) $v->ReorderLevel,
                     ])->values(),
 
                     // SPECIFICATIONS
@@ -297,13 +408,15 @@ class ProductController extends Controller
             'CostPrice'     => (float) $product->CostPrice,
             'IsReturnable'  => (bool) $product->IsReturnable,
 
-            // SIZES & PRICES (full detail incl. Specs, for the edit form)
+            // SIZES & PRICES (full detail incl. Specs + stock, for the edit form)
             'variants' => $product->variants->map(fn ($v) => [
                 'VariantID'    => $v->VariantID,
                 'Label'        => $v->Label,
                 'Specs'        => $v->Specs ?? [],
                 'SellingPrice' => (float) $v->SellingPrice,
                 'CostPrice'    => (float) $v->CostPrice,
+                'Stock'        => (int) $v->QuantityOnHand,
+                'ReorderLevel' => (int) $v->ReorderLevel,
             ])->values(),
 
             'Product_Image' => $product->Product_Image,
@@ -331,14 +444,20 @@ class ProductController extends Controller
         DB::beginTransaction();
 
         try {
-            // Throws a 422 ValidationException if sizes/prices are bad.
+            // Throws a 422 ValidationException if sizes/prices/stock are bad.
             // Caught separately below so it isn't turned into a 500.
             $variants = $this->parseVariants($request);
 
+            if ($variants === null) {
+                throw ValidationException::withMessages([
+                    'Variants' => 'Add at least one size and price.',
+                ]);
+            }
+
             // Backward-compat: the products table still has its own price
             // columns, so mirror the FIRST size's price into them.
-            $firstSell = $variants[0]['SellingPrice'] ?? $request->SellingPrice;
-            $firstCost = $variants[0]['CostPrice']    ?? $request->CostPrice;
+            $firstSell = $variants[0]['SellingPrice'];
+            $firstCost = $variants[0]['CostPrice'];
 
             $product = Product::create([
                 'ProductName'   => $request->ProductName,
@@ -370,28 +489,12 @@ class ProductController extends Controller
                     : null,
             ]);
 
-            // SIZES & PRICES
-            if ($variants) {
-                $this->syncVariants($product, $variants);
-            }
+            // SIZES, PRICES + PER-SIZE OPENING STOCK (+ one stock_in log per size)
+            $this->syncVariants($product, $variants);
 
-            // INVENTORY
-            $product->inventory()->create([
-                'QuantityOnHand' => $request->OpeningStock ?? 0,
-                'ReorderLevel'   => $request->ReorderLevel,
-                'LastUpdated'    => now(),
-            ]);
-
-            // LOG NEW PRODUCT / OPENING STOCK
-            DB::table('inventory_logs')->insert([
-                'ProductID'  => $product->ProductID,
-                'type'       => 'stock_in',
-                'quantity'   => $request->OpeningStock ?? 0,
-                'notes'      => 'New product added',
-                'created_by' => auth()->id() ?? null,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            // INVENTORY = product total (sum of the sizes' stock)
+            StockService::syncProductInventory($product->ProductID);
+            $totalOpening = (int) collect($variants)->sum('OpeningStock');
 
             // SUPPLIER
             if ($request->SupplierID) {
@@ -405,7 +508,7 @@ class ProductController extends Controller
                 'type'            => 'product_created',
                 'title'           => 'New Product Added',
                 'description'     => "\"{$product->ProductName}\" was added to inventory"
-                    . ($request->OpeningStock ? " with an opening stock of {$request->OpeningStock}." : '.'),
+                    . ($totalOpening > 0 ? " with an opening stock of {$totalOpening} across " . count($variants) . ' size(s).' : '.'),
                 'notifiable_type' => Product::class,
                 'notifiable_id'   => $product->ProductID,
                 'user_id'         => null,
@@ -495,22 +598,29 @@ class ProductController extends Controller
             }
 
             // INVENTORY UPDATE
-            $inventory = $product->inventory;
+            if ($variants !== null) {
+                // Per-size stock path: product total = sum of the sizes.
+                StockService::syncProductInventory($product->ProductID);
+            } else {
+                // Legacy path (an old edit form that sends no sizes). This
+                // changes the product total only and bypasses per-size stock.
+                $inventory = $product->inventory;
 
-            if (!$inventory) {
-                $inventory = $product->inventory()->create([
-                    'QuantityOnHand' => 0,
-                    'ReorderLevel'   => 0,
-                ]);
+                if (!$inventory) {
+                    $inventory = $product->inventory()->create([
+                        'QuantityOnHand' => 0,
+                        'ReorderLevel'   => 0,
+                    ]);
+                }
+
+                if ($request->stock_adjustment) {
+                    $inventory->QuantityOnHand += $request->stock_adjustment;
+                }
+
+                $inventory->ReorderLevel = $request->ReorderLevel;
+                $inventory->LastUpdated  = now();
+                $inventory->save();
             }
-
-            if ($request->stock_adjustment) {
-                $inventory->QuantityOnHand += $request->stock_adjustment;
-            }
-
-            $inventory->ReorderLevel = $request->ReorderLevel;
-            $inventory->LastUpdated  = now();
-            $inventory->save();
 
             DB::commit();
             return response()->json(['status' => 'success']);
@@ -532,43 +642,35 @@ class ProductController extends Controller
 
     /**
      * =========================================================
-     * RESTOCK PRODUCT
+     * RESTOCK PRODUCT (one size at a time)
      * =========================================================
+     * Body: { quantity, variant_id }
+     * variant_id may be omitted only when the product has a single size.
      */
     public function restock(Request $request, $id)
     {
         $request->validate([
-            'quantity' => 'required|integer|min:1',
+            'quantity'   => 'required|integer|min:1',
+            'variant_id' => 'nullable|integer',
         ]);
 
         DB::beginTransaction();
 
         try {
-            $product = Product::with('inventory')->findOrFail($id);
+            $product = Product::findOrFail($id);
 
-            $inventory = $product->inventory;
-
-            if (!$inventory) {
-                $inventory = $product->inventory()->create([
-                    'QuantityOnHand' => 0,
-                    'ReorderLevel'   => 0,
-                ]);
+            try {
+                $variant = StockService::add(
+                    (int) $product->ProductID,
+                    $request->filled('variant_id') ? (int) $request->variant_id : null,
+                    (int) $request->quantity
+                );
+            } catch (\RuntimeException $e) {
+                throw ValidationException::withMessages(['variant_id' => $e->getMessage()]);
             }
 
-            $inventory->QuantityOnHand += $request->quantity;
-            $inventory->LastUpdated = now();
-            $inventory->save();
-
-            // LOG STOCK IN
-            DB::table('inventory_logs')->insert([
-                'ProductID'  => $product->ProductID,
-                'type'       => 'stock_in',
-                'quantity'   => $request->quantity,
-                'notes'      => 'Manual restock',
-                'created_by' => auth()->id() ?? null,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            // LOG STOCK IN (tagged with the size)
+            $this->logStock($product, $variant, 'stock_in', (int) $request->quantity, 'Manual restock');
 
             DB::commit();
 
@@ -576,6 +678,13 @@ class ProductController extends Controller
                 'status' => 'success',
             ]);
 
+        } catch (ValidationException $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'status'  => 'error',
+                'message' => collect($e->errors())->flatten()->first(),
+            ], 422);
         } catch (\Exception $e) {
             DB::rollBack();
 
