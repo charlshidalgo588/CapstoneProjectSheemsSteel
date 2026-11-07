@@ -3,16 +3,22 @@
 namespace App\Http\Controllers;
 
 use App\Models\Sale;
-use App\Models\Product;
 use App\Models\Inventory;
+use App\Models\ProductVariant;
+use App\Services\StockService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class ReportsController extends Controller
 {
-    /** Item profit = (price at sale - cost at sale) * quantity. */
-    private const PROFIT_SQL = 'SUM((sales_items.PriceAtSale - COALESCE(sales_items.CostAtSale, 0)) * sales_items.Quantity)';
+    /**
+     * Item profit.
+     *  - cut-piece and leftover lines: AllocatedProfit (the proportional share booked on that line;
+     *    the cut and its leftover add up to the piece's full profit, counted once)
+     *  - every other line (and all older sales): (price at sale - cost at sale) * quantity
+     */
+    private const PROFIT_SQL = 'SUM(COALESCE(sales_items.AllocatedProfit, (sales_items.PriceAtSale - COALESCE(sales_items.CostAtSale, 0)) * sales_items.Quantity))';
 
     /** Shop sales = customer paid minus the worker's pass-through share of services. */
     private const NET_SALES_SQL = 'SUM(sales.TotalAmount - COALESCE(svc.worker_total, 0))';
@@ -28,119 +34,110 @@ class ReportsController extends Controller
         return DB::table('sales')->leftJoin($this->svcSub(), 'svc.SaleID', '=', 'sales.SaleID');
     }
 
+    private function itemsQuery(array $p)
+    {
+        return DB::table('sales_items')
+            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
+            ->whereBetween('sales.SaleDate', [$p['start'], $p['end']]);
+    }
+
+    private function servicesQuery(array $p)
+    {
+        return DB::table('sale_services')
+            ->join('sales', 'sale_services.SaleID', '=', 'sales.SaleID')
+            ->whereBetween('sales.SaleDate', [$p['start'], $p['end']]);
+    }
+
     /**
      * UNIFIED REPORTS ENDPOINT
      *   ?mode=month&year=2026&month=6   (default)
      *   ?mode=day&date=2026-06-14
+     *   ?mode=year&year=2026
+     *   &totals_only=1   -> just the sales total (previous-period comparison)
+     *   &include_sales=0 -> skip the transactions list
      */
     public function index(Request $request)
     {
         $mode = $request->query('mode', 'month');
-        $mode = in_array($mode, ['month', 'day']) ? $mode : 'month';
+        $mode = in_array($mode, ['day', 'month', 'year'], true) ? $mode : 'month';
 
-        if ($mode === 'day') {
-            return $this->dayReport($request);
+        $request->validate(['date' => ['nullable', 'date_format:Y-m-d']]);
+
+        $p = $this->resolvePeriod($request, $mode);
+
+        $totalSales = round((float) ($this->netSalesQuery()
+            ->whereBetween('sales.SaleDate', [$p['start'], $p['end']])
+            ->selectRaw(self::NET_SALES_SQL . ' as total')
+            ->value('total') ?? 0), 2);
+
+        if ($request->boolean('totals_only')) {
+            return response()->json([
+                'mode'            => $mode,
+                'selected_period' => $p['selected'],
+                'monthly_total'   => $totalSales,
+            ], 200);
         }
 
-        return $this->monthReport($request);
-    }
+        $itemsSold = (int) ($this->itemsQuery($p)->sum('sales_items.Quantity') ?? 0);
 
-    /** MONTH MODE */
-    private function monthReport(Request $request)
-    {
-        $year  = (int) $request->query('year', now()->year);
-        $month = (int) $request->query('month', now()->month);
-
-        $month = max(1, min($month, 12));
-        $year  = max(2000, min($year, (int) now()->year + 1));
-
-        $periodStart = Carbon::create($year, $month, 1)->startOfMonth();
-
-        $totalSales = $this->netSalesQuery()
-            ->whereYear('sales.SaleDate', $year)
-            ->whereMonth('sales.SaleDate', $month)
-            ->selectRaw(self::NET_SALES_SQL . ' as total')
-            ->value('total') ?? 0;
-
-        $itemsSold = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->whereYear('sales.SaleDate', $year)
-            ->whereMonth('sales.SaleDate', $month)
-            ->sum('sales_items.Quantity') ?? 0;
-
-        $transactions = Sale::whereYear('SaleDate', $year)
-            ->whereMonth('SaleDate', $month)
+        $transactions = DB::table('sales')
+            ->whereBetween('SaleDate', [$p['start'], $p['end']])
             ->count();
 
-        $itemProfit = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->whereYear('sales.SaleDate', $year)
-            ->whereMonth('sales.SaleDate', $month)
+        $itemProfit = (float) ($this->itemsQuery($p)
             ->selectRaw(self::PROFIT_SQL . ' as profit')
-            ->value('profit') ?? 0;
+            ->value('profit') ?? 0);
 
-        $serviceProfit = DB::table('sale_services')
-            ->join('sales', 'sale_services.SaleID', '=', 'sales.SaleID')
-            ->whereYear('sales.SaleDate', $year)
-            ->whereMonth('sales.SaleDate', $month)
-            ->sum('sale_services.OwnerAmount');
+        $serviceProfit = (float) $this->servicesQuery($p)->sum('sale_services.OwnerAmount');
 
-        $profit = round((float) $itemProfit + (float) $serviceProfit, 2);
+        $profit = round($itemProfit + $serviceProfit, 2);
 
+        $w = $p['words'];
         $salesActivity = [
-            ['label' => "This Month's Sales",      'value' => '₱' . number_format($totalSales, 2)],
-            ['label' => "Items Sold This Month",   'value' => (int) $itemsSold],
-            ['label' => "Transactions This Month", 'value' => (int) $transactions],
-            ['label' => "Monthly Profit",          'value' => '₱' . number_format($profit, 2)],
+            ['label' => $w['sales'],  'value' => '₱' . number_format($totalSales, 2)],
+            ['label' => $w['items'],  'value' => $itemsSold],
+            ['label' => $w['tx'],     'value' => (int) $transactions],
+            ['label' => $w['profit'], 'value' => '₱' . number_format($profit, 2)],
         ];
 
-        $topSelling = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
+        $topSelling = $this->itemsQuery($p)
             ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
             ->leftJoin('categories', 'products.CategoryID', '=', 'categories.CategoryID')
-            ->whereYear('sales.SaleDate', $year)
-            ->whereMonth('sales.SaleDate', $month)
             ->select(
+                'products.ProductID',
                 'products.ProductName',
                 DB::raw("COALESCE(categories.CategoryName, 'Uncategorized') as CategoryName"),
                 DB::raw('SUM(sales_items.Quantity) as total_quantity'),
                 DB::raw('SUM(sales_items.Quantity * sales_items.PriceAtSale) as total_sales')
             )
-            ->groupBy('products.ProductName', 'categories.CategoryName')
+            ->groupBy('products.ProductID', 'products.ProductName', 'categories.CategoryName')
             ->orderByDesc('total_quantity')
             ->get();
 
-        // --- DAILY SALES (shop's share) ---
+        // --- SERIES (hour / day / month buckets) ---
+        $bucket = $p['bucket'];
+
         $rawSales = $this->netSalesQuery()
-            ->whereYear('sales.SaleDate', $year)
-            ->whereMonth('sales.SaleDate', $month)
-            ->selectRaw('DATE(sales.SaleDate) as date, ' . self::NET_SALES_SQL . ' as total')
-            ->groupBy('date')
-            ->orderBy('date')
+            ->whereBetween('sales.SaleDate', [$p['start'], $p['end']])
+            ->selectRaw("$bucket as bucket, " . self::NET_SALES_SQL . ' as total')
+            ->groupBy('bucket')
             ->get()
-            ->keyBy('date');
+            ->keyBy(fn ($r) => (string) $r->bucket);
 
-        // --- DAILY PROFIT: items + services ---
-        $rawItemProfit = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->whereYear('sales.SaleDate', $year)
-            ->whereMonth('sales.SaleDate', $month)
-            ->selectRaw('DATE(sales.SaleDate) as date, ' . self::PROFIT_SQL . ' as profit')
-            ->groupBy('date')
+        $rawItemProfit = $this->itemsQuery($p)
+            ->selectRaw("$bucket as bucket, " . self::PROFIT_SQL . ' as profit')
+            ->groupBy('bucket')
             ->get()
-            ->keyBy('date');
+            ->keyBy(fn ($r) => (string) $r->bucket);
 
-        $rawServiceProfit = DB::table('sale_services')
-            ->join('sales', 'sale_services.SaleID', '=', 'sales.SaleID')
-            ->whereYear('sales.SaleDate', $year)
-            ->whereMonth('sales.SaleDate', $month)
-            ->selectRaw('DATE(sales.SaleDate) as date, SUM(sale_services.OwnerAmount) as profit')
-            ->groupBy('date')
+        $rawServiceProfit = $this->servicesQuery($p)
+            ->selectRaw("$bucket as bucket, SUM(sale_services.OwnerAmount) as profit")
+            ->groupBy('bucket')
             ->get()
-            ->keyBy('date');
+            ->keyBy(fn ($r) => (string) $r->bucket);
 
-        // Only dates that actually have a transaction, aligned index for index.
-        $transactionDates = $rawSales->keys()
+        // Only buckets that actually have a transaction, aligned index for index.
+        $keys = $rawSales->keys()
             ->merge($rawItemProfit->keys())
             ->merge($rawServiceProfit->keys())
             ->unique()
@@ -148,191 +145,167 @@ class ReportsController extends Controller
             ->values();
 
         $monthlySales = [];
-        $dailyProfit  = [];
+        $profitSeries = [];
 
-        foreach ($transactionDates as $date) {
-            $monthlySales[] = [
-                'date'  => $date,
-                'total' => $rawSales[$date]->total ?? 0,
-            ];
-
-            $dailyProfit[] = [
-                'date'   => $date,
-                'profit' => round(
-                    (float) ($rawItemProfit[$date]->profit ?? 0) + (float) ($rawServiceProfit[$date]->profit ?? 0),
-                    2
-                ),
-            ];
-        }
-
-        return response()->json([
-            'mode'              => 'month',
-            'selected_period'   => [
-                'year'  => $year,
-                'month' => $month,
-                'value' => sprintf('%04d-%02d', $year, $month),
-                'label' => $periodStart->format('F Y'),
-            ],
-            'sales_activity'    => $salesActivity,
-            'inventory_summary' => $this->inventorySummary(),
-            'top_selling'       => $topSelling,
-            'monthly_sales'     => $monthlySales,
-            'daily_profit'      => $dailyProfit,
-            'monthly_total'     => $totalSales,
-            'sales'             => $this->salesList(),
-        ], 200);
-    }
-
-    /** DAY MODE */
-    private function dayReport(Request $request)
-    {
-        $request->validate([
-            'date' => ['required', 'date_format:Y-m-d'],
-        ]);
-
-        $date = Carbon::createFromFormat('Y-m-d', $request->query('date'));
-
-        if ($date->isAfter(now()->endOfDay())) {
-            $date = now();
-        }
-
-        $totalSales = $this->netSalesQuery()
-            ->whereDate('sales.SaleDate', $date)
-            ->selectRaw(self::NET_SALES_SQL . ' as total')
-            ->value('total') ?? 0;
-
-        $itemsSold = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->whereDate('sales.SaleDate', $date)
-            ->sum('sales_items.Quantity') ?? 0;
-
-        $transactions = Sale::whereDate('SaleDate', $date)->count();
-
-        $itemProfit = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->whereDate('sales.SaleDate', $date)
-            ->selectRaw(self::PROFIT_SQL . ' as profit')
-            ->value('profit') ?? 0;
-
-        $serviceProfit = DB::table('sale_services')
-            ->join('sales', 'sale_services.SaleID', '=', 'sales.SaleID')
-            ->whereDate('sales.SaleDate', $date)
-            ->sum('sale_services.OwnerAmount');
-
-        $profit = round((float) $itemProfit + (float) $serviceProfit, 2);
-
-        $salesActivity = [
-            ['label' => "Sales This Day",        'value' => '₱' . number_format($totalSales, 2)],
-            ['label' => "Items Sold This Day",   'value' => (int) $itemsSold],
-            ['label' => "Transactions This Day", 'value' => (int) $transactions],
-            ['label' => "Profit This Day",       'value' => '₱' . number_format($profit, 2)],
-        ];
-
-        $topSelling = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
-            ->leftJoin('categories', 'products.CategoryID', '=', 'categories.CategoryID')
-            ->whereDate('sales.SaleDate', $date)
-            ->select(
-                'products.ProductName',
-                DB::raw("COALESCE(categories.CategoryName, 'Uncategorized') as CategoryName"),
-                DB::raw('SUM(sales_items.Quantity) as total_quantity'),
-                DB::raw('SUM(sales_items.Quantity * sales_items.PriceAtSale) as total_sales')
-            )
-            ->groupBy('products.ProductName', 'categories.CategoryName')
-            ->orderByDesc('total_quantity')
-            ->get();
-
-        // --- HOURLY SALES (shop's share) ---
-        $rawSales = $this->netSalesQuery()
-            ->whereDate('sales.SaleDate', $date)
-            ->selectRaw('HOUR(sales.SaleDate) as hour, ' . self::NET_SALES_SQL . ' as total')
-            ->groupBy('hour')
-            ->orderBy('hour')
-            ->get()
-            ->keyBy('hour');
-
-        // --- HOURLY PROFIT: items + services ---
-        $rawItemProfit = DB::table('sales_items')
-            ->join('sales', 'sales_items.SaleID', '=', 'sales.SaleID')
-            ->whereDate('sales.SaleDate', $date)
-            ->selectRaw('HOUR(sales.SaleDate) as hour, ' . self::PROFIT_SQL . ' as profit')
-            ->groupBy('hour')
-            ->get()
-            ->keyBy('hour');
-
-        $rawServiceProfit = DB::table('sale_services')
-            ->join('sales', 'sale_services.SaleID', '=', 'sales.SaleID')
-            ->whereDate('sales.SaleDate', $date)
-            ->selectRaw('HOUR(sales.SaleDate) as hour, SUM(sale_services.OwnerAmount) as profit')
-            ->groupBy('hour')
-            ->get()
-            ->keyBy('hour');
-
-        $transactionHours = $rawSales->keys()
-            ->merge($rawItemProfit->keys())
-            ->merge($rawServiceProfit->keys())
-            ->unique()
-            ->sort()
-            ->values();
-
-        $monthlySales = [];
-        $dailyProfit  = [];
-
-        foreach ($transactionHours as $hour) {
-            $label = sprintf('%02d:00', $hour);
+        foreach ($keys as $key) {
+            $label = $mode === 'day' ? sprintf('%02d:00', (int) $key) : $key;
 
             $monthlySales[] = [
                 'date'  => $label,
-                'total' => $rawSales[$hour]->total ?? 0,
+                'total' => round((float) ($rawSales[$key]->total ?? 0), 2),
             ];
 
-            $dailyProfit[] = [
+            $profitSeries[] = [
                 'date'   => $label,
                 'profit' => round(
-                    (float) ($rawItemProfit[$hour]->profit ?? 0) + (float) ($rawServiceProfit[$hour]->profit ?? 0),
+                    (float) ($rawItemProfit[$key]->profit ?? 0) + (float) ($rawServiceProfit[$key]->profit ?? 0),
                     2
                 ),
             ];
         }
 
-        return response()->json([
-            'mode'              => 'day',
-            'selected_period'   => [
-                'date'  => $date->format('Y-m-d'),
-                'value' => $date->format('Y-m-d'),
-                'label' => $date->format('F j, Y'),
-            ],
+        $payload = [
+            'mode'              => $mode,
+            'selected_period'   => $p['selected'],
             'sales_activity'    => $salesActivity,
             'inventory_summary' => $this->inventorySummary(),
             'top_selling'       => $topSelling,
             'monthly_sales'     => $monthlySales,
-            'daily_profit'      => $dailyProfit,
+            'monthly_profit'    => $profitSeries,
+            'daily_profit'      => $profitSeries,   // kept for older callers
             'monthly_total'     => $totalSales,
-            'sales'             => $this->salesList(),
-        ], 200);
+        ];
+
+        if ($request->boolean('include_sales', true)) {
+            $payload['sales'] = $this->salesList();
+        }
+
+        return response()->json($payload, 200);
+    }
+
+    /** Date range, bucket SQL, labels and response meta for the selected period. */
+    private function resolvePeriod(Request $request, string $mode): array
+    {
+        if ($mode === 'day') {
+            $date = Carbon::createFromFormat('Y-m-d', $request->query('date', now()->format('Y-m-d')))->startOfDay();
+            if ($date->isAfter(now())) {
+                $date = now()->startOfDay();
+            }
+
+            return [
+                'start'    => $date->copy()->startOfDay(),
+                'end'      => $date->copy()->endOfDay(),
+                'bucket'   => 'HOUR(sales.SaleDate)',
+                'selected' => [
+                    'date'  => $date->format('Y-m-d'),
+                    'value' => $date->format('Y-m-d'),
+                    'label' => $date->format('F j, Y'),
+                ],
+                'words'    => [
+                    'sales' => 'Sales This Day', 'items' => 'Items Sold This Day',
+                    'tx' => 'Transactions This Day', 'profit' => 'Profit This Day',
+                ],
+            ];
+        }
+
+        $year = max(2000, min((int) $request->query('year', now()->year), (int) now()->year + 1));
+
+        if ($mode === 'year') {
+            $start = Carbon::create($year, 1, 1)->startOfYear();
+
+            return [
+                'start'    => $start,
+                'end'      => $start->copy()->endOfYear(),
+                'bucket'   => "DATE_FORMAT(sales.SaleDate, '%Y-%m')",
+                'selected' => ['year' => $year, 'value' => (string) $year, 'label' => (string) $year],
+                'words'    => [
+                    'sales' => "This Year's Sales", 'items' => 'Items Sold This Year',
+                    'tx' => 'Transactions This Year', 'profit' => 'Yearly Profit',
+                ],
+            ];
+        }
+
+        $month = max(1, min((int) $request->query('month', now()->month), 12));
+        $start = Carbon::create($year, $month, 1)->startOfMonth();
+
+        return [
+            'start'    => $start,
+            'end'      => $start->copy()->endOfMonth(),
+            'bucket'   => 'DATE(sales.SaleDate)',
+            'selected' => [
+                'year'  => $year,
+                'month' => $month,
+                'value' => sprintf('%04d-%02d', $year, $month),
+                'label' => $start->format('F Y'),
+            ],
+            'words'    => [
+                'sales' => "This Month's Sales", 'items' => 'Items Sold This Month',
+                'tx' => 'Transactions This Month', 'profit' => 'Monthly Profit',
+            ],
+        ];
+    }
+
+    /**
+     * Stock counts, SIZE by SIZE (every size is its own item). Same rules as the Home dashboard.
+     *   out     = QuantityOnHand <= 0
+     *   low     = QuantityOnHand > 0 AND <= ReorderLevel (or the default when ReorderLevel is 0)
+     *   healthy = everything else
+     * "low" and "out" are SEPARATE and never overlap.
+     * A product that has no sizes at all counts as ONE item (its own inventory row).
+     */
+    private function stockSummary(): array
+    {
+        $default = StockService::DEFAULT_LOW_STOCK;
+        $limit   = 'CASE WHEN ReorderLevel > 0 THEN ReorderLevel ELSE ? END';
+
+        // --- sizes ---
+        $totalSizes = ProductVariant::count();
+
+        $outSizes = ProductVariant::where('QuantityOnHand', '<=', 0)->count();
+
+        $lowSizes = ProductVariant::where('QuantityOnHand', '>', 0)
+            ->whereRaw("QuantityOnHand <= {$limit}", [$default])
+            ->count();
+
+        // --- products without any size (legacy) ---
+        $legacy = DB::table('products')
+            ->join('inventories', 'products.ProductID', '=', 'inventories.ProductID')
+            ->whereNotExists(function ($q) {
+                $q->select(DB::raw(1))
+                  ->from('product_variants')
+                  ->whereColumn('product_variants.ProductID', 'products.ProductID');
+            });
+
+        $legacyTotal = (clone $legacy)->count();
+        $legacyOut   = (clone $legacy)->where('inventories.QuantityOnHand', '<=', 0)->count();
+        $legacyLow   = (clone $legacy)
+            ->where('inventories.QuantityOnHand', '>', 0)
+            ->whereColumn('inventories.QuantityOnHand', '<=', 'inventories.ReorderLevel')
+            ->count();
+
+        $total = $totalSizes + $legacyTotal;
+        $low   = $lowSizes + $legacyLow;
+        $out   = $outSizes + $legacyOut;
+
+        return [
+            'low'    => $low,
+            'out'    => $out,
+            'total'  => $total,
+            'active' => max($total - $low - $out, 0), // healthy items
+        ];
     }
 
     /** INVENTORY SUMMARY (point-in-time, not scoped to the period) */
     private function inventorySummary(): array
     {
-        $quantityInHand = Inventory::sum('QuantityOnHand');
-
-        $lowStock = DB::table('products')
-            ->join('inventories', 'products.ProductID', '=', 'inventories.ProductID')
-            ->whereColumn('inventories.QuantityOnHand', '<=', 'inventories.ReorderLevel')
-            ->count();
+        $s = $this->stockSummary();
 
         return [
-            ['label' => 'Quantity in Hand', 'value' => (int) $quantityInHand],
-            ['label' => 'Low Stock Items',  'value' => (int) $lowStock, 'isRed' => true],
-            ['label' => 'Total Items',      'value' => Product::count()],
-            [
-                'label' => 'Active Items',
-                'value' => Product::whereHas('inventory', fn ($q) =>
-                    $q->where('QuantityOnHand', '>', 0)
-                )->count(),
-            ],
+            ['key' => 'quantity', 'label' => 'Quantity in Hand',   'value' => (int) Inventory::sum('QuantityOnHand')],
+            ['key' => 'low',      'label' => 'Low Stock Items',    'value' => (int) $s['low'],   'isWarn' => true],
+            ['key' => 'out',      'label' => 'Out of Stock Items', 'value' => (int) $s['out'],   'isRed' => true],
+            ['key' => 'total',    'label' => 'Total Items',        'value' => (int) $s['total']],
+            ['key' => 'active',   'label' => 'Active Items',       'value' => (int) $s['active']],
         ];
     }
 

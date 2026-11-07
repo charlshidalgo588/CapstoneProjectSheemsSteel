@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Sale;
 use App\Models\Product;
 use App\Models\Inventory;
+use App\Models\ProductVariant;
+use App\Services\StockService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -32,6 +34,61 @@ class HomeController extends Controller
         return DB::table('sales')->leftJoin($this->svcSub(), 'svc.SaleID', '=', 'sales.SaleID');
     }
 
+    /**
+     * Stock counts, SIZE by SIZE (every size is its own item).
+     *   out     = QuantityOnHand <= 0
+     *   low     = QuantityOnHand > 0 AND <= ReorderLevel (or 5 when ReorderLevel is 0)
+     *   healthy = everything else
+     * "low" and "out" are SEPARATE and never overlap.
+     * A product that has no sizes at all counts as ONE item (its own inventory row).
+     */
+    private function stockSummary(): array
+    {
+        $default = StockService::DEFAULT_LOW_STOCK;
+        $limit   = 'CASE WHEN ReorderLevel > 0 THEN ReorderLevel ELSE ? END';
+
+        // --- sizes ---
+        $totalSizes = ProductVariant::count();
+
+        $outSizes = ProductVariant::where('QuantityOnHand', '<=', 0)->count();
+
+        $lowSizes = ProductVariant::where('QuantityOnHand', '>', 0)
+            ->whereRaw("QuantityOnHand <= {$limit}", [$default])
+            ->count();
+
+        // --- products without any size (legacy) ---
+        $legacy = DB::table('products')
+            ->join('inventories', 'products.ProductID', '=', 'inventories.ProductID')
+            ->whereNotExists(function ($q) {
+                $q->select(DB::raw(1))
+                  ->from('product_variants')
+                  ->whereColumn('product_variants.ProductID', 'products.ProductID');
+            });
+
+        $legacyTotal = (clone $legacy)->count();
+        $legacyOut   = (clone $legacy)->where('inventories.QuantityOnHand', '<=', 0)->count();
+        $legacyLow   = (clone $legacy)
+            ->where('inventories.QuantityOnHand', '>', 0)
+            ->whereColumn('inventories.QuantityOnHand', '<=', 'inventories.ReorderLevel')
+            ->count();
+
+        $total = $totalSizes + $legacyTotal;
+        $low   = $lowSizes + $legacyLow;
+        $out   = $outSizes + $legacyOut;
+        $needs = $low + $out;
+
+        return [
+            'low_stock_items'      => $low,                     // running low (NOT zero)
+            'out_of_stock_items'   => $out,                     // zero stock
+            'needs_restock_items'  => $needs,                   // low + out
+            'total_items'          => $total,                   // every size
+            'active_items'         => max($total - $needs, 0),  // healthy sizes
+            'products_to_restock'  => Product::whereHas('variants', function ($v) use ($default, $limit) {
+                $v->whereRaw("QuantityOnHand <= {$limit}", [$default]);
+            })->count(),
+        ];
+    }
+
     public function dashboard(Request $request)
     {
         $today = Carbon::today();
@@ -49,21 +106,11 @@ class HomeController extends Controller
 
         $transactionsToday = Sale::whereDate('SaleDate', $today)->count();
 
-        // --- INVENTORY SUMMARY -----------------------------------------------
-        $inventorySummary = [
+        // --- INVENTORY SUMMARY (per size) ------------------------------------
+        $inventorySummary = array_merge([
             'quantity_in_hand'    => Inventory::sum('QuantityOnHand'),
             'quantity_to_receive' => 0,
-
-            'low_stock_items'     => DB::table('products')
-                ->join('inventories', 'products.ProductID', '=', 'inventories.ProductID')
-                ->whereColumn('inventories.QuantityOnHand', '<=', 'inventories.ReorderLevel')
-                ->count(),
-
-            'total_items'         => Product::count(),
-            'active_items'        => Product::whereHas('inventory', function ($q) {
-                $q->where('QuantityOnHand', '>', 0);
-            })->count(),
-        ];
+        ], $this->stockSummary());
 
         // --- DATE RANGE HANDLING ---------------------------------------------
         $dateRange = $request->input('date_range', 'this_month');

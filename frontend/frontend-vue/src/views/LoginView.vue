@@ -5,7 +5,7 @@
     <header class="lw-nav">
       <div class="lw-nav-inner">
         <div class="lw-brand">
-          <img src="@/assets/cutout_logo.png" alt="Shem Steel logo" class="lw-logo-img" />
+          <img src="@/assets/sheems_logo.png" alt="Shem Steel logo" class="lw-logo-img" />
           <div class="lw-brand-text">
             <div class="lw-brand-name">Shem Steel</div>
             <div class="lw-brand-sub">Construction Company</div>

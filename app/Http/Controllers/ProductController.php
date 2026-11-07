@@ -16,6 +16,27 @@ class ProductController extends Controller
 {
     /**
      * =========================================================
+     * SKU HELPER
+     * =========================================================
+     * Builds the next SKU for a product name, e.g. "Tiger Steel" → TIG-00001.
+     * Used by generateSku() AND by update() when a product has no SKU.
+     */
+    private function makeSku(?string $name): string
+    {
+        $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', (string) $name), 0, 3));
+        $prefix = str_pad($prefix, 3, 'X');
+
+        $lastSku = Product::where('SKU', 'LIKE', "{$prefix}-%")
+            ->orderBy('SKU', 'desc')
+            ->value('SKU');
+
+        $next = $lastSku ? (intval(substr($lastSku, 4)) + 1) : 1;
+
+        return sprintf('%s-%05d', $prefix, $next);
+    }
+
+    /**
+     * =========================================================
      * VARIANT HELPERS
      * =========================================================
      * ProductCreate.vue sends `Variants` as a JSON string:
@@ -463,7 +484,8 @@ class ProductController extends Controller
                 'ProductName'   => $request->ProductName,
                 'Unit'          => $request->Unit,
                 'CategoryID'    => $request->CategoryID,
-                'SKU'           => $request->SKU,
+                // Use the submitted SKU, or auto-generate one if it's empty.
+                'SKU'           => $request->filled('SKU') ? $request->SKU : $this->makeSku($request->ProductName),
                 'Barcode'       => $request->filled('Barcode') ? $request->Barcode : null,
                 'Brand'         => $request->Brand,
                 'Description'   => $request->Description,
@@ -558,7 +580,9 @@ class ProductController extends Controller
                 'ProductName'  => $request->ProductName,
                 'Unit'         => $request->Unit,
                 'CategoryID'   => $request->CategoryID,
-                'SKU'          => $request->SKU,
+                // SKU is locked in the edit form and never sent. Keep the stored
+                // one; if it's empty (e.g. wiped earlier), generate a new one.
+                'SKU'          => $product->SKU ?: $this->makeSku($request->ProductName ?? $product->ProductName),
                 'Barcode'      => $request->filled('Barcode') ? $request->Barcode : null,
                 'Brand'        => $request->Brand,
                 'Description'  => $request->Description,
@@ -727,19 +751,8 @@ class ProductController extends Controller
             return response()->json(['sku' => '']);
         }
 
-        $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 3));
-        $prefix = str_pad($prefix, 3, 'X');
-
-        $lastSku = Product::where('SKU', 'LIKE', "{$prefix}-%")
-            ->orderBy('SKU', 'desc')
-            ->value('SKU');
-
-        $nextNumber = $lastSku
-            ? (intval(substr($lastSku, 4)) + 1)
-            : 1;
-
         return response()->json([
-            'sku' => sprintf("%s-%05d", $prefix, $nextNumber)
+            'sku' => $this->makeSku($name)
         ]);
     }
 

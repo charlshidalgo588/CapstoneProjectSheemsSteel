@@ -113,8 +113,11 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::
     |--------------------------------------------------------------------------
     */
 
-    // 🟦 Inventory Logs JSON (logs, summary, services, leftover pieces)
+    // 🟦 Inventory Logs JSON (logs, summary, services)
     Route::get('/inventory/logs', [InventoryLogController::class, 'index']);
+
+    // 🟦 Leftover pieces list for the Inventory (Product List) page
+    Route::get('/inventory/remnants', [InventoryLogController::class, 'remnants']);
 
     // 🟦 Leftover pieces: mark used / scrapped / available (also writes a history row)
     Route::patch('/inventory/remnants/{id}', [InventoryLogController::class, 'updateRemnant']);

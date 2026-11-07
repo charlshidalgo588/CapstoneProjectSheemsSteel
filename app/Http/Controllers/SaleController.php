@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\InventoryLog;
 use App\Models\Notification;
+use App\Services\ProfitAllocator;
 use App\Services\StockService;
 use App\Services\SaleTracker;
 
@@ -30,6 +31,12 @@ class SaleController extends Controller
      * Deducts stock PER SIZE through StockService, writes the inventory log
      * (with cut-piece details), sells leftover pieces from product_remnants
      * and records any extra services.
+     *
+     * PROFIT ALLOCATION (all computed here, never trusted from the browser):
+     *  - cut line      : books only (length sold / full length) of the piece's expected
+     *                    profit; the rest is saved on the new remnant.
+     *  - remnant line  : books the remnant's SAVED remaining cost + profit (proportional
+     *                    when only some of its pieces are sold), not the current cost.
      */
     public function processSale(Request $request)
     {
@@ -50,7 +57,7 @@ class SaleController extends Controller
                 'items.*.price'      => 'required|numeric|min:0',
                 'items.*.original_price' => 'nullable|numeric|min:0',   // list price before a cut / custom price
 
-                // Cut pieces: needed so the cost is only the share that was sold.
+                // Cut pieces: needed so cost and profit are only the share that was sold.
                 'items.*.cut'              => 'nullable|array',
                 'items.*.cut.full_length'  => 'required_with:items.*.cut|numeric|gt:0',
                 'items.*.cut.sold_length'  => 'required_with:items.*.cut|numeric|gt:0',
@@ -121,39 +128,57 @@ class SaleController extends Controller
                 }
 
                 $product = Product::findOrFail($item['product_id']);
+                $qty     = (int) $item['quantity'];
+                $cut     = $item['cut'] ?? null;
+
+                if (is_array($cut) && (float) ($cut['sold_length'] ?? 0) > (float) ($cut['full_length'] ?? 0)) {
+                    throw new \RuntimeException('The length sold cannot be longer than the full piece.');
+                }
 
                 $variant = StockService::deduct(
                     (int) $item['product_id'],
                     isset($item['variant_id']) ? (int) $item['variant_id'] : null,
-                    (int) $item['quantity'],
+                    $qty,
                     $product->ProductName
                 );
 
+                $unitCost = (float) ($variant->CostPrice ?? $product->CostPrice ?? 0);
+
+                // List price comes from the database; the browser's value is only a fallback.
+                $listPrice = (float) ($variant->SellingPrice
+                    ?? $product->SellingPrice
+                    ?? ($item['original_price'] ?? $item['price']));
+
+                // Cut piece -> book only the proportional share; the rest goes to the remnant.
+                $alloc = ProfitAllocator::forCut($qty, $unitCost, $listPrice, $cut);
+
                 $sale->salesItems()->create([
-                    'ProductID'    => $item['product_id'],
-                    'VariantID'    => $variant->VariantID,
-                    'VariantLabel' => $variant->Label,
-                    'Quantity'     => $item['quantity'],
-                    'PriceAtSale'  => $item['price'],
-                    // Cost snapshot (cut pieces only carry their share of the cost).
-                    'CostAtSale'   => SalesItem::costFor(
-                        (float) ($variant->CostPrice ?? $product->CostPrice ?? 0),
-                        $item['cut'] ?? null
-                    ),
+                    'ProductID'       => $item['product_id'],
+                    'VariantID'       => $variant->VariantID,
+                    'VariantLabel'    => $variant->Label,
+                    'Quantity'        => $qty,
+                    'PriceAtSale'     => $item['price'],
+                    // Cost snapshot per unit (cut pieces only carry their share of the cost).
+                    'CostAtSale'      => $alloc
+                        ? ProfitAllocator::money($alloc['sold_cost'] / $qty)
+                        : SalesItem::costFor($unitCost, $cut),
+                    // Line totals used by the reports (NULL = normal line, legacy formula).
+                    'AllocatedCost'   => $alloc['sold_cost']   ?? null,
+                    'AllocatedProfit' => $alloc['sold_profit'] ?? null,
                 ]);
 
                 Transaction::create([
                     'ProductID'       => $item['product_id'],
                     'TransactionType' => 'SALE',
-                    'QuantityChange'  => -$item['quantity'],
+                    'QuantityChange'  => -$qty,
                     'UnitPrice'       => $item['price'],
-                    'TotalAmount'     => $item['quantity'] * $item['price'],
+                    'TotalAmount'     => $qty * $item['price'],
                     'ReferenceID'     => $sale->SaleID,
                     'TransactionDate' => now(),
                 ]);
 
-                // Inventory log (+ offcut when the line was a cut piece)
-                SaleTracker::logItem($sale->SaleID, $item, $variant, $product, Auth::id());
+                // Inventory log (+ offcut carrying the remaining cost/profit when the line was a cut piece)
+                SaleTracker::logItem($sale->SaleID, $item, $variant, $product, Auth::id(), $alloc);
             }
 
             SaleService::record($sale->SaleID, $request->services ?? []);
@@ -214,6 +239,13 @@ class SaleController extends Controller
      * Sells (part of) a leftover piece. Whole-piece stock is NOT touched: it already
      * left stock when the cut was sold. Runs inside processSale()'s transaction,
      * so any failure rolls the whole sale back.
+     *
+     * PROFIT: the remnant row is locked (lockForUpdate) and holds the cost + profit
+     * that the cut sale did not book. Selling `qty` of its `have` pieces books
+     * qty/have of that balance (the last pieces take whatever is left, to the cent) and
+     * the unsold balance stays on the row. Because the balance is consumed in the same
+     * locked transaction, the same allocated profit can never be booked twice.
+     * Rows without a saved balance (older leftovers) keep the previous behaviour.
      */
     private function sellRemnant(Sale $sale, array $item): void
     {
@@ -234,13 +266,11 @@ class SaleController extends Controller
         if ($qty > $have) {
             throw new \RuntimeException("Only {$have} of that leftover piece is available.");
         }
+        if ((float) $item['price'] <= 0) {
+            throw new \RuntimeException('Set a price for the leftover piece before selling it.');
+        }
 
         $left = $have - $qty;
-        DB::table('product_remnants')->where('RemnantID', $rem->RemnantID)->update([
-            'Quantity'   => $left,
-            'Status'     => $left > 0 ? 'available' : 'used',
-            'updated_at' => now(),
-        ]);
 
         $product      = Product::findOrFail($rem->ProductID);
         $variantTable = $this->variantTable();
@@ -248,21 +278,52 @@ class SaleController extends Controller
             ? DB::table($variantTable)->where('VariantID', $rem->VariantID)->first()
             : null;
 
-        // Cost = the share of the piece this leftover represents. The cut sale only booked
-        // the cost of the part sold, so the two add up to one full piece.
-        $unitCost = (float) ($variant->CostPrice ?? $product->CostPrice ?? 0);
-        $fullLen  = (float) ($rem->FullLength ?? 0);
-        $cost = $fullLen > 0
-            ? SalesItem::costFor($unitCost, ['full_length' => $fullLen, 'sold_length' => (float) $rem->Length])
-            : 0;
+        $update = [
+            'Quantity'   => $left,
+            'Status'     => $left > 0 ? 'available' : 'used',
+            'updated_at' => now(),
+        ];
+
+        $hasAllocation = $rem->RemainingCost !== null && $rem->RemainingProfit !== null;
+
+        if ($hasAllocation) {
+            // Use the SAVED balance, not the product's current cost.
+            $alloc = ProfitAllocator::forRemnantUnits(
+                (float) $rem->RemainingCost,
+                (float) $rem->RemainingProfit,
+                $have,
+                $qty
+            );
+
+            $lineCost   = $alloc['sold_cost'];
+            $lineProfit = $alloc['sold_profit'];
+            $unitCost   = ProfitAllocator::money($lineCost / $qty);
+
+            $update['RemainingCost']   = $alloc['rest_cost'];
+            $update['RemainingProfit'] = $alloc['rest_profit'];
+        } else {
+            // Legacy leftover (no saved balance): cost = share of the piece it represents,
+            // profit falls back to (price - cost) x qty in the reports.
+            $baseCost = (float) ($variant->CostPrice ?? $product->CostPrice ?? 0);
+            $fullLen  = (float) ($rem->FullLength ?? 0);
+            $unitCost = $fullLen > 0
+                ? SalesItem::costFor($baseCost, ['full_length' => $fullLen, 'sold_length' => (float) $rem->Length])
+                : 0;
+            $lineCost   = null;
+            $lineProfit = null;
+        }
+
+        DB::table('product_remnants')->where('RemnantID', $rem->RemnantID)->update($update);
 
         $line = $sale->salesItems()->make([
-            'ProductID'    => $rem->ProductID,
-            'VariantID'    => $rem->VariantID,
-            'VariantLabel' => $rem->VariantLabel ?? ($variant->Label ?? null),
-            'Quantity'     => $qty,
-            'PriceAtSale'  => $item['price'],
-            'CostAtSale'   => $cost,
+            'ProductID'       => $rem->ProductID,
+            'VariantID'       => $rem->VariantID,
+            'VariantLabel'    => $rem->VariantLabel ?? ($variant->Label ?? null),
+            'Quantity'        => $qty,
+            'PriceAtSale'     => $item['price'],
+            'CostAtSale'      => $unitCost,
+            'AllocatedCost'   => $lineCost,
+            'AllocatedProfit' => $lineProfit,
         ]);
 
         // Remember which leftover this line sold (needs the RemnantID migration).
@@ -300,7 +361,8 @@ class SaleController extends Controller
 
     /**
      * Undo one sold line when a sale is deleted.
-     * - Leftover line: the leftover goes back to available (no whole-piece stock change).
+     * - Leftover line: the leftover goes back to available AND gets its cost/profit
+     *   balance back (no whole-piece stock change).
      * - Normal line: whole-piece stock is restored and a stock_in row is logged.
      */
     private function rollbackItem(Sale $sale, $item, string $note, ?int $userId): void
@@ -308,11 +370,21 @@ class SaleController extends Controller
         if (!empty($item->RemnantID)) {
             $rem = DB::table('product_remnants')->where('RemnantID', $item->RemnantID)->lockForUpdate()->first();
             if ($rem) {
-                DB::table('product_remnants')->where('RemnantID', $rem->RemnantID)->update([
+                $update = [
                     'Quantity'   => (int) $rem->Quantity + (int) $item->Quantity,
                     'Status'     => 'available',
                     'updated_at' => now(),
-                ]);
+                ];
+
+                // Give back exactly what this line consumed (only for allocated lines).
+                if ($item->AllocatedCost !== null && $rem->RemainingCost !== null) {
+                    $update['RemainingCost'] = ProfitAllocator::money((float) $rem->RemainingCost + (float) $item->AllocatedCost);
+                }
+                if ($item->AllocatedProfit !== null && $rem->RemainingProfit !== null) {
+                    $update['RemainingProfit'] = ProfitAllocator::money((float) $rem->RemainingProfit + (float) $item->AllocatedProfit);
+                }
+
+                DB::table('product_remnants')->where('RemnantID', $rem->RemnantID)->update($update);
             }
             return;
         }

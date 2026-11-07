@@ -7,361 +7,422 @@
         <div>
           <p class="page-eyebrow">Inventory</p>
           <h1 class="page-title">Add New Item</h1>
+          <p class="page-sub">Fill in the details, add at least one size, then save. Press <kbd class="kbd-hint">Ctrl</kbd> + <kbd class="kbd-hint">S</kbd> any time.</p>
         </div>
         <RouterLink to="/products" class="btn btn--ghost">
           <i class="fa-solid fa-arrow-left"></i> Back to List
         </RouterLink>
       </div>
 
-      <!-- ── ALERTS ── -->
-      <transition name="alert-fade">
-        <div v-if="errorMessage" class="alert alert--error">
-          <i class="fa-solid fa-circle-exclamation"></i>
-          <span>{{ errorMessage }}</span>
-          <button class="alert-close" @click="errorMessage = ''"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-      </transition>
-      <transition name="alert-fade">
-        <div v-if="successMessage" class="alert alert--success">
-          <i class="fa-solid fa-circle-check"></i>
-          <span>{{ successMessage }}</span>
-        </div>
-      </transition>
-
-      <!-- ══ BASIC INFORMATION ══ -->
-      <div class="form-card">
-        <div class="form-card-header">
-          <div class="form-card-icon form-card-icon--blue">
-            <i class="fa-solid fa-tag"></i>
+      <!-- ── FLOATING TOASTS (always visible, even when scrolled) ── -->
+      <div class="toast-stack" aria-live="polite">
+        <transition name="alert-fade">
+          <div v-if="errorMessage" class="alert alert--error" role="alert">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span>{{ errorMessage }}</span>
+            <button type="button" class="alert-close" @click="errorMessage = ''" aria-label="Dismiss"><i class="fa-solid fa-xmark"></i></button>
           </div>
-          <div>
-            <h2 class="form-card-title">Basic Information</h2>
-            <p class="form-card-sub">Name, SKU, unit and return policy.</p>
+        </transition>
+        <transition name="alert-fade">
+          <div v-if="successMessage" class="alert alert--success" role="status">
+            <i class="fa-solid fa-circle-check"></i>
+            <span>{{ successMessage }}</span>
           </div>
-        </div>
-        <div class="form-card-body">
-          <div class="form-grid-2">
-            <!-- Left column -->
-            <div class="form-stack">
-              <div class="form-field">
-                <label class="form-label">Product Name <span class="req">*</span></label>
-                <div class="input-wrap">
-                  <i class="fa-solid fa-cube input-icon"></i>
-                  <input
-                    v-model="form.ProductName"
-                    type="text"
-                    class="form-input"
-                    placeholder="e.g. Corrugated Steel Sheet"
-                    required
-                    @blur="generateSku"
-                  />
-                </div>
-              </div>
+        </transition>
+      </div>
 
-              <div class="form-field">
-                <label class="form-label">SKU</label>
-                <div class="input-wrap">
-                  <i class="fa-solid fa-barcode input-icon"></i>
-                  <input :value="form.SKU" disabled class="form-input form-input--disabled" placeholder="Auto-generated" />
-                </div>
-                <p class="form-hint">SKU is automatically generated from the product name.</p>
-              </div>
+      <form ref="formEl" class="create-form" @submit.prevent="saveProduct" @keydown.enter="blockEnterSubmit">
 
-              <!-- ══ BARCODE ══ -->
-              <div class="form-field">
-                <label class="form-label">Barcode</label>
-                <div class="input-wrap barcode-input-wrap">
-                  <i class="fa-solid fa-barcode input-icon"></i>
-                  <input
-                    v-model="form.Barcode"
-                    type="text"
-                    class="form-input barcode-input"
-                    placeholder="Scan or type manually"
-                  />
+        <!-- ══ BASIC INFORMATION ══ -->
+        <div class="form-card">
+          <div class="form-card-header">
+            <div class="form-card-icon form-card-icon--blue">
+              <i class="fa-solid fa-tag"></i>
+            </div>
+            <div>
+              <h2 class="form-card-title">Basic Information</h2>
+              <p class="form-card-sub">Name, SKU, unit and return policy.</p>
+            </div>
+          </div>
+          <div class="form-card-body">
+            <div class="form-grid-2">
+              <!-- Left column -->
+              <div class="form-stack">
+                <div class="form-field">
+                  <label class="form-label" for="c-name">Product Name <span class="req">*</span></label>
+                  <div class="input-wrap">
+                    <i class="fa-solid fa-cube input-icon"></i>
+                    <input
+                      id="c-name"
+                      v-model="form.ProductName"
+                      type="text"
+                      class="form-input"
+                      placeholder="e.g. Corrugated Steel Sheet"
+                      required
+                      @blur="generateSku"
+                    />
+                  </div>
+                </div>
+
+                <div class="form-field">
+                  <label class="form-label" for="c-sku">SKU</label>
+                  <div class="input-wrap">
+                    <i class="fa-solid fa-barcode input-icon"></i>
+                    <input id="c-sku" :value="form.SKU" disabled class="form-input form-input--disabled" placeholder="Auto-generated" />
+                  </div>
+                  <p class="form-hint">SKU is automatically generated from the product name.</p>
+                </div>
+
+                <!-- ══ BARCODE ══ -->
+                <div class="form-field">
+                  <label class="form-label" for="c-barcode">Barcode</label>
+                  <div class="input-wrap barcode-input-wrap">
+                    <i class="fa-solid fa-barcode input-icon"></i>
+                    <input
+                      id="c-barcode"
+                      v-model="form.Barcode"
+                      type="text"
+                      class="form-input barcode-input"
+                      placeholder="Scan or type manually"
+                    />
+                    <button
+                      type="button"
+                      class="barcode-scan-btn"
+                      @click="openBarcodeScanner"
+                      title="Scan Barcode"
+                      aria-label="Scan barcode with camera or USB scanner"
+                    >
+                      <i class="fa-solid fa-camera"></i>
+                    </button>
+                  </div>
+                  <p v-if="checkingBarcode" class="form-hint">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Checking barcode…
+                  </p>
+                  <p v-else-if="barcodeDuplicate" class="form-hint form-hint--error">
+                    <i class="fa-solid fa-triangle-exclamation"></i> This barcode is already in use by another product.
+                  </p>
+                </div>
+
+                <div class="form-field">
+                  <label class="form-label" for="c-unit">Unit <span class="req">*</span></label>
+                  <div class="select-wrap">
+                    <i class="fa-solid fa-scale-balanced input-icon"></i>
+                    <select id="c-unit" v-model="form.Unit" class="form-select" required>
+                      <option value="">Select Unit</option>
+                      <option v-for="u in units" :key="u" :value="u">{{ u }}</option>
+                    </select>
+                    <i class="fa-solid fa-chevron-down select-caret"></i>
+                  </div>
+                </div>
+
+                <div class="toggle-row" @click="form.IsReturnable = !form.IsReturnable">
                   <button
                     type="button"
-                    class="barcode-scan-btn"
-                    @click="openBarcodeScanner"
-                    title="Scan Barcode"
+                    role="switch"
+                    class="toggle-track"
+                    :class="{ 'toggle-track--on': form.IsReturnable }"
+                    :aria-checked="form.IsReturnable"
+                    aria-label="Returnable item"
+                    @click.stop="form.IsReturnable = !form.IsReturnable"
                   >
-                    <i class="fa-solid fa-camera"></i>
+                    <span class="toggle-thumb" :class="{ 'toggle-thumb--on': form.IsReturnable }"></span>
                   </button>
+                  <div>
+                    <p class="toggle-label">Returnable Item</p>
+                    <p class="toggle-sub">Allow this product to be returned after sale.</p>
+                  </div>
                 </div>
-                <p v-if="checkingBarcode" class="form-hint">
-                  <i class="fa-solid fa-spinner fa-spin"></i> Checking barcode…
-                </p>
-                <p v-else-if="barcodeDuplicate" class="form-hint form-hint--error">
-                  <i class="fa-solid fa-triangle-exclamation"></i> This barcode is already in use by another product.
-                </p>
               </div>
 
+              <!-- Image upload -->
               <div class="form-field">
-                <label class="form-label">Unit <span class="req">*</span></label>
+                <label class="form-label">Product Image</label>
+                <div
+                  class="upload-zone"
+                  :class="{ 'upload-zone--has-image': preview, 'upload-zone--drag': dragging }"
+                  @dragover.prevent="dragging = true"
+                  @dragleave.prevent="dragging = false"
+                  @drop.prevent="onDrop"
+                >
+                  <img v-if="preview" :src="preview" class="upload-preview" alt="Product image preview" />
+                  <div v-else class="upload-placeholder">
+                    <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                    <p class="upload-text">Click to upload or drag here</p>
+                    <p class="upload-hint">PNG / JPG · Max 5 MB</p>
+                  </div>
+                  <span v-if="preview" class="upload-change"><i class="fa-solid fa-camera"></i> Change</span>
+                  <input ref="fileInput" type="file" accept="image/*" class="upload-input" aria-label="Upload product image" @change="uploadImage" />
+                </div>
+                <button v-if="preview" type="button" class="upload-remove" @click="removeImage">
+                  <i class="fa-solid fa-xmark"></i> Remove image
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ CLASSIFICATION ══ -->
+        <div class="form-card">
+          <div class="form-card-header">
+            <div class="form-card-icon form-card-icon--violet">
+              <i class="fa-solid fa-layer-group"></i>
+            </div>
+            <div>
+              <h2 class="form-card-title">Classification</h2>
+              <p class="form-card-sub">Category and supplier assignment.</p>
+            </div>
+          </div>
+          <div class="form-card-body">
+            <div class="form-grid-2">
+              <div class="form-field">
+                <label class="form-label" for="c-cat">Category <span class="req">*</span></label>
                 <div class="select-wrap">
-                  <i class="fa-solid fa-scale-balanced input-icon"></i>
-                  <select v-model="form.Unit" class="form-select" required>
-                    <option value="">Select Unit</option>
-                    <option v-for="u in units" :key="u" :value="u">{{ u }}</option>
+                  <i class="fa-solid fa-folder input-icon"></i>
+                  <select id="c-cat" v-model="form.CategoryID" class="form-select" required>
+                    <option value="">Select Category</option>
+                    <option v-for="c in categories" :key="c.CategoryID" :value="c.CategoryID">{{ c.CategoryName }}</option>
                   </select>
                   <i class="fa-solid fa-chevron-down select-caret"></i>
                 </div>
               </div>
-
-              <label class="toggle-row">
-                <div class="toggle-track" :class="{ 'toggle-track--on': form.IsReturnable }" @click="form.IsReturnable = !form.IsReturnable">
-                  <div class="toggle-thumb" :class="{ 'toggle-thumb--on': form.IsReturnable }"></div>
+              <div class="form-field">
+                <label class="form-label" for="c-sup">Supplier</label>
+                <div class="select-wrap">
+                  <i class="fa-solid fa-truck-field input-icon"></i>
+                  <select id="c-sup" v-model="form.SupplierID" class="form-select">
+                    <option value="">Select Supplier</option>
+                    <option v-for="s in suppliers" :key="s.SupplierID" :value="s.SupplierID">{{ s.SupplierName }}</option>
+                  </select>
+                  <i class="fa-solid fa-chevron-down select-caret"></i>
                 </div>
-                <div>
-                  <p class="toggle-label">Returnable Item</p>
-                  <p class="toggle-sub">Allow this product to be returned after sale.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ PRODUCT DETAILS ══ -->
+        <div class="form-card">
+          <div class="form-card-header">
+            <div class="form-card-icon form-card-icon--green">
+              <i class="fa-solid fa-circle-info"></i>
+            </div>
+            <div>
+              <h2 class="form-card-title">Product Details</h2>
+              <p class="form-card-sub">Brand, description, material and finish.</p>
+            </div>
+          </div>
+          <div class="form-card-body">
+            <div class="form-grid-2">
+              <div class="form-field">
+                <label class="form-label" for="c-brand">Brand</label>
+                <div class="input-wrap">
+                  <i class="fa-solid fa-registered input-icon"></i>
+                  <input id="c-brand" v-model="form.Brand" type="text" class="form-input" placeholder="e.g. Tiger Steel" />
                 </div>
-              </label>
-            </div>
-
-            <!-- Image upload -->
-            <div class="form-field">
-              <label class="form-label">Product Image</label>
-              <div class="upload-zone" :class="{ 'upload-zone--has-image': preview }">
-                <img v-if="preview" :src="preview" class="upload-preview" />
-                <div v-else class="upload-placeholder">
-                  <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
-                  <p class="upload-text">Click to upload or drag here</p>
-                  <p class="upload-hint">PNG / JPG · Max 5 MB</p>
-                </div>
-                <input type="file" accept="image/*" class="upload-input" @change="uploadImage" />
               </div>
-              <button v-if="preview" type="button" class="upload-remove" @click="preview = null; imageFile = null">
-                <i class="fa-solid fa-xmark"></i> Remove image
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══ CLASSIFICATION ══ -->
-      <div class="form-card">
-        <div class="form-card-header">
-          <div class="form-card-icon form-card-icon--violet">
-            <i class="fa-solid fa-layer-group"></i>
-          </div>
-          <div>
-            <h2 class="form-card-title">Classification</h2>
-            <p class="form-card-sub">Category and supplier assignment.</p>
-          </div>
-        </div>
-        <div class="form-card-body">
-          <div class="form-grid-2">
-            <div class="form-field">
-              <label class="form-label">Category <span class="req">*</span></label>
-              <div class="select-wrap">
-                <i class="fa-solid fa-folder input-icon"></i>
-                <select v-model="form.CategoryID" class="form-select" required>
-                  <option value="">Select Category</option>
-                  <option v-for="c in categories" :key="c.CategoryID" :value="c.CategoryID">{{ c.CategoryName }}</option>
-                </select>
-                <i class="fa-solid fa-chevron-down select-caret"></i>
+              <div class="form-field">
+                <label class="form-label" for="c-desc">Description</label>
+                <textarea id="c-desc" v-model="form.Description" class="form-textarea" rows="3" placeholder="Brief product description…"></textarea>
               </div>
             </div>
-            <div class="form-field">
-              <label class="form-label">Supplier</label>
-              <div class="select-wrap">
-                <i class="fa-solid fa-truck-field input-icon"></i>
-                <select v-model="form.SupplierID" class="form-select">
-                  <option value="">Select Supplier</option>
-                  <option v-for="s in suppliers" :key="s.SupplierID" :value="s.SupplierID">{{ s.SupplierName }}</option>
-                </select>
-                <i class="fa-solid fa-chevron-down select-caret"></i>
+
+            <div class="form-grid-3 details-extra-row">
+              <div class="form-field">
+                <label class="form-label" for="c-mat">Material</label>
+                <input id="c-mat" v-model="form.Material" type="text" class="form-input form-input--plain" placeholder="e.g. Galvanized Steel" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="c-prof">Profile / Type</label>
+                <input id="c-prof" v-model="form.ProfileType" type="text" class="form-input form-input--plain" placeholder="e.g. Corrugated" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="c-color">Color</label>
+                <input id="c-color" v-model="form.Color" type="text" class="form-input form-input--plain" placeholder="e.g. Red Oxide" />
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- ══ PRODUCT DETAILS ══ -->
-      <div class="form-card">
-        <div class="form-card-header">
-          <div class="form-card-icon form-card-icon--green">
-            <i class="fa-solid fa-circle-info"></i>
-          </div>
-          <div>
-            <h2 class="form-card-title">Product Details</h2>
-            <p class="form-card-sub">Brand, description, material and finish.</p>
-          </div>
-        </div>
-        <div class="form-card-body">
-          <div class="form-grid-2">
-            <div class="form-field">
-              <label class="form-label">Brand</label>
-              <div class="input-wrap">
-                <i class="fa-solid fa-registered input-icon"></i>
-                <input v-model="form.Brand" type="text" class="form-input" placeholder="e.g. Tiger Steel" />
-              </div>
+        <!-- ══ SIZES, PRICES & STOCK ══ -->
+        <div class="form-card">
+          <div class="form-card-header">
+            <div class="form-card-icon form-card-icon--amber">
+              <i class="fa-solid fa-ruler-combined"></i>
             </div>
-            <div class="form-field">
-              <label class="form-label">Description</label>
-              <textarea v-model="form.Description" class="form-textarea" rows="3" placeholder="Brief product description…"></textarea>
+            <div>
+              <h2 class="form-card-title">Sizes, Prices &amp; Stock</h2>
+              <p class="form-card-sub">Each size has its own specs, price and stock. POS shows these as a dropdown.</p>
             </div>
+            <span class="size-total-pill">{{ variants.length }} size{{ variants.length === 1 ? '' : 's' }}</span>
           </div>
-
-          <div class="form-grid-3 details-extra-row">
-            <div class="form-field">
-              <label class="form-label">Material</label>
-              <input v-model="form.Material" type="text" class="form-input form-input--plain" placeholder="e.g. Galvanized Steel" />
-            </div>
-            <div class="form-field">
-              <label class="form-label">Profile / Type</label>
-              <input v-model="form.ProfileType" type="text" class="form-input form-input--plain" placeholder="e.g. Corrugated" />
-            </div>
-            <div class="form-field">
-              <label class="form-label">Color</label>
-              <input v-model="form.Color" type="text" class="form-input form-input--plain" placeholder="e.g. Red Oxide" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══ SIZES, PRICES & STOCK ══ -->
-      <div class="form-card">
-        <div class="form-card-header">
-          <div class="form-card-icon form-card-icon--amber">
-            <i class="fa-solid fa-ruler-combined"></i>
-          </div>
-          <div>
-            <h2 class="form-card-title">Sizes, Prices &amp; Stock</h2>
-            <p class="form-card-sub">Each size has its own specs, price and stock. POS shows these as a dropdown.</p>
-          </div>
-        </div>
-        <div class="form-card-body">
-          <div class="variant-list">
-            <div v-for="(v, vi) in variants" :key="v.uid" class="variant-card">
-              <div class="variant-head">
-                <span class="variant-badge">Size {{ vi + 1 }}</span>
-                <span class="variant-label">{{ variantLabel(v) }}</span>
-                <button
-                  v-if="variants.length > 1"
-                  type="button"
-                  class="variant-remove"
-                  title="Remove this size"
-                  @click="removeVariant(vi)"
-                >
-                  <i class="fa-solid fa-trash-can"></i>
-                </button>
-              </div>
-
-              <div class="spec-rows">
-                <div v-for="(s, si) in v.specs" :key="s.uid" class="spec-row">
-                  <div class="select-wrap">
-                    <select v-model="s.type" class="form-select form-select--plain" @change="onSpecTypeChange(s)">
-                      <option v-for="t in SPEC_TYPES" :key="t.key" :value="t.key">{{ t.label }}</option>
-                    </select>
-                    <i class="fa-solid fa-chevron-down select-caret"></i>
-                  </div>
-                  <input
-                    v-model="s.value"
-                    type="number"
-                    step="0.01"
-                    class="form-input form-input--plain"
-                    placeholder="Value"
-                  />
-                  <div class="select-wrap">
-                    <select v-model="s.unit" class="form-select form-select--plain">
-                      <option v-for="u in specUnits(s.type)" :key="u" :value="u">{{ u }}</option>
-                    </select>
-                    <i class="fa-solid fa-chevron-down select-caret"></i>
-                  </div>
-                  <button type="button" class="spec-remove" title="Remove specification" @click="removeSpec(v, si)">
-                    <i class="fa-solid fa-xmark"></i>
+          <div class="form-card-body">
+            <div class="variant-list">
+              <div v-for="(v, vi) in variants" :id="`variant-${v.uid}`" :key="v.uid" class="variant-card">
+                <div class="variant-head">
+                  <span class="variant-badge">Size {{ vi + 1 }}</span>
+                  <span class="variant-label">{{ variantLabel(v) }}</span>
+                  <button type="button" class="variant-action" title="Duplicate this size" @click="duplicateVariant(vi)">
+                    <i class="fa-solid fa-clone"></i>
+                  </button>
+                  <button
+                    v-if="variants.length > 1"
+                    type="button"
+                    class="variant-action variant-action--danger"
+                    title="Remove this size"
+                    @click="removeVariant(vi)"
+                  >
+                    <i class="fa-solid fa-trash-can"></i>
                   </button>
                 </div>
 
-                <button type="button" class="add-spec-btn" @click="addSpec(v)">
-                  <i class="fa-solid fa-plus"></i> Add specification
-                </button>
-              </div>
-
-              <!-- Prices -->
-              <div class="form-grid-2 variant-section">
-                <div class="form-field">
-                  <label class="form-label">Selling Price <span class="req">*</span></label>
-                  <div class="input-wrap input-wrap--prefix">
-                    <span class="input-prefix">₱</span>
-                    <input v-model="v.SellingPrice" type="number" step="0.01" class="form-input form-input--prefixed" placeholder="0.00" />
+                <div class="spec-rows">
+                  <div v-for="(s, si) in v.specs" :key="s.uid" class="spec-row">
+                    <div class="select-wrap">
+                      <select v-model="s.type" class="form-select form-select--plain" aria-label="Specification type" @change="onSpecTypeChange(s)">
+                        <option v-for="t in SPEC_TYPES" :key="t.key" :value="t.key">{{ t.label }}</option>
+                      </select>
+                      <i class="fa-solid fa-chevron-down select-caret"></i>
+                    </div>
+                    <input
+                      v-model="s.value"
+                      type="number"
+                      step="0.01"
+                      class="form-input form-input--plain"
+                      placeholder="Value"
+                      aria-label="Specification value"
+                    />
+                    <div class="select-wrap">
+                      <select v-model="s.unit" class="form-select form-select--plain" aria-label="Specification unit">
+                        <option v-for="u in specUnits(s.type)" :key="u" :value="u">{{ u }}</option>
+                      </select>
+                      <i class="fa-solid fa-chevron-down select-caret"></i>
+                    </div>
+                    <button type="button" class="spec-remove" title="Remove specification" @click="removeSpec(v, si)">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
                   </div>
-                </div>
-                <div class="form-field">
-                  <label class="form-label">Cost Price <span class="req">*</span></label>
-                  <div class="input-wrap input-wrap--prefix">
-                    <span class="input-prefix">₱</span>
-                    <input v-model="v.CostPrice" type="number" step="0.01" class="form-input form-input--prefixed" placeholder="0.00" />
-                  </div>
-                </div>
-              </div>
 
-              <!-- Stock (per size) -->
-              <div class="form-grid-2 variant-section">
-                <div class="form-field">
-                  <label class="form-label">Opening Stock</label>
-                  <input
-                    v-model="v.OpeningStock"
-                    type="number"
-                    min="0"
-                    step="1"
-                    class="form-input form-input--plain"
-                    placeholder="0"
-                  />
+                  <button type="button" class="add-spec-btn" @click="addSpec(v)">
+                    <i class="fa-solid fa-plus"></i> Add specification
+                  </button>
                 </div>
-                <div class="form-field">
-                  <label class="form-label">Reorder Level</label>
-                  <input
-                    v-model="v.ReorderLevel"
-                    type="number"
-                    min="0"
-                    step="1"
-                    class="form-input form-input--plain"
-                    placeholder="0"
-                  />
-                  <p class="form-hint">Alert when this size runs low.</p>
+
+                <!-- Prices -->
+                <div class="variant-section variant-prices-wrap">
+                  <div class="form-grid-2">
+                    <div class="form-field">
+                      <label class="form-label">Selling Price <span class="req">*</span></label>
+                      <div class="input-wrap input-wrap--prefix">
+                        <span class="input-prefix">₱</span>
+                        <input v-model="v.SellingPrice" type="number" step="0.01" min="0" class="form-input form-input--prefixed" placeholder="0.00" />
+                      </div>
+                    </div>
+                    <div class="form-field">
+                      <label class="form-label">Cost Price <span class="req">*</span></label>
+                      <div class="input-wrap input-wrap--prefix">
+                        <span class="input-prefix">₱</span>
+                        <input v-model="v.CostPrice" type="number" step="0.01" min="0" class="form-input form-input--prefixed" placeholder="0.00" />
+                      </div>
+                    </div>
+                  </div>
+                  <p v-if="marginInfo(v)" class="margin-hint" :class="{ 'margin-hint--loss': marginInfo(v).loss }">
+                    <i class="fa-solid" :class="marginInfo(v).loss ? 'fa-triangle-exclamation' : 'fa-arrow-trend-up'"></i>
+                    <template v-if="marginInfo(v).loss">Selling below cost: loses ₱{{ marginInfo(v).amount }} per unit.</template>
+                    <template v-else>Profit ₱{{ marginInfo(v).amount }} per unit · {{ marginInfo(v).pct }}% margin</template>
+                  </p>
+                </div>
+
+                <!-- Stock (per size) -->
+                <div class="form-grid-2 variant-section">
+                  <div class="form-field">
+                    <label class="form-label">Opening Stock</label>
+                    <input
+                      v-model="v.OpeningStock"
+                      type="number"
+                      min="0"
+                      step="1"
+                      class="form-input form-input--plain"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label">Reorder Level</label>
+                    <input
+                      v-model="v.ReorderLevel"
+                      type="number"
+                      min="0"
+                      step="1"
+                      class="form-input form-input--plain"
+                      placeholder="0"
+                    />
+                    <p class="form-hint">Alert when this size runs low.</p>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <button type="button" class="btn btn--ghost add-variant-btn" @click="addVariant">
-            <i class="fa-solid fa-plus"></i> Add Size &amp; Price
-          </button>
-        </div>
-      </div>
-
-      <!-- ══ INVENTORY SUMMARY (read-only; stock is set per size above) ══ -->
-      <div class="form-card">
-        <div class="form-card-header">
-          <div class="form-card-icon form-card-icon--teal">
-            <i class="fa-solid fa-boxes-stacked"></i>
-          </div>
-          <div>
-            <h2 class="form-card-title">Inventory Summary</h2>
-            <p class="form-card-sub">Stock is now set per size above.</p>
+            <button type="button" class="btn btn--ghost add-variant-btn" @click="addVariant">
+              <i class="fa-solid fa-plus"></i> Add Size &amp; Price
+            </button>
           </div>
         </div>
-        <div class="form-card-body">
-          <p class="form-hint">
-            Total opening stock across {{ variants.length }} size{{ variants.length === 1 ? '' : 's' }}:
-            <b>{{ totalOpeningStock }}</b>
-          </p>
-        </div>
-      </div>
 
-      <!-- ── FORM ACTIONS ── -->
-      <div class="form-actions">
-        <RouterLink to="/products" class="btn btn--ghost">
-          <i class="fa-solid fa-xmark"></i> Cancel
-        </RouterLink>
-        <button @click="saveProduct" class="btn btn--primary" :disabled="saving">
-          <i v-if="saving" class="fa-solid fa-spinner fa-spin"></i>
-          <i v-else class="fa-solid fa-floppy-disk"></i>
-          {{ saving ? 'Saving…' : 'Save Product' }}
-        </button>
-      </div>
+        <!-- ══ INVENTORY SUMMARY (read-only; stock is set per size above) ══ -->
+        <div class="form-card">
+          <div class="form-card-header">
+            <div class="form-card-icon form-card-icon--teal">
+              <i class="fa-solid fa-boxes-stacked"></i>
+            </div>
+            <div>
+              <h2 class="form-card-title">Inventory Summary</h2>
+              <p class="form-card-sub">Totals across all sizes. Stock is set per size above.</p>
+            </div>
+          </div>
+          <div class="form-card-body">
+            <div class="summary-grid">
+              <div class="summary-tile">
+                <span class="summary-label">Sizes</span>
+                <span class="summary-value">{{ variants.length }}</span>
+              </div>
+              <div class="summary-tile">
+                <span class="summary-label">Opening stock</span>
+                <span class="summary-value">{{ totalOpeningStock }} <small>units</small></span>
+              </div>
+              <div class="summary-tile">
+                <span class="summary-label">Stock value at cost</span>
+                <span class="summary-value">₱{{ money(stockCostValue) }}</span>
+              </div>
+              <div class="summary-tile">
+                <span class="summary-label">Stock value at selling price</span>
+                <span class="summary-value">₱{{ money(stockRetailValue) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ FLOATING SAVE BAR (sticks to the bottom of the screen) ══ -->
+        <div class="save-bar" :class="{ 'save-bar--dirty': dirty }">
+          <div class="save-bar-status">
+            <span class="save-dot" :class="{ 'save-dot--dirty': dirty }"></span>
+            <div class="save-bar-text">
+              <strong>{{ dirty ? 'Unsaved changes' : 'New product' }}</strong>
+              <span class="save-bar-meta">{{ variants.length }} size{{ variants.length === 1 ? '' : 's' }} · {{ totalOpeningStock }} units opening stock</span>
+            </div>
+          </div>
+          <div class="save-bar-actions">
+            <RouterLink to="/products" class="btn btn--ghost">
+              <i class="fa-solid fa-xmark"></i> <span class="btn-text">Cancel</span>
+            </RouterLink>
+            <button type="submit" class="btn btn--primary" :disabled="saving" title="Save (Ctrl+S)">
+              <i v-if="saving" class="fa-solid fa-spinner fa-spin"></i>
+              <i v-else class="fa-solid fa-floppy-disk"></i>
+              {{ saving ? 'Saving…' : 'Save Product' }}
+              <kbd class="kbd">Ctrl S</kbd>
+            </button>
+          </div>
+        </div>
+
+      </form>
 
     </div>
 
@@ -371,7 +432,7 @@
         <div class="scan-modal">
           <div class="scan-modal-header">
             <h3>Scan Barcode</h3>
-            <button class="scan-modal-close" @click="closeBarcodeScanner">
+            <button class="scan-modal-close" @click="closeBarcodeScanner" aria-label="Close scanner">
               <i class="fa-solid fa-xmark"></i>
             </button>
           </div>
@@ -505,6 +566,9 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 
 const router = useRouter()
 
+const formEl    = ref(null)
+const fileInput = ref(null)
+
 // NOTE: OpeningStock and ReorderLevel are no longer product-level fields.
 // They now live on each size (see `variants` below).
 const form = ref({
@@ -544,12 +608,52 @@ const newVariant = () => ({
 
 const variants = ref([newVariant()])
 
-// Sum of every size's opening stock — shown in the Inventory Summary card.
+// Sum of every size's opening stock — shown in the Inventory Summary card + save bar.
 const totalOpeningStock = computed(() =>
   variants.value.reduce((sum, v) => sum + (Number(v.OpeningStock) || 0), 0)
 )
+const stockCostValue = computed(() =>
+  variants.value.reduce((sum, v) => sum + (Number(v.OpeningStock) || 0) * (Number(v.CostPrice) || 0), 0)
+)
+const stockRetailValue = computed(() =>
+  variants.value.reduce((sum, v) => sum + (Number(v.OpeningStock) || 0) * (Number(v.SellingPrice) || 0), 0)
+)
+const money = n => Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-function addVariant()        { variants.value.push(newVariant()) }
+/** Profit per unit + margin, shown under the price fields. */
+function marginInfo(v) {
+  const sell = Number(v.SellingPrice)
+  if (v.SellingPrice === '' || v.SellingPrice === null || !(sell > 0)) return null
+  if (v.CostPrice === '' || v.CostPrice === null) return null
+  const diff = sell - Number(v.CostPrice)
+  return {
+    loss: diff < 0,
+    amount: money(Math.abs(diff)),
+    pct: ((diff / sell) * 100).toFixed(1),
+  }
+}
+
+function scrollToVariant(uid) {
+  nextTick(() => document.getElementById(`variant-${uid}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+}
+function addVariant() {
+  const v = newVariant()
+  variants.value.push(v)
+  scrollToVariant(v.uid)
+}
+/** Copies specs + prices into a new size (then just change the specs). */
+function duplicateVariant(i) {
+  const src = variants.value[i]
+  const copy = {
+    ...newVariant(),
+    specs: src.specs.map(s => ({ ...s, uid: nextUid() })),
+    SellingPrice: src.SellingPrice,
+    CostPrice: src.CostPrice,
+    ReorderLevel: src.ReorderLevel,
+  }
+  variants.value.splice(i + 1, 0, copy)
+  scrollToVariant(copy.uid)
+}
 function removeVariant(i)    { variants.value.splice(i, 1) }
 function addSpec(v)          { v.specs.push(newSpec()) }
 function removeSpec(v, i)    { v.specs.splice(i, 1) }
@@ -585,13 +689,9 @@ function validateVariants() {
   return ''
 }
 
-// Snapshot covers the main form AND the sizes, for the unsaved-changes prompt.
-// Initial value is set in onMounted (variants must exist first).
-const formSnapshot = () => JSON.stringify({ form: form.value, variants: variants.value })
-const initialFormSnapshot = ref('')
-
 const preview      = ref(null)
 const imageFile    = ref(null)
+const dragging     = ref(false)
 const units        = ['Piece', 'Box', 'Pack', 'Set', 'Roll', 'Kg', 'g', 'L', 'mL']
 const categories   = ref([])
 const suppliers    = ref([])
@@ -599,6 +699,21 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const hasSaved     = ref(false)
 const saving       = ref(false)
+let toastTimer = null
+
+// Errors fade out by themselves after a few seconds (they float on screen now).
+function flashError(msg) {
+  successMessage.value = ''
+  errorMessage.value = msg
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { errorMessage.value = '' }, 6000)
+}
+
+// Snapshot covers the main form, the sizes AND the image, for the unsaved-changes prompt.
+// Baseline is set in onMounted (variants must exist first).
+const formSnapshot = () => JSON.stringify({ form: form.value, variants: variants.value, image: !!imageFile.value })
+const initialFormSnapshot = ref('')
+const dirty = computed(() => initialFormSnapshot.value !== '' && formSnapshot() !== initialFormSnapshot.value)
 
 /* ────────────────────────────────────────────────────────────
    SKU AUTO-GENERATION — fires once, on blur (when the person
@@ -630,17 +745,57 @@ async function generateSku() {
   }
 }
 
-function uploadImage(e) {
-  const file = e.target.files[0]
+/* ── IMAGE ── */
+const MAX_IMAGE_MB = 5
+
+function setImage(file) {
   if (!file) return
+  if (!file.type.startsWith('image/')) { flashError('Please choose an image file (PNG or JPG).'); return }
+  if (file.size > MAX_IMAGE_MB * 1024 * 1024) { flashError(`That image is larger than ${MAX_IMAGE_MB} MB.`); return }
+  if (preview.value) URL.revokeObjectURL(preview.value)
   imageFile.value = file
   preview.value = URL.createObjectURL(file)
+}
+function uploadImage(e) {
+  setImage(e.target.files?.[0])
+  e.target.value = ''   // lets you pick the same file again later
+}
+function onDrop(e) {
+  dragging.value = false
+  setImage(e.dataTransfer?.files?.[0])
+}
+function removeImage() {
+  if (preview.value) URL.revokeObjectURL(preview.value)
+  preview.value = null
+  imageFile.value = null
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 async function loadCategories() { const r = await api.get('/api/categories'); categories.value = r.data.categories }
 async function loadSuppliers()  { const r = await api.get('/api/suppliers');  suppliers.value  = r.data.suppliers  }
 
+/* Pressing Enter inside a text box must not submit the whole form
+   (a USB scanner types Enter after every barcode). Buttons and the
+   description box keep their normal Enter behaviour. */
+function blockEnterSubmit(e) {
+  if (e.target?.tagName === 'INPUT') e.preventDefault()
+}
+
+/* Ctrl+S / Cmd+S saves (runs the browser's required-field checks first) */
+function onSaveShortcut(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    if (showBarcodeScanner.value || showLeaveModal.value || saving.value) return
+    formEl.value?.requestSubmit()
+  }
+}
+function onBeforeUnload(e) {
+  if (dirty.value && !hasSaved.value) { e.preventDefault(); e.returnValue = '' }
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', onSaveShortcut)
+  window.addEventListener('beforeunload', onBeforeUnload)
   try {
     await Promise.all([loadCategories(), loadSuppliers()])
   } catch (e) {
@@ -681,7 +836,7 @@ const confirmLeave = () => resolveLeave(true)
 
 onBeforeRouteLeave(() => {
   if (hasSaved.value) return true
-  if (formSnapshot() !== initialFormSnapshot.value) return askLeaveConfirmation()
+  if (dirty.value) return askLeaveConfirmation()
   return true
 })
 
@@ -995,6 +1150,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('keydown', onSaveShortcut)
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  clearTimeout(toastTimer)
   clearTimeout(barcodeCheckTimer)
   clearTimeout(barcodeDebounceTimer)
   clearTimeout(cameraFlashTimer)
@@ -1002,6 +1160,7 @@ onBeforeUnmount(() => {
   clearTimeout(scanFeedbackTimer)
   clearTimeout(closeAfterScanTimer)
   clearTimeout(usbReceivingTimer)
+  if (preview.value) URL.revokeObjectURL(preview.value)
   stopCamera()
 })
 
@@ -1010,15 +1169,16 @@ onBeforeUnmount(() => {
 ──────────────────────────────────────────────────────────── */
 async function saveProduct() {
   errorMessage.value = ''
+  if (saving.value) return
 
   if (barcodeDuplicate.value) {
-    errorMessage.value = 'This barcode is already assigned to another product. Please use a different barcode.'
+    flashError('This barcode is already assigned to another product. Please use a different barcode.')
     return
   }
 
   const variantError = validateVariants()
   if (variantError) {
-    errorMessage.value = variantError
+    flashError(variantError)
     return
   }
 
@@ -1051,7 +1211,7 @@ async function saveProduct() {
     successMessage.value = 'Product saved successfully!'
     setTimeout(() => router.push('/products'), 800)
   } catch (err) {
-    errorMessage.value = err?.response?.data?.message || 'Failed to save product.'
+    flashError(err?.response?.data?.message || 'Failed to save product.')
   } finally {
     saving.value = false
   }
@@ -1079,16 +1239,22 @@ async function saveProduct() {
 
   min-height: 100%;
   background: var(--p-bg);
-  padding: 28px 28px 64px;
+  padding: 28px 28px 32px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: 20px;
   transition: background-color .22s ease;
 }
+.create-form { display: flex; flex-direction: column; gap: 20px; }
 
 /* PAGE HEADER */
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .page-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--p-accent); text-transform: uppercase; margin: 0 0 5px; }
 .page-title   { font-size: 26px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.03em; margin: 0; transition: color .22s; }
+.page-sub     { margin: 6px 0 0; font-size: 13px; color: var(--p-text-muted); }
+.kbd-hint {
+  font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 5px;
+  background: var(--p-surface-raised); border: 1px solid var(--p-border-strong); color: var(--p-text-secondary);
+}
 
 /* BUTTONS */
 .btn {
@@ -1099,6 +1265,7 @@ async function saveProduct() {
   transition: background .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s;
 }
 .btn:active { transform: scale(.98); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
 .btn--ghost   { background: var(--p-surface); border-color: var(--p-border-strong); color: var(--p-text-secondary); }
 .btn--ghost:hover { background: var(--p-surface-raised); border-color: var(--p-accent-border); color: var(--p-text-primary); }
 .btn--primary {
@@ -1107,21 +1274,37 @@ async function saveProduct() {
 }
 .btn--primary:hover { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
 .btn--primary:disabled { opacity: .6; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
+.kbd {
+  font-family: inherit; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
+  background: rgba(255,255,255,.22); color: #fff; margin-left: 2px;
+}
 
-/* ALERTS */
+/* TOASTS: fixed to the screen so they are never scrolled out of view */
+.toast-stack {
+  position: fixed; top: 16px; right: 16px; z-index: 10001;
+  display: flex; flex-direction: column; gap: 10px;
+  width: min(420px, calc(100vw - 32px)); pointer-events: none;
+}
 .alert {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; pointer-events: auto;
   padding: 12px 16px; border-radius: 12px;
   font-size: 13.5px; font-weight: 500; border: 1px solid transparent;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
 }
-.alert--success { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25); color: #10b981; }
-.alert--error   { background: rgba(244,63,94,.09);  border-color: rgba(244,63,94,.22);  color: #f43f5e; }
-html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); color: #4ADE80; }
-html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  color: #F87171; }
+.alert--success {
+  background: linear-gradient(rgba(16,185,129,.12), rgba(16,185,129,.12)), var(--p-surface);
+  border-color: rgba(16,185,129,.35); color: #059669;
+}
+.alert--error {
+  background: linear-gradient(rgba(244,63,94,.10), rgba(244,63,94,.10)), var(--p-surface);
+  border-color: rgba(244,63,94,.35); color: #e11d48;
+}
+html[data-theme="dark"] .alert--success { color: #4ADE80; }
+html[data-theme="dark"] .alert--error   { color: #F87171; }
 .alert-close { background: none; border: none; cursor: pointer; color: inherit; opacity: .6; margin-left: auto; font-size: 13px; padding: 2px; transition: opacity .15s; }
 .alert-close:hover { opacity: 1; }
 .alert-fade-enter-active, .alert-fade-leave-active { transition: opacity .22s, transform .22s; }
-.alert-fade-enter-from, .alert-fade-leave-to { opacity: 0; transform: translateY(-6px); }
+.alert-fade-enter-from, .alert-fade-leave-to { opacity: 0; transform: translateY(-8px); }
 
 /* FORM CARD */
 .form-card {
@@ -1142,7 +1325,6 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 .form-card-icon--violet { background: rgba(99,102,241,.12); color: #6366f1; }
 .form-card-icon--green  { background: rgba(16,185,129,.12); color: #10b981; }
 .form-card-icon--amber  { background: rgba(245,158,11,.12); color: #f59e0b; }
-.form-card-icon--orange { background: var(--p-accent-soft); color: var(--p-accent); }
 .form-card-icon--teal   { background: rgba(20,184,166,.12); color: #14b8a6; }
 html[data-theme="dark"] .form-card-icon--blue   { background: rgba(59,130,246,.18); }
 html[data-theme="dark"] .form-card-icon--violet { background: rgba(99,102,241,.18); }
@@ -1153,6 +1335,10 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .form-card-title { font-size: 15px; font-weight: 700; color: var(--p-text-primary); margin: 0 0 2px; transition: color .22s; }
 .form-card-sub   { font-size: 12.5px; color: var(--p-text-muted); margin: 0; }
 .form-card-body  { padding: 22px 24px; }
+.size-total-pill {
+  margin-left: auto; flex-shrink: 0; font-size: 11.5px; font-weight: 700;
+  padding: 4px 12px; border-radius: 20px; background: var(--p-accent-soft); color: var(--p-accent);
+}
 
 /* GRIDS */
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -1163,7 +1349,6 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 /* FIELDS */
 .form-field { display: flex; flex-direction: column; gap: 7px; }
 .form-label { font-size: 12.5px; font-weight: 600; color: var(--p-text-secondary); letter-spacing: .01em; transition: color .22s; }
-.form-label-hint { font-weight: 400; font-size: 11px; color: var(--p-text-faint); margin-left: 4px; }
 .req { color: var(--p-accent); }
 .form-hint { font-size: 11.5px; color: var(--p-text-faint); margin: 0; }
 .form-hint--error { color: #f43f5e; font-weight: 600; display: flex; align-items: center; gap: 5px; }
@@ -1239,11 +1424,12 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 /* TOGGLE */
 .toggle-row { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; }
 .toggle-track {
-  width: 44px; height: 24px; border-radius: 999px; flex-shrink: 0;
+  width: 44px; height: 24px; border-radius: 999px; flex-shrink: 0; padding: 0; border: none;
   background: var(--p-border-strong);
   transition: background-color .22s ease;
   position: relative; cursor: pointer;
 }
+.toggle-track:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
 .toggle-track--on { background: var(--p-accent); }
 .toggle-thumb {
   position: absolute; top: 3px; left: 3px;
@@ -1262,9 +1448,10 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   overflow: hidden; cursor: pointer;
   background: var(--p-surface-sunken);
-  transition: border-color .18s, background-color .22s;
+  transition: border-color .18s, background-color .22s, transform .15s;
 }
-.upload-zone:hover { border-color: var(--p-accent-border); background: var(--p-accent-soft); }
+.upload-zone:hover, .upload-zone--drag { border-color: var(--p-accent); background: var(--p-accent-soft); }
+.upload-zone--drag { transform: scale(1.01); }
 .upload-zone--has-image { border-style: solid; border-color: var(--p-border); }
 .upload-preview { max-height: 160px; max-width: 100%; object-fit: contain; border-radius: 8px; }
 .upload-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px; text-align: center; }
@@ -1272,6 +1459,13 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .upload-text { font-size: 13px; font-weight: 600; color: var(--p-text-muted); margin: 0; }
 .upload-hint { font-size: 11.5px; color: var(--p-text-faint); margin: 0; }
 .upload-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.upload-change {
+  position: absolute; right: 10px; bottom: 10px; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
+  padding: 5px 11px; border-radius: 20px; background: rgba(15,23,42,.72); color: #fff;
+  opacity: 0; transition: opacity .15s;
+}
+.upload-zone:hover .upload-change { opacity: 1; }
 .upload-remove {
   align-self: flex-start; margin-top: 6px;
   background: none; border: none; cursor: pointer;
@@ -1286,7 +1480,7 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .variant-card {
   border: 1.5px solid var(--p-border); border-radius: 14px;
   background: var(--p-surface-sunken); padding: 16px;
-  display: flex; flex-direction: column; gap: 14px;
+  display: flex; flex-direction: column; gap: 14px; scroll-margin: 90px;
 }
 .variant-head { display: flex; align-items: center; gap: 10px; }
 .variant-badge {
@@ -1294,14 +1488,15 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
   padding: 3px 10px; border-radius: 999px;
   background: var(--p-accent-soft); color: var(--p-accent);
 }
-.variant-label { font-size: 13.5px; font-weight: 600; color: var(--p-text-primary); flex: 1; min-width: 0; }
-.variant-remove, .spec-remove {
+.variant-label { font-size: 13.5px; font-weight: 600; color: var(--p-text-primary); flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.variant-action, .spec-remove {
   width: 30px; height: 30px; flex-shrink: 0; border: none; border-radius: 8px;
   background: transparent; color: var(--p-text-faint); cursor: pointer;
   display: flex; align-items: center; justify-content: center; font-size: 13px;
   transition: background-color .15s, color .15s;
 }
-.variant-remove:hover, .spec-remove:hover { background: rgba(244,63,94,.12); color: #f43f5e; }
+.variant-action:hover { background: var(--p-accent-soft); color: var(--p-accent); }
+.variant-action--danger:hover, .spec-remove:hover { background: rgba(244,63,94,.12); color: #f43f5e; }
 
 .spec-rows { display: flex; flex-direction: column; gap: 8px; }
 .spec-row  { display: grid; grid-template-columns: 1.3fr 1fr .9fr auto; gap: 8px; align-items: center; }
@@ -1315,10 +1510,45 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .add-spec-btn:hover { border-color: var(--p-accent); color: var(--p-accent); background: var(--p-accent-soft); }
 /* Price row and stock row inside a size card share the same divider style. */
 .variant-section { padding-top: 14px; border-top: 1px dashed var(--p-border-strong); }
+.variant-prices-wrap { display: flex; flex-direction: column; gap: 10px; }
+.margin-hint {
+  margin: 0; display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+  font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 20px;
+  background: rgba(16,185,129,.12); color: #059669;
+}
+.margin-hint--loss { background: rgba(244,63,94,.12); color: #e11d48; }
+html[data-theme="dark"] .margin-hint { color: #4ADE80; }
+html[data-theme="dark"] .margin-hint--loss { color: #F87171; }
 .add-variant-btn { margin-top: 16px; width: 100%; justify-content: center; border-style: dashed; }
 
-/* FORM ACTIONS */
-.form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 4px; }
+/* INVENTORY SUMMARY */
+.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.summary-tile {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; min-width: 0;
+  background: var(--p-surface-sunken); border: 1px solid var(--p-border); border-radius: 12px;
+}
+.summary-label { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--p-text-muted); }
+.summary-value { font-size: 18px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.summary-value small { font-size: 12px; font-weight: 600; color: var(--p-text-faint); }
+
+/* FLOATING SAVE BAR — sticks to the bottom of the screen while the form is on screen */
+.save-bar {
+  position: sticky; bottom: 16px; z-index: 30;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 14px 12px 18px; border-radius: 16px;
+  background: var(--p-surface); border: 1px solid var(--p-border-strong);
+  box-shadow: 0 12px 34px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.08);
+  transition: border-color .2s, box-shadow .2s;
+}
+.save-bar--dirty { border-color: var(--p-accent); box-shadow: 0 12px 34px rgba(0,0,0,.20), 0 0 0 3px var(--p-ring); }
+.save-bar-status { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.save-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--p-border-strong); }
+.save-dot--dirty { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.22); animation: dot-pulse 1.6s ease-in-out infinite; }
+@keyframes dot-pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(245,158,11,.22); } 50% { box-shadow: 0 0 0 6px rgba(245,158,11,.10); } }
+.save-bar-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.save-bar-text strong { font-size: 13.5px; font-weight: 700; color: var(--p-text-primary); }
+.save-bar-meta { font-size: 12px; color: var(--p-text-muted); }
+.save-bar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
 /* BARCODE SCANNER MODAL */
 .scan-modal-backdrop {
@@ -1504,12 +1734,23 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; transform: scale(.97) translateY(8px); }
 
 /* RESPONSIVE */
+@media (max-width: 900px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 800px) {
-  .prod-page { padding: 16px 16px 48px; }
+  .prod-page { padding: 16px 16px 24px; }
   .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
   .spec-row { grid-template-columns: 1fr 1fr; }
   .spec-row .spec-remove { grid-column: 2; justify-self: end; }
-  .form-actions { flex-direction: column-reverse; align-items: stretch; }
-  .btn { justify-content: center; }
+  .save-bar { bottom: 10px; padding: 10px; border-radius: 14px; }
+  .save-bar-status { display: none; }
+  .save-bar-actions { width: 100%; }
+  .save-bar-actions .btn { flex: 1; justify-content: center; }
+  .save-bar-actions .btn--ghost { flex: 0 0 auto; }
+  .kbd, .page-sub { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .save-dot--dirty { animation: none; }
+  .alert-fade-enter-active, .alert-fade-leave-active { transition: none; }
 }
 </style>

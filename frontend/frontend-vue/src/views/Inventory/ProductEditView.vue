@@ -7,26 +7,32 @@
         <div>
           <p class="page-eyebrow">Inventory</p>
           <h1 class="page-title">Edit Product</h1>
+          <p v-if="!pageLoading && form.ProductName" class="page-sub">
+            {{ form.ProductName }}
+            <span class="sku-chip" :class="{ 'sku-chip--empty': !form.SKU }">{{ form.SKU || 'No SKU yet' }}</span>
+          </p>
         </div>
         <RouterLink to="/products" class="btn btn--ghost">
           <i class="fa-solid fa-arrow-left"></i> Back to List
         </RouterLink>
       </div>
 
-      <!-- ── ALERTS ── -->
-      <transition name="alert-fade">
-        <div v-if="error" class="alert alert--error">
-          <i class="fa-solid fa-circle-exclamation"></i>
-          <span>{{ error }}</span>
-          <button class="alert-close" @click="error = ''"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-      </transition>
-      <transition name="alert-fade">
-        <div v-if="success" class="alert alert--success">
-          <i class="fa-solid fa-circle-check"></i>
-          <span>{{ success }}</span>
-        </div>
-      </transition>
+      <!-- ── FLOATING TOASTS (always visible, even when scrolled) ── -->
+      <div class="toast-stack" aria-live="polite">
+        <transition name="alert-fade">
+          <div v-if="error" class="alert alert--error" role="alert">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span>{{ error }}</span>
+            <button type="button" class="alert-close" @click="error = ''" aria-label="Dismiss"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </transition>
+        <transition name="alert-fade">
+          <div v-if="success" class="alert alert--success" role="status">
+            <i class="fa-solid fa-circle-check"></i>
+            <span>{{ success }}</span>
+          </div>
+        </transition>
+      </div>
 
       <!-- ── SKELETON ── -->
       <template v-if="pageLoading">
@@ -48,7 +54,7 @@
       </template>
 
       <!-- ── FORM ── -->
-      <form v-else @submit.prevent="updateProduct">
+      <form v-else ref="formEl" @submit.prevent="updateProduct">
 
         <!-- ══ BASIC INFORMATION ══ -->
         <div class="form-card">
@@ -63,64 +69,88 @@
             <div class="form-grid-2">
               <div class="form-stack">
                 <div class="form-field">
-                  <label class="form-label">Product Name <span class="req">*</span></label>
+                  <label class="form-label" for="f-name">Product Name <span class="req">*</span></label>
                   <div class="input-wrap">
                     <i class="fa-solid fa-cube input-icon"></i>
-                    <input v-model="form.ProductName" type="text" class="form-input" required />
+                    <input id="f-name" v-model="form.ProductName" type="text" class="form-input" required />
                   </div>
                 </div>
                 <div class="form-field">
-                  <label class="form-label">SKU</label>
+                  <label class="form-label" for="f-sku">SKU</label>
                   <div class="input-wrap">
                     <i class="fa-solid fa-barcode input-icon"></i>
-                    <input :value="form.SKU" disabled class="form-input form-input--disabled" />
+                    <input
+                      id="f-sku"
+                      :value="form.SKU"
+                      disabled
+                      class="form-input form-input--disabled"
+                      :placeholder="skuPlaceholder"
+                    />
+                    <i v-if="form.SKU" class="fa-solid fa-lock input-lock" title="SKU cannot be changed"></i>
                   </div>
+                  <p v-if="!form.SKU" class="form-hint">
+                    No SKU on file. One will be generated automatically when you save.
+                  </p>
                 </div>
                 <div class="form-field">
-                  <label class="form-label">Barcode</label>
+                  <label class="form-label" for="f-barcode">Barcode</label>
                   <div class="input-wrap">
                     <i class="fa-solid fa-barcode input-icon"></i>
-                    <input v-model="form.Barcode" type="text" class="form-input" placeholder="Scan or type manually" />
+                    <input id="f-barcode" v-model="form.Barcode" type="text" class="form-input" placeholder="Scan or type manually" />
                   </div>
                 </div>
                 <div class="form-field">
-                  <label class="form-label">Unit <span class="req">*</span></label>
+                  <label class="form-label" for="f-unit">Unit <span class="req">*</span></label>
                   <div class="select-wrap">
                     <i class="fa-solid fa-scale-balanced input-icon"></i>
-                    <select v-model="form.Unit" class="form-select" required>
+                    <select id="f-unit" v-model="form.Unit" class="form-select" required>
                       <option value="">Select Unit</option>
                       <option v-for="u in units" :key="u" :value="u">{{ u }}</option>
                     </select>
                     <i class="fa-solid fa-chevron-down select-caret"></i>
                   </div>
                 </div>
-                <label class="toggle-row">
-                  <div class="toggle-track" :class="{ 'toggle-track--on': form.IsReturnable }" @click="form.IsReturnable = !form.IsReturnable">
-                    <div class="toggle-thumb" :class="{ 'toggle-thumb--on': form.IsReturnable }"></div>
-                  </div>
+                <div class="toggle-row" @click="form.IsReturnable = !form.IsReturnable">
+                  <button
+                    type="button"
+                    role="switch"
+                    class="toggle-track"
+                    :class="{ 'toggle-track--on': form.IsReturnable }"
+                    :aria-checked="form.IsReturnable"
+                    aria-label="Returnable item"
+                    @click.stop="form.IsReturnable = !form.IsReturnable"
+                  >
+                    <span class="toggle-thumb" :class="{ 'toggle-thumb--on': form.IsReturnable }"></span>
+                  </button>
                   <div>
                     <p class="toggle-label">Returnable Item</p>
                     <p class="toggle-sub">Allow this product to be returned after sale.</p>
                   </div>
-                </label>
+                </div>
               </div>
 
               <!-- Image -->
               <div class="form-field">
                 <label class="form-label">Product Image</label>
-                <div class="upload-zone" :class="{ 'upload-zone--has-image': existingImage || previewImage }">
-                  <img v-if="previewImage" :src="previewImage" class="upload-preview" />
-                  <img v-else-if="existingImage" :src="existingImage" class="upload-preview" />
+                <div
+                  class="upload-zone"
+                  :class="{ 'upload-zone--has-image': existingImage || previewImage, 'upload-zone--drag': dragging }"
+                  @dragover.prevent="dragging = true"
+                  @dragleave.prevent="dragging = false"
+                  @drop.prevent="onDrop"
+                >
+                  <img v-if="previewImage" :src="previewImage" class="upload-preview" alt="New product image preview" />
+                  <img v-else-if="existingImage" :src="existingImage" class="upload-preview" alt="Current product image" />
                   <div v-else class="upload-placeholder">
                     <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
-                    <p class="upload-text">Click to upload a new image</p>
+                    <p class="upload-text">Click or drop an image here</p>
                     <p class="upload-hint">PNG / JPG · Max 5 MB</p>
                   </div>
-                  <input type="file" accept="image/*" class="upload-input" @change="handleImageUpload" />
+                  <span v-if="existingImage || previewImage" class="upload-change"><i class="fa-solid fa-camera"></i> Change</span>
+                  <input ref="fileInput" type="file" accept="image/*" class="upload-input" aria-label="Upload product image" @change="handleImageUpload" />
                 </div>
-                <button v-if="previewImage || existingImage" type="button" class="upload-remove"
-                  @click="previewImage = null; newImageFile = null; existingImage = null">
-                  <i class="fa-solid fa-xmark"></i> Remove image
+                <button v-if="previewImage" type="button" class="upload-remove" @click="discardNewImage">
+                  <i class="fa-solid fa-rotate-left"></i> Discard new image
                 </button>
               </div>
             </div>
@@ -139,10 +169,10 @@
           <div class="form-card-body">
             <div class="form-grid-2">
               <div class="form-field">
-                <label class="form-label">Category <span class="req">*</span></label>
+                <label class="form-label" for="f-cat">Category <span class="req">*</span></label>
                 <div class="select-wrap">
                   <i class="fa-solid fa-folder input-icon"></i>
-                  <select v-model="form.CategoryID" class="form-select" required>
+                  <select id="f-cat" v-model="form.CategoryID" class="form-select" required>
                     <option value="">Select Category</option>
                     <option v-for="c in categories" :key="c.CategoryID" :value="c.CategoryID">{{ c.CategoryName }}</option>
                   </select>
@@ -150,10 +180,10 @@
                 </div>
               </div>
               <div class="form-field">
-                <label class="form-label">Supplier</label>
+                <label class="form-label" for="f-sup">Supplier</label>
                 <div class="select-wrap">
                   <i class="fa-solid fa-truck-field input-icon"></i>
-                  <select v-model="form.SupplierID" class="form-select">
+                  <select id="f-sup" v-model="form.SupplierID" class="form-select">
                     <option value="">Select Supplier</option>
                     <option v-for="s in suppliers" :key="s.SupplierID" :value="s.SupplierID">{{ s.SupplierName }}</option>
                   </select>
@@ -176,30 +206,30 @@
           <div class="form-card-body">
             <div class="form-grid-2">
               <div class="form-field">
-                <label class="form-label">Brand</label>
+                <label class="form-label" for="f-brand">Brand</label>
                 <div class="input-wrap">
                   <i class="fa-solid fa-registered input-icon"></i>
-                  <input v-model="form.Brand" type="text" class="form-input" placeholder="e.g. Tiger Steel" />
+                  <input id="f-brand" v-model="form.Brand" type="text" class="form-input" placeholder="e.g. Tiger Steel" />
                 </div>
               </div>
               <div class="form-field">
-                <label class="form-label">Description</label>
-                <textarea v-model="form.Description" class="form-textarea" rows="3" placeholder="Brief product description…"></textarea>
+                <label class="form-label" for="f-desc">Description</label>
+                <textarea id="f-desc" v-model="form.Description" class="form-textarea" rows="3" placeholder="Brief product description…"></textarea>
               </div>
             </div>
 
             <div class="form-grid-3 details-extra-row">
               <div class="form-field">
-                <label class="form-label">Material</label>
-                <input v-model="form.Material" type="text" class="form-input form-input--plain" placeholder="e.g. Galvanized Steel" />
+                <label class="form-label" for="f-mat">Material</label>
+                <input id="f-mat" v-model="form.Material" type="text" class="form-input form-input--plain" placeholder="e.g. Galvanized Steel" />
               </div>
               <div class="form-field">
-                <label class="form-label">Profile / Type</label>
-                <input v-model="form.ProfileType" type="text" class="form-input form-input--plain" placeholder="e.g. Corrugated" />
+                <label class="form-label" for="f-prof">Profile / Type</label>
+                <input id="f-prof" v-model="form.ProfileType" type="text" class="form-input form-input--plain" placeholder="e.g. Corrugated" />
               </div>
               <div class="form-field">
-                <label class="form-label">Color</label>
-                <input v-model="form.Color" type="text" class="form-input form-input--plain" placeholder="e.g. Red Oxide" />
+                <label class="form-label" for="f-color">Color</label>
+                <input id="f-color" v-model="form.Color" type="text" class="form-input form-input--plain" placeholder="e.g. Red Oxide" />
               </div>
             </div>
           </div>
@@ -215,17 +245,22 @@
               <h2 class="form-card-title">Sizes, Prices &amp; Stock</h2>
               <p class="form-card-sub">Each size has its own specs, price, stock and reorder level. POS shows these per size.</p>
             </div>
+            <span class="size-total-pill">{{ variants.length }} size{{ variants.length === 1 ? '' : 's' }}</span>
           </div>
           <div class="form-card-body">
             <div class="variant-list">
-              <div v-for="(v, vi) in variants" :key="v.uid" class="variant-card">
+              <div v-for="(v, vi) in variants" :id="`variant-${v.uid}`" :key="v.uid" class="variant-card">
                 <div class="variant-head">
                   <span class="variant-badge">Size {{ vi + 1 }}</span>
+                  <span v-if="!v.VariantID" class="variant-new">New</span>
                   <span class="variant-label">{{ variantLabel(v) }}</span>
+                  <button type="button" class="variant-action" title="Duplicate this size" @click="duplicateVariant(vi)">
+                    <i class="fa-solid fa-clone"></i>
+                  </button>
                   <button
                     v-if="variants.length > 1"
                     type="button"
-                    class="variant-remove"
+                    class="variant-action variant-action--danger"
                     title="Remove this size"
                     @click="removeVariant(vi)"
                   >
@@ -236,7 +271,7 @@
                 <div class="spec-rows">
                   <div v-for="(s, si) in v.specs" :key="s.uid" class="spec-row">
                     <div class="select-wrap">
-                      <select v-model="s.type" class="form-select form-select--plain" @change="onSpecTypeChange(s)">
+                      <select v-model="s.type" class="form-select form-select--plain" aria-label="Specification type" @change="onSpecTypeChange(s)">
                         <option v-for="t in SPEC_TYPES" :key="t.key" :value="t.key">{{ t.label }}</option>
                       </select>
                       <i class="fa-solid fa-chevron-down select-caret"></i>
@@ -247,9 +282,10 @@
                       step="0.01"
                       class="form-input form-input--plain"
                       placeholder="Value"
+                      aria-label="Specification value"
                     />
                     <div class="select-wrap">
-                      <select v-model="s.unit" class="form-select form-select--plain">
+                      <select v-model="s.unit" class="form-select form-select--plain" aria-label="Specification unit">
                         <option v-for="u in specUnits(s.type)" :key="u" :value="u">{{ u }}</option>
                       </select>
                       <i class="fa-solid fa-chevron-down select-caret"></i>
@@ -264,21 +300,28 @@
                   </button>
                 </div>
 
-                <div class="form-grid-2 variant-prices">
-                  <div class="form-field">
-                    <label class="form-label">Selling Price <span class="req">*</span></label>
-                    <div class="input-wrap input-wrap--prefix">
-                      <span class="input-prefix">₱</span>
-                      <input v-model="v.SellingPrice" type="number" step="0.01" class="form-input form-input--prefixed" placeholder="0.00" />
+                <div class="variant-prices-wrap">
+                  <div class="form-grid-2">
+                    <div class="form-field">
+                      <label class="form-label">Selling Price <span class="req">*</span></label>
+                      <div class="input-wrap input-wrap--prefix">
+                        <span class="input-prefix">₱</span>
+                        <input v-model="v.SellingPrice" type="number" step="0.01" min="0" class="form-input form-input--prefixed" placeholder="0.00" />
+                      </div>
+                    </div>
+                    <div class="form-field">
+                      <label class="form-label">Cost Price <span class="req">*</span></label>
+                      <div class="input-wrap input-wrap--prefix">
+                        <span class="input-prefix">₱</span>
+                        <input v-model="v.CostPrice" type="number" step="0.01" min="0" class="form-input form-input--prefixed" placeholder="0.00" />
+                      </div>
                     </div>
                   </div>
-                  <div class="form-field">
-                    <label class="form-label">Cost Price <span class="req">*</span></label>
-                    <div class="input-wrap input-wrap--prefix">
-                      <span class="input-prefix">₱</span>
-                      <input v-model="v.CostPrice" type="number" step="0.01" class="form-input form-input--prefixed" placeholder="0.00" />
-                    </div>
-                  </div>
+                  <p v-if="marginInfo(v)" class="margin-hint" :class="{ 'margin-hint--loss': marginInfo(v).loss }">
+                    <i class="fa-solid" :class="marginInfo(v).loss ? 'fa-triangle-exclamation' : 'fa-arrow-trend-up'"></i>
+                    <template v-if="marginInfo(v).loss">Selling below cost: loses ₱{{ marginInfo(v).amount }} per unit.</template>
+                    <template v-else>Profit ₱{{ marginInfo(v).amount }} per unit · {{ marginInfo(v).pct }}% margin</template>
+                  </p>
                 </div>
 
                 <!-- Stock for THIS size -->
@@ -316,16 +359,26 @@
           </div>
         </div>
 
-        <!-- ── FORM ACTIONS ── -->
-        <div class="form-actions">
-          <RouterLink to="/products" class="btn btn--ghost">
-            <i class="fa-solid fa-xmark"></i> Cancel
-          </RouterLink>
-          <button type="submit" class="btn btn--primary" :disabled="loading">
-            <i v-if="loading" class="fa-solid fa-spinner fa-spin"></i>
-            <i v-else class="fa-solid fa-floppy-disk"></i>
-            {{ loading ? 'Saving…' : 'Save Changes' }}
-          </button>
+        <!-- ══ FLOATING SAVE BAR (sticks to the bottom of the screen) ══ -->
+        <div class="save-bar" :class="{ 'save-bar--dirty': dirty }">
+          <div class="save-bar-status">
+            <span class="save-dot" :class="{ 'save-dot--dirty': dirty }"></span>
+            <div class="save-bar-text">
+              <strong>{{ dirty ? 'Unsaved changes' : 'No changes yet' }}</strong>
+              <span class="save-bar-meta">{{ variants.length }} size{{ variants.length === 1 ? '' : 's' }} · {{ totalAfter }} units in stock after saving</span>
+            </div>
+          </div>
+          <div class="save-bar-actions">
+            <RouterLink to="/products" class="btn btn--ghost">
+              <i class="fa-solid fa-xmark"></i> <span class="btn-text">Cancel</span>
+            </RouterLink>
+            <button type="submit" class="btn btn--primary" :disabled="loading" title="Save (Ctrl+S)">
+              <i v-if="loading" class="fa-solid fa-spinner fa-spin"></i>
+              <i v-else class="fa-solid fa-floppy-disk"></i>
+              {{ loading ? 'Saving…' : 'Save Changes' }}
+              <kbd class="kbd">Ctrl S</kbd>
+            </button>
+          </div>
         </div>
 
       </form>
@@ -336,8 +389,8 @@
 <script setup>
 import Layout from '@/components/Layout.vue'
 import api from '@/api/axios'
-import { ref, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 
 const route     = useRoute()
 const router    = useRouter()
@@ -348,12 +401,24 @@ const categories = ref([])
 const suppliers  = ref([])
 const units      = ['Piece', 'Box', 'Pack', 'Set', 'Roll', 'Kg', 'g', 'L', 'mL']
 
+const formEl    = ref(null)
+const fileInput = ref(null)
+
 // Price, dimension AND stock fields now live per size in the
 // "Sizes, Prices & Stock" section (variants).
 const form = ref({
   ProductName: '', SKU: '', Barcode: '', Unit: '', IsReturnable: false,
   CategoryID: '', SupplierID: '', Brand: '', Description: '',
   Material: '', ProfileType: '', Color: '',
+})
+
+/* When the product has no SKU, show an example built from its name
+   (e.g. "Tiger Steel" → TIG-00001). The real one is generated by the
+   server when you save. */
+const skuPlaceholder = computed(() => {
+  const letters = (form.value.ProductName || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 3)
+  const prefix  = (letters || 'XXX').padEnd(3, 'X')
+  return `e.g. ${prefix}-00001 (auto-generated on save)`
 })
 
 /* ────────────────────────────────────────────────────────────
@@ -388,17 +453,51 @@ const variants = ref([newVariant()])
 
 const adjOf    = v => Number(v.StockAdjustment) || 0
 const newStock = v => v.VariantID ? (Number(v.Stock) || 0) + adjOf(v) : (Number(v.OpeningStock) || 0)
+const totalAfter = computed(() => variants.value.reduce((sum, v) => sum + newStock(v), 0))
 const stockClass = v => {
   const s = Number(v.Stock) || 0
   const t = Number(v.ReorderLevel) > 0 ? Number(v.ReorderLevel) : 5
   return s <= 0 ? 'stock-readout--oos' : s <= t ? 'stock-readout--low' : 'stock-readout--ok'
 }
 
-function addVariant()        { variants.value.push(newVariant()) }
+/** Profit per unit + margin, shown under the price fields. */
+function marginInfo(v) {
+  const sell = Number(v.SellingPrice)
+  if (v.SellingPrice === '' || v.SellingPrice === null || !(sell > 0)) return null
+  if (v.CostPrice === '' || v.CostPrice === null) return null
+  const diff = sell - Number(v.CostPrice)
+  return {
+    loss: diff < 0,
+    amount: Math.abs(diff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    pct: ((diff / sell) * 100).toFixed(1),
+  }
+}
+
+function scrollToVariant(uid) {
+  nextTick(() => document.getElementById(`variant-${uid}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+}
+function addVariant() {
+  const v = newVariant()
+  variants.value.push(v)
+  scrollToVariant(v.uid)
+}
+/** Copies specs + prices into a brand-new size (change the specs, then save). */
+function duplicateVariant(i) {
+  const src = variants.value[i]
+  const copy = {
+    ...newVariant(),
+    specs: src.specs.map(s => ({ ...s, uid: nextUid() })),
+    SellingPrice: src.SellingPrice,
+    CostPrice: src.CostPrice,
+    ReorderLevel: src.ReorderLevel,
+  }
+  variants.value.splice(i + 1, 0, copy)
+  scrollToVariant(copy.uid)
+}
 function removeVariant(i) {
   const v = variants.value[i]
   if (v.VariantID && Number(v.Stock) > 0) {
-    error.value = `"${variantLabel(v)}" still has ${v.Stock} in stock. Adjust it to 0 before removing the size.`
+    flashError(`"${variantLabel(v)}" still has ${v.Stock} in stock. Adjust it to 0 before removing the size.`)
     return
   }
   variants.value.splice(i, 1)
@@ -441,6 +540,7 @@ function validateVariants() {
   return ''
 }
 
+/* ── STATUS / TOASTS ── */
 const success      = ref('')
 const error        = ref('')
 const loading      = ref(false)
@@ -448,12 +548,72 @@ const pageLoading  = ref(true)
 const existingImage = ref(null)
 const newImageFile  = ref(null)
 const previewImage  = ref(null)
+const dragging      = ref(false)
+let toastTimer = null
 
-function handleImageUpload(e) {
-  newImageFile.value = e.target.files[0]
-  previewImage.value = URL.createObjectURL(newImageFile.value)
+function flashError(msg) {
+  success.value = ''
+  error.value = msg
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { error.value = '' }, 6000)
 }
 
+/* ── IMAGE ── */
+const MAX_IMAGE_MB = 5
+
+function setImage(file) {
+  if (!file) return
+  if (!file.type.startsWith('image/')) { flashError('Please choose an image file (PNG or JPG).'); return }
+  if (file.size > MAX_IMAGE_MB * 1024 * 1024) { flashError(`That image is larger than ${MAX_IMAGE_MB} MB.`); return }
+  if (previewImage.value) URL.revokeObjectURL(previewImage.value)
+  newImageFile.value = file
+  previewImage.value = URL.createObjectURL(file)
+}
+function handleImageUpload(e) {
+  setImage(e.target.files?.[0])
+  e.target.value = ''   // lets you pick the same file again later
+}
+function onDrop(e) {
+  dragging.value = false
+  setImage(e.dataTransfer?.files?.[0])
+}
+/** Throws away a newly picked image and goes back to the saved one. */
+function discardNewImage() {
+  if (previewImage.value) URL.revokeObjectURL(previewImage.value)
+  previewImage.value = null
+  newImageFile.value = null
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+/* ── UNSAVED-CHANGES TRACKING ── */
+const snapshot = () => JSON.stringify({
+  form: form.value,
+  image: !!newImageFile.value,
+  variants: variants.value.map(v => ({
+    id: v.VariantID,
+    specs: v.specs.map(s => [s.type, String(s.value), s.unit]),
+    sell: String(v.SellingPrice), cost: String(v.CostPrice),
+    reorder: String(v.ReorderLevel), opening: String(v.OpeningStock), adj: String(v.StockAdjustment),
+  })),
+})
+const baseline = ref('')
+const dirty = computed(() => baseline.value !== '' && snapshot() !== baseline.value)
+
+onBeforeRouteLeave(() => {
+  if (dirty.value && !window.confirm('You have unsaved changes. Leave without saving?')) return false
+})
+function onBeforeUnload(e) {
+  if (dirty.value) { e.preventDefault(); e.returnValue = '' }
+}
+// Ctrl+S / Cmd+S saves (runs the browser's required-field checks first)
+function onKeydown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    if (!loading.value && !pageLoading.value) formEl.value?.requestSubmit()
+  }
+}
+
+/* ── LOAD ── */
 async function loadData() {
   try {
     const [p, cats, sups] = await Promise.all([
@@ -466,7 +626,7 @@ async function loadData() {
     suppliers.value    = sups.data.suppliers
 
     Object.assign(form.value, {
-      ProductName: p.data.ProductName, SKU: p.data.SKU,
+      ProductName: p.data.ProductName, SKU: p.data.SKU ?? '',
       Barcode: p.data.Barcode ?? '',
       Unit: p.data.Unit, IsReturnable: p.data.IsReturnable,
       CategoryID: p.data.category?.CategoryID ?? '',
@@ -498,24 +658,28 @@ async function loadData() {
       : [{ ...newVariant(), SellingPrice: p.data.SellingPrice ?? '', CostPrice: p.data.CostPrice ?? '' }]
 
     existingImage.value = p.data.ImageURL
+    baseline.value = snapshot()
   } catch {
-    error.value = 'Failed to load product data.'
+    flashError('Failed to load product data.')
   } finally {
     pageLoading.value = false
   }
 }
 
+/* ── SAVE ── */
 async function updateProduct() {
   success.value = ''; error.value = ''
+  if (loading.value) return
 
   const variantError = validateVariants()
-  if (variantError) { error.value = variantError; return }
+  if (variantError) { flashError(variantError); return }
 
   loading.value = true
   try {
     const fd = new FormData()
     fd.append('IsReturnable', form.value.IsReturnable ? 1 : 0)
     for (const key in form.value) {
+      // SKU is locked: the server keeps the stored one (or generates one if missing).
       if (key === 'IsReturnable' || key === 'SKU') continue
       fd.append(key, form.value[key] ?? '')
     }
@@ -540,16 +704,27 @@ async function updateProduct() {
     await api.post(`/api/products/${productId}`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
+    baseline.value = snapshot()   // saved → nothing is "unsaved" any more
     success.value = 'Product updated successfully!'
     setTimeout(() => router.push('/products'), 800)
   } catch (err) {
-    error.value = err?.response?.data?.message || 'Update failed. Please check your inputs.'
+    flashError(err?.response?.data?.message || 'Update failed. Please check your inputs.')
   } finally {
     loading.value = false
   }
 }
 
-onMounted(loadData)
+onMounted(() => {
+  loadData()
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('beforeunload', onBeforeUnload)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  clearTimeout(toastTimer)
+  if (previewImage.value) URL.revokeObjectURL(previewImage.value)
+})
 </script>
 
 <style scoped>
@@ -573,7 +748,7 @@ onMounted(loadData)
 
   min-height: 100%;
   background: var(--p-bg);
-  padding: 28px 28px 64px;
+  padding: 28px 28px 32px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: 20px;
   transition: background-color .22s ease;
@@ -585,6 +760,13 @@ onMounted(loadData)
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .page-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--p-accent); text-transform: uppercase; margin: 0 0 5px; }
 .page-title   { font-size: 26px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.03em; margin: 0; transition: color .22s; }
+.page-sub     { margin: 6px 0 0; font-size: 13.5px; color: var(--p-text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.sku-chip {
+  font-size: 11.5px; font-weight: 700; padding: 2px 10px; border-radius: 20px;
+  background: var(--p-surface-raised); border: 1px solid var(--p-border); color: var(--p-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.sku-chip--empty { color: #d97706; border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.10); }
 
 .btn {
   display: inline-flex; align-items: center; gap: 7px;
@@ -594,6 +776,7 @@ onMounted(loadData)
   transition: background .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s;
 }
 .btn:active { transform: scale(.98); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
 .btn--ghost   { background: var(--p-surface); border-color: var(--p-border-strong); color: var(--p-text-secondary); }
 .btn--ghost:hover { background: var(--p-surface-raised); border-color: var(--p-accent-border); color: var(--p-text-primary); }
 .btn--primary {
@@ -602,20 +785,37 @@ onMounted(loadData)
 }
 .btn--primary:hover { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
 .btn--primary:disabled { opacity: .6; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
+.kbd {
+  font-family: inherit; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
+  background: rgba(255,255,255,.22); color: #fff; margin-left: 2px;
+}
 
+/* TOASTS: fixed to the screen so they are never scrolled out of view */
+.toast-stack {
+  position: fixed; top: 16px; right: 16px; z-index: 10001;
+  display: flex; flex-direction: column; gap: 10px;
+  width: min(420px, calc(100vw - 32px)); pointer-events: none;
+}
 .alert {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; pointer-events: auto;
   padding: 12px 16px; border-radius: 12px;
   font-size: 13.5px; font-weight: 500; border: 1px solid transparent;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
 }
-.alert--success { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25); color: #10b981; }
-.alert--error   { background: rgba(244,63,94,.09);  border-color: rgba(244,63,94,.22);  color: #f43f5e; }
-html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); color: #4ADE80; }
-html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  color: #F87171; }
+.alert--success {
+  background: linear-gradient(rgba(16,185,129,.12), rgba(16,185,129,.12)), var(--p-surface);
+  border-color: rgba(16,185,129,.35); color: #059669;
+}
+.alert--error {
+  background: linear-gradient(rgba(244,63,94,.10), rgba(244,63,94,.10)), var(--p-surface);
+  border-color: rgba(244,63,94,.35); color: #e11d48;
+}
+html[data-theme="dark"] .alert--success { color: #4ADE80; }
+html[data-theme="dark"] .alert--error   { color: #F87171; }
 .alert-close { background: none; border: none; cursor: pointer; color: inherit; opacity: .6; margin-left: auto; font-size: 13px; padding: 2px; transition: opacity .15s; }
 .alert-close:hover { opacity: 1; }
 .alert-fade-enter-active, .alert-fade-leave-active { transition: opacity .22s, transform .22s; }
-.alert-fade-enter-from, .alert-fade-leave-to { opacity: 0; transform: translateY(-6px); }
+.alert-fade-enter-from, .alert-fade-leave-to { opacity: 0; transform: translateY(-8px); }
 
 /* SKELETON */
 .skeleton-card { padding: 24px; }
@@ -649,16 +849,17 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 .form-card-icon--violet { background: rgba(99,102,241,.12); color: #6366f1; }
 .form-card-icon--green  { background: rgba(16,185,129,.12); color: #10b981; }
 .form-card-icon--amber  { background: rgba(245,158,11,.12); color: #f59e0b; }
-.form-card-icon--orange { background: var(--p-accent-soft); color: var(--p-accent); }
-.form-card-icon--teal   { background: rgba(20,184,166,.12); color: #14b8a6; }
 html[data-theme="dark"] .form-card-icon--blue   { background: rgba(59,130,246,.18); }
 html[data-theme="dark"] .form-card-icon--violet { background: rgba(99,102,241,.18); }
 html[data-theme="dark"] .form-card-icon--green  { background: rgba(16,185,129,.18); }
 html[data-theme="dark"] .form-card-icon--amber  { background: rgba(245,158,11,.18); }
-html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.18); }
 .form-card-title { font-size: 15px; font-weight: 700; color: var(--p-text-primary); margin: 0 0 2px; transition: color .22s; }
 .form-card-sub   { font-size: 12.5px; color: var(--p-text-muted); margin: 0; }
 .form-card-body  { padding: 22px 24px; }
+.size-total-pill {
+  margin-left: auto; flex-shrink: 0; font-size: 11.5px; font-weight: 700;
+  padding: 4px 12px; border-radius: 20px; background: var(--p-accent-soft); color: var(--p-accent);
+}
 
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .form-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
@@ -675,6 +876,7 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
   position: absolute; left: 13px; font-size: 12px;
   color: var(--p-text-faint); pointer-events: none; z-index: 1; transition: color .22s;
 }
+.input-lock { position: absolute; right: 13px; font-size: 11px; color: var(--p-text-faint); pointer-events: none; }
 .input-prefix {
   position: absolute; left: 13px; font-size: 14px; font-weight: 700;
   color: var(--p-text-faint); pointer-events: none; z-index: 1;
@@ -689,7 +891,7 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .form-input:focus { border-color: var(--p-accent); box-shadow: 0 0 0 3px var(--p-ring); background: var(--p-surface); }
 .input-wrap:focus-within .input-icon { color: var(--p-accent); }
 .form-input::placeholder { color: var(--p-text-faint); }
-.form-input--disabled { background: var(--p-surface-raised); color: var(--p-text-faint); cursor: not-allowed; }
+.form-input--disabled { background: var(--p-surface-raised); color: var(--p-text-faint); cursor: not-allowed; padding-right: 34px; }
 .form-input--prefixed { padding-left: 30px; }
 .form-input--plain { padding-left: 14px; }
 
@@ -718,10 +920,11 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 
 .toggle-row { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; }
 .toggle-track {
-  width: 44px; height: 24px; border-radius: 999px; flex-shrink: 0;
+  width: 44px; height: 24px; border-radius: 999px; flex-shrink: 0; padding: 0; border: none;
   background: var(--p-border-strong); transition: background-color .22s ease;
   position: relative; cursor: pointer;
 }
+.toggle-track:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
 .toggle-track--on { background: var(--p-accent); }
 .toggle-thumb {
   position: absolute; top: 3px; left: 3px;
@@ -738,9 +941,10 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
   border: 2px dashed var(--p-border-strong); border-radius: 14px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   overflow: hidden; cursor: pointer; background: var(--p-surface-sunken);
-  transition: border-color .18s, background-color .22s;
+  transition: border-color .18s, background-color .22s, transform .15s;
 }
-.upload-zone:hover { border-color: var(--p-accent-border); background: var(--p-accent-soft); }
+.upload-zone:hover, .upload-zone--drag { border-color: var(--p-accent); background: var(--p-accent-soft); }
+.upload-zone--drag { transform: scale(1.01); }
 .upload-zone--has-image { border-style: solid; border-color: var(--p-border); }
 .upload-preview { max-height: 160px; max-width: 100%; object-fit: contain; border-radius: 8px; }
 .upload-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px; text-align: center; }
@@ -748,20 +952,27 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .upload-text { font-size: 13px; font-weight: 600; color: var(--p-text-muted); margin: 0; }
 .upload-hint { font-size: 11.5px; color: var(--p-text-faint); margin: 0; }
 .upload-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.upload-change {
+  position: absolute; right: 10px; bottom: 10px; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
+  padding: 5px 11px; border-radius: 20px; background: rgba(15,23,42,.72); color: #fff;
+  opacity: 0; transition: opacity .15s;
+}
+.upload-zone:hover .upload-change { opacity: 1; }
 .upload-remove {
   align-self: flex-start; margin-top: 6px;
   background: none; border: none; cursor: pointer;
-  font-size: 12px; font-weight: 600; color: #f43f5e; font-family: inherit;
-  display: flex; align-items: center; gap: 5px; padding: 2px 0; transition: opacity .15s;
+  font-size: 12px; font-weight: 600; color: var(--p-text-muted); font-family: inherit;
+  display: flex; align-items: center; gap: 5px; padding: 2px 0; transition: color .15s;
 }
-.upload-remove:hover { opacity: .7; }
+.upload-remove:hover { color: var(--p-accent); }
 
 /* SIZES, PRICES & STOCK */
 .variant-list { display: flex; flex-direction: column; gap: 16px; }
 .variant-card {
   border: 1.5px solid var(--p-border); border-radius: 14px;
   background: var(--p-surface-sunken); padding: 16px;
-  display: flex; flex-direction: column; gap: 14px;
+  display: flex; flex-direction: column; gap: 14px; scroll-margin: 90px;
 }
 .variant-head { display: flex; align-items: center; gap: 10px; }
 .variant-badge {
@@ -769,14 +980,19 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
   padding: 3px 10px; border-radius: 999px;
   background: var(--p-accent-soft); color: var(--p-accent);
 }
-.variant-label { font-size: 13.5px; font-weight: 600; color: var(--p-text-primary); flex: 1; min-width: 0; }
-.variant-remove, .spec-remove {
+.variant-new {
+  font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; background: rgba(16,185,129,.14); color: #059669;
+}
+.variant-label { font-size: 13.5px; font-weight: 600; color: var(--p-text-primary); flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.variant-action, .spec-remove {
   width: 30px; height: 30px; flex-shrink: 0; border: none; border-radius: 8px;
   background: transparent; color: var(--p-text-faint); cursor: pointer;
   display: flex; align-items: center; justify-content: center; font-size: 13px;
   transition: background-color .15s, color .15s;
 }
-.variant-remove:hover, .spec-remove:hover { background: rgba(244,63,94,.12); color: #f43f5e; }
+.variant-action:hover { background: var(--p-accent-soft); color: var(--p-accent); }
+.variant-action--danger:hover, .spec-remove:hover { background: rgba(244,63,94,.12); color: #f43f5e; }
 
 .spec-rows { display: flex; flex-direction: column; gap: 8px; }
 .spec-row  { display: grid; grid-template-columns: 1.3fr 1fr .9fr auto; gap: 8px; align-items: center; }
@@ -788,7 +1004,15 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
   transition: border-color .15s, color .15s, background-color .15s;
 }
 .add-spec-btn:hover { border-color: var(--p-accent); color: var(--p-accent); background: var(--p-accent-soft); }
-.variant-prices { padding-top: 14px; border-top: 1px dashed var(--p-border-strong); }
+.variant-prices-wrap { padding-top: 14px; border-top: 1px dashed var(--p-border-strong); display: flex; flex-direction: column; gap: 10px; }
+.margin-hint {
+  margin: 0; display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+  font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 20px;
+  background: rgba(16,185,129,.12); color: #059669;
+}
+.margin-hint--loss { background: rgba(244,63,94,.12); color: #e11d48; }
+html[data-theme="dark"] .margin-hint { color: #4ADE80; }
+html[data-theme="dark"] .margin-hint--loss { color: #F87171; }
 .add-variant-btn { margin-top: 16px; width: 100%; justify-content: center; border-style: dashed; }
 
 /* per-size stock block */
@@ -799,15 +1023,40 @@ html[data-theme="dark"] .form-card-icon--teal   { background: rgba(20,184,166,.1
 .stock-readout--low { color: #f59e0b; }
 .stock-readout--oos { color: #f43f5e; }
 
-.form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 4px; }
+/* FLOATING SAVE BAR — sticks to the bottom of the screen while the form is on screen */
+.save-bar {
+  position: sticky; bottom: 16px; z-index: 30;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 14px 12px 18px; border-radius: 16px;
+  background: var(--p-surface); border: 1px solid var(--p-border-strong);
+  box-shadow: 0 12px 34px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.08);
+  transition: border-color .2s, box-shadow .2s;
+}
+.save-bar--dirty { border-color: var(--p-accent); box-shadow: 0 12px 34px rgba(0,0,0,.20), 0 0 0 3px var(--p-ring); }
+.save-bar-status { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.save-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--p-border-strong); }
+.save-dot--dirty { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.22); animation: dot-pulse 1.6s ease-in-out infinite; }
+@keyframes dot-pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(245,158,11,.22); } 50% { box-shadow: 0 0 0 6px rgba(245,158,11,.10); } }
+.save-bar-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.save-bar-text strong { font-size: 13.5px; font-weight: 700; color: var(--p-text-primary); }
+.save-bar-meta { font-size: 12px; color: var(--p-text-muted); }
+.save-bar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
 @media (max-width: 800px) {
-  .prod-page { padding: 16px 16px 48px; }
+  .prod-page { padding: 16px 16px 24px; }
   .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
   .spec-row { grid-template-columns: 1fr 1fr; }
   .spec-row .spec-remove { grid-column: 2; justify-self: end; }
-  .form-actions { flex-direction: column-reverse; align-items: stretch; }
-  .btn { justify-content: center; }
   .skeleton-grid { grid-template-columns: 1fr; }
+  .save-bar { bottom: 10px; padding: 10px; border-radius: 14px; }
+  .save-bar-status { display: none; }
+  .save-bar-actions { width: 100%; }
+  .save-bar-actions .btn { flex: 1; justify-content: center; }
+  .save-bar-actions .btn--ghost { flex: 0 0 auto; }
+  .kbd { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .save-dot--dirty, .skeleton-icon, .skeleton-line, .skeleton-field { animation: none; }
+  .alert-fade-enter-active, .alert-fade-leave-active { transition: none; }
 }
 </style>

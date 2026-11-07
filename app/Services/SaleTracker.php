@@ -21,8 +21,12 @@ class SaleTracker
      * The offcut also gets a BasePrice (baseline for resale):
      *   list price of the uncut piece - price the cut was sold for   (e.g. 370 - 235 = 135).
      * It only pre-fills the price in the POS; the cashier can still change it.
+     *
+     * PROFIT ALLOCATION: $alloc (from ProfitAllocator::forCut) holds the cost/profit that
+     * was NOT booked on the cut sale. It is stored on the offcut (RemainingCost /
+     * RemainingProfit) and booked later, once, when the offcut is sold.
      */
-    public static function logItem(int $saleId, array $item, $variant, $product, ?int $userId): void
+    public static function logItem(int $saleId, array $item, $variant, $product, ?int $userId, ?array $alloc = null): void
     {
         $cut   = $item['cut'] ?? null;
         $isCut = is_array($cut)
@@ -71,7 +75,15 @@ class SaleTracker
                 $data['BasePrice'] = $base > 0 ? $base : null;
             }
 
-            ProductRemnant::create($data);
+            // Cost + profit still to be booked when this leftover is sold.
+            if ($alloc !== null) {
+                $data['RemainingCost']   = $alloc['rest_cost'];
+                $data['RemainingProfit'] = $alloc['rest_profit'];
+            }
+
+            // forceFill: the new columns work even if the model's $fillable doesn't list them.
+            $remnant = new ProductRemnant();
+            $remnant->forceFill($data)->save();
         }
     }
 

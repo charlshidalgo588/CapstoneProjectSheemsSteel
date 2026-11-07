@@ -2,324 +2,353 @@
   <Layout title="Home">
     <div class="dash">
 
-      <!-- ── PAGE HEADER ── -->
+      <!-- HEADER -->
       <div class="page-header">
-        <div class="page-header-left">
-          <p class="page-eyebrow">Sales Intelligence</p>
+        <div>
           <h1 class="page-title">Dashboard</h1>
+          <p class="page-sub">
+            <span>{{ todayLabel }}</span>
+            <span v-if="loading" class="status status--busy"><i class="fa-solid fa-spinner fa-spin"></i> Updating…</span>
+            <span v-else-if="lastUpdated" class="status"><i class="live-dot"></i>Updated {{ lastUpdated }}</span>
+          </p>
         </div>
         <div class="page-header-right">
-          <div class="range-select-wrap">
-            <i class="fa-regular fa-calendar range-icon"></i>
-            <select v-model="selectedDateRange" @change="loadDashboard" class="range-select">
-              <option value="today">Today</option>
-              <option value="this_week">This Week</option>
-              <option value="this_month">This Month</option>
-            </select>
-            <i class="fa-solid fa-chevron-down range-caret"></i>
-          </div>
-          <router-link to="/reports" class="full-report-link">
-            Full Report<i class="fa-solid fa-arrow-right"></i>
-          </router-link>
+          <router-link :to="{ name: 'sales-transactions' }" class="btn"><i class="fa-solid fa-receipt"></i>Transactions</router-link>
+          <button type="button" class="btn btn--primary" :disabled="loading" aria-label="Refresh dashboard" @click="loadDashboard()">
+            <i class="fa-solid fa-rotate" :class="{ 'fa-spin': loading }"></i>Refresh
+          </button>
         </div>
       </div>
 
-      <!-- ── KPI STRIP ── -->
-      <div class="kpi-strip">
+      <!-- NOTICES -->
+      <div v-if="loadError" class="notice notice--error" role="alert">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>{{ loadError }}</span>
+        <button type="button" class="notice-btn" @click="loadDashboard()">Try again</button>
+      </div>
+      <div v-if="outOfStockCount > 0" class="notice notice--error" role="status">
+        <i class="fa-solid fa-circle-xmark"></i>
+        <span><strong>{{ outOfStockCount }} {{ outOfStockCount === 1 ? 'item is' : 'items are' }} out of stock.</strong> Customers can't buy {{ outOfStockCount === 1 ? 'it' : 'them' }} until restocked.</span>
+        <router-link :to="{ name: 'products', query: { stockFilter: 'out' } }" class="notice-btn">View out of stock</router-link>
+      </div>
+      <div v-if="lowStockCount > 0" class="notice notice--warn" role="status">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span><strong>{{ lowStockCount }} {{ lowStockCount === 1 ? 'item is' : 'items are' }} low on stock.</strong> Reorder soon to avoid running out.</span>
+        <router-link :to="{ name: 'products', query: { stockFilter: 'low' } }" class="notice-btn">View low stock</router-link>
+      </div>
 
-        <div class="kpi-card kpi-card--featured">
-          <div class="kpi-card-inner">
-            <div class="kpi-icon-wrap kpi-icon-wrap--orange">
-              <i class="fa-solid fa-peso-sign"></i>
+      <!-- SKELETON -->
+      <div v-if="firstLoad" class="dash-body" aria-busy="true" aria-label="Loading dashboard">
+        <div class="row-two">
+          <div class="card sk-card"><div class="sk sk-line"></div><div class="sk sk-big"></div><div class="sk sk-bar"></div><div class="sk sk-block"></div></div>
+          <div class="card sk-card"><div class="sk sk-line"></div><div class="sk sk-big"></div><div class="sk sk-bar"></div><div class="sk sk-block"></div></div>
+        </div>
+        <div class="card sk-card"><div class="sk sk-line"></div><div class="sk sk-block sk-tall"></div></div>
+      </div>
+
+      <div v-else class="dash-body" :class="{ 'is-loading': loading }" :aria-busy="loading">
+
+        <!-- TODAY + MONTH PACE -->
+        <div class="row-two">
+
+          <section class="card card--hero" style="--d: 0ms" aria-labelledby="hm-today">
+            <header class="card-header">
+              <div class="card-head-l">
+                <span class="card-icon"><i class="fa-solid fa-sun"></i></span>
+                <div>
+                  <h2 id="hm-today" class="card-title">Today</h2>
+                  <p class="card-sub">Sales so far</p>
+                </div>
+              </div>
+              <div class="seg" role="group" aria-label="Daily target">
+                <button v-for="t in targetModes" :key="t.key" type="button" class="seg-btn" :class="{ 'seg-btn--active': targetMode === t.key }" :aria-pressed="targetMode === t.key" @click="setTargetMode(t.key)">{{ t.label }}</button>
+              </div>
+            </header>
+
+            <div class="hero-row">
+              <div class="hero-main">
+                <p class="big-value">₱{{ price(anim.today) }}</p>
+                <p v-if="todayTrend.available" class="trend-line">
+                  <span class="kpi-trend" :class="todayTrend.direction" :title="`Yesterday: ₱${price(yesterdayTotal)}`"><i :class="trendIcon(todayTrend)"></i>{{ todayTrend.text }}</span>
+                  <span>vs yesterday</span>
+                </p>
+              </div>
+
+              <div v-if="spark" class="spark" role="img" aria-label="Sales over the last 14 days">
+                <svg viewBox="0 0 120 40" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="hm-spark-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" style="stop-color: var(--d-accent); stop-opacity: .28" />
+                      <stop offset="100%" style="stop-color: var(--d-accent); stop-opacity: 0" />
+                    </linearGradient>
+                  </defs>
+                  <path class="spark-area" :class="{ 'is-on': barsReady }" :d="spark.area" fill="url(#hm-spark-fill)" />
+                  <path class="spark-line" :class="{ 'is-on': barsReady }" :d="spark.line" pathLength="1" />
+                </svg>
+                <span class="spark-cap">Last {{ spark.days }} days</span>
+              </div>
             </div>
-            <div class="kpi-body">
-              <p class="kpi-label">Total Sales</p>
-              <p class="kpi-value">
-                ₱{{ formatNumber(displayedMonthlyTotal) }}
-                <span
-                  v-if="salesTrend.available"
-                  class="kpi-trend"
-                  :class="salesTrend.direction"
-                  :title="`vs ${comparisonLabel}`"
-                >
-                  <i :class="trendIcon"></i>{{ salesTrend.percent }}%
-                </span>
+
+            <div class="goal">
+              <div class="goal-head">
+                <span>{{ goalLabel }}</span>
+                <label v-if="targetMode === 'custom'" class="goal-input">₱<input type="number" min="0" step="100" inputmode="decimal" v-model.number="customTarget" aria-label="Custom daily target" @change="saveTarget" /></label>
+                <strong v-else-if="target > 0">₱{{ price(target) }}</strong>
+              </div>
+              <div class="goal-track" role="progressbar" :aria-valuenow="Math.min(goalPct, 100)" aria-valuemin="0" aria-valuemax="100">
+                <div class="goal-fill" :class="{ 'goal-fill--done': goalPct >= 100 }" :style="{ width: goalBarPct + '%' }"></div>
+              </div>
+              <p class="goal-sub">{{ goalText }}</p>
+            </div>
+
+            <dl class="mini-stats">
+              <div class="ms"><dt><i class="fa-solid fa-receipt"></i>Transactions</dt><dd>{{ formatNumber(anim.tx) }}</dd></div>
+              <div class="ms"><dt><i class="fa-solid fa-box-open"></i>Items sold</dt><dd>{{ formatNumber(anim.items) }}</dd></div>
+              <div class="ms"><dt><i class="fa-solid fa-tag"></i>Average sale</dt><dd>₱{{ price(anim.avg) }}</dd></div>
+              <div class="ms"><dt><i class="fa-solid fa-arrow-trend-up"></i>Profit</dt><dd class="green">₱{{ price(anim.todayProfit) }}</dd></div>
+            </dl>
+          </section>
+
+          <section class="card" style="--d: 70ms" aria-labelledby="hm-month">
+            <header class="card-header">
+              <div class="card-head-l">
+                <span class="card-icon card-icon--blue"><i class="fa-solid fa-calendar-days"></i></span>
+                <div>
+                  <h2 id="hm-month" class="card-title">{{ monthName }} so far</h2>
+                  <p class="card-sub">Day {{ dayOfMonth }} of {{ daysInMonth }}</p>
+                </div>
+              </div>
+            </header>
+
+            <p class="big-value big-value--sm">₱{{ price(anim.month) }}</p>
+            <p v-if="lastMonthTotal" class="trend-line">
+              <span class="kpi-trend" :class="monthBeat ? 'up' : 'flat'" :title="`Last month in full: ₱${price(lastMonthTotal)}`"><i :class="monthBeat ? 'fa-solid fa-arrow-trend-up' : 'fa-solid fa-flag-checkered'"></i>{{ monthBeat ? 'Beat last month' : '₱' + price(monthGap) + ' to go' }}</span>
+              <span>{{ monthBeat ? `last month in full was ₱${price(lastMonthTotal)}` : `to match last month in full (₱${price(lastMonthTotal)})` }}</span>
+            </p>
+
+            <div class="goal">
+              <div class="goal-head"><span>Month progress</span><strong>{{ Math.round(monthProgress) }}%</strong></div>
+              <div class="goal-track"><div class="goal-fill goal-fill--blue" :style="{ width: monthBarPct + '%' }"></div></div>
+            </div>
+
+            <dl class="mini-stats mini-stats--3">
+              <div class="ms"><dt><i class="fa-solid fa-arrow-trend-up"></i>Profit</dt><dd class="green">₱{{ price(anim.profit) }}</dd></div>
+              <div class="ms"><dt><i class="fa-solid fa-percent"></i>Margin</dt><dd>{{ anim.margin.toFixed(1) }}%</dd></div>
+              <div class="ms">
+                <dt><i class="fa-solid fa-trophy"></i>Best day</dt>
+                <dd>{{ bestDay ? '₱' + price(bestDay.total) : '—' }}</dd>
+                <span class="ms-sub">{{ bestDay ? bestDayLabel : 'No sales yet' }}</span>
+              </div>
+            </dl>
+
+          </section>
+        </div>
+
+        <!-- CALENDAR -->
+        <section class="card" style="--d: 140ms" aria-labelledby="hm-cal">
+          <header class="card-header">
+            <div class="card-head-l">
+              <span class="card-icon card-icon--violet"><i class="fa-solid fa-table-cells"></i></span>
+              <div>
+                <h2 id="hm-cal" class="card-title">{{ monthName }} at a glance</h2>
+                <p class="card-sub">Darker days sold more. Select a day for its numbers.</p>
+              </div>
+            </div>
+            <div class="seg" role="group" aria-label="Calendar metric">
+              <button type="button" class="seg-btn" :class="{ 'seg-btn--active': calMetric === 'total' }" :aria-pressed="calMetric === 'total'" @click="calMetric = 'total'">Sales</button>
+              <button type="button" class="seg-btn" :class="{ 'seg-btn--active': calMetric === 'profit' }" :aria-pressed="calMetric === 'profit'" @click="calMetric = 'profit'">Profit</button>
+            </div>
+          </header>
+
+          <div class="cal-layout">
+            <div class="cal" :class="{ 'cal--profit': calMetric === 'profit' }">
+              <span v-for="(w, i) in weekdays" :key="'w' + i" class="cal-dow">{{ w }}</span>
+              <template v-for="(c, i) in calendar" :key="i">
+                <span v-if="!c" class="cal-blank"></span>
+                <button v-else type="button" class="cal-day" :style="{ '--i': i }" :class="[`lv${c.level}`, { 'cal-day--sel': c.key === activeRow.key, 'cal-day--today': c.key === todayKey }]" :disabled="c.future" :aria-pressed="c.key === activeRow.key" :aria-label="`${c.d}: ₱${price(c.v)}`" :title="`₱${price(c.v)}`" @click="selectDay(c.key)">{{ c.d }}</button>
+              </template>
+              <div class="cal-scale"><span>Less</span><i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>More</span></div>
+            </div>
+
+            <div class="day" aria-live="polite">
+              <div class="day-head">
+                <h3 class="day-title">{{ activeLabel }}</h3>
+                <span v-if="activeIsToday" class="chip">Today</span>
+                <button v-else type="button" class="link-btn" @click="backToToday">Back to today</button>
+              </div>
+              <p class="day-value">₱{{ price(anim.day) }}</p>
+              <div v-if="activeRow.total > 0" class="split-wrap">
+                <div class="split-bar" role="img" :aria-label="`Profit ${activeMargin} percent of sales`">
+                  <span class="split-seg split-seg--profit" :style="{ width: (splitReady ? activeProfitPct : 0) + '%' }" :title="`Profit ₱${price(activeRow.profit)}`"></span>
+                  <span class="split-seg split-seg--cost" :style="{ width: (splitReady ? 100 - activeProfitPct : 0) + '%' }" :title="`Cost ₱${price(activeCost)}`"></span>
+                </div>
+                <div class="split-legend"><span><i class="sl sl--profit"></i>Profit</span><span><i class="sl sl--cost"></i>Cost of goods</span></div>
+              </div>
+              <p v-else class="muted">No sales on this day.</p>
+              <dl class="facts">
+                <div><dt>Profit</dt><dd class="green">₱{{ price(activeRow.profit) }}</dd></div>
+                <div><dt>Cost of goods</dt><dd>₱{{ price(activeCost) }}</dd></div>
+                <div><dt>Margin</dt><dd>{{ activeMargin }}%</dd></div>
+                <div><dt>Share of month</dt><dd>{{ activeShare }}%</dd></div>
+                <div><dt>Vs daily average</dt><dd :class="activeVsAvg >= 0 ? 'green' : 'red'">{{ activeVsAvg >= 0 ? '+' : '' }}{{ activeVsAvg.toFixed(1) }}%</dd></div>
+              </dl>
+            </div>
+          </div>
+        </section>
+
+        <!-- SALES MIX + STOCK -->
+        <div class="row-two">
+
+          <section class="card" style="--d: 210ms" aria-labelledby="hm-mix">
+            <header class="card-header">
+              <div class="card-head-l">
+                <span class="card-icon card-icon--green"><i class="fa-solid fa-chart-pie"></i></span>
+                <div>
+                  <h2 id="hm-mix" class="card-title">Where sales come from</h2>
+                  <p class="card-sub">Share of {{ monthName }} {{ mixMetric === 'qty' ? 'units sold' : 'sales' }} by product</p>
+                </div>
+              </div>
+              <div class="seg" role="group" aria-label="Measure by">
+                <button type="button" class="seg-btn" :class="{ 'seg-btn--active': mixMetric === 'sales' }" :aria-pressed="mixMetric === 'sales'" @click="setMixMetric('sales')">By sales</button>
+                <button type="button" class="seg-btn" :class="{ 'seg-btn--active': mixMetric === 'qty' }" :aria-pressed="mixMetric === 'qty'" @click="setMixMetric('qty')">By units</button>
+              </div>
+            </header>
+
+            <div v-if="hasMix" class="mix">
+              <p class="mix-insight">
+                <i class="fa-solid fa-lightbulb"></i>
+                <span>{{ mixInsight }}<template v-if="mixConcentrated"> Most of your sales rely on this product, so keep it well stocked.</template></span>
               </p>
-              <p class="kpi-sub">
-                Monthly Revenue<span v-if="salesTrend.available"> · vs {{ comparisonLabel }}</span>
-              </p>
-            </div>
-          </div>
-          <div class="kpi-sparkline">
-            <canvas id="sparklineChart" v-if="hasPeriodSales"></canvas>
-            <div v-else class="sparkline-empty">
-              <span class="sparkline-empty-line"></span>
-              <span class="sparkline-empty-text">No data yet</span>
-            </div>
-          </div>
-          <div class="kpi-accent-bar kpi-accent-bar--orange"></div>
-        </div>
 
-        <div class="kpi-card">
-          <div class="kpi-card-inner">
-            <div class="kpi-icon-wrap kpi-icon-wrap--green">
-              <i class="fa-solid fa-arrow-trend-up"></i>
-            </div>
-            <div class="kpi-body">
-              <p class="kpi-label">Total Profit</p>
-              <p class="kpi-value kpi-value--green">₱{{ formatNumber(displayedTotalProfit) }}</p>
-              <p class="kpi-sub">Net Earnings · {{ profitMarginPct }}% margin</p>
-            </div>
-          </div>
-          <div class="kpi-accent-bar kpi-accent-bar--green"></div>
-        </div>
+              <div class="mix-body">
+                <div class="donut">
+                  <svg viewBox="0 0 200 200" role="group" aria-label="Share of sales by product">
+                    <circle class="donut-track" cx="100" cy="100" r="74" />
+                    <circle
+                      v-for="(a, i) in mixArcs" :key="'arc' + i"
+                      class="donut-seg" :class="{ 'is-on': focusIdx === i, 'is-dim': focusIdx !== null && focusIdx !== i }"
+                      cx="100" cy="100" r="74" transform="rotate(-90 100 100)"
+                      :stroke="mixRows[i].color"
+                      :stroke-dasharray="`${mixReady ? a.len : 0} ${a.C}`"
+                      :stroke-dashoffset="a.offset"
+                      tabindex="0" role="button"
+                      :aria-label="`${mixRows[i].name}, ${mixRows[i].pct.toFixed(1)} percent`"
+                      @mouseenter="hoverIdx = i" @mouseleave="hoverIdx = null"
+                      @focus="hoverIdx = i" @blur="hoverIdx = null"
+                      @click="pickMix(i)" @keydown.enter.prevent="pickMix(i)" @keydown.space.prevent="pickMix(i)"
+                    />
+                  </svg>
+                  <div class="donut-center" aria-live="polite">
+                    <template v-if="focusRow">
+                      <strong>{{ focusRow.pct.toFixed(1) }}%</strong>
+                      <span class="dc-name">{{ focusRow.name }}</span>
+                      <span class="dc-sub">{{ mixMetric === 'qty' ? formatNumber(focusRow.qty) + ' units' : '₱' + price(focusRow.sales) }}</span>
+                    </template>
+                    <template v-else>
+                      <strong>{{ mixMetric === 'qty' ? formatNumber(mixTotal) : '₱' + compact(mixTotal) }}</strong>
+                      <span class="dc-name">{{ mixMetric === 'qty' ? 'Units sold' : 'Total sales' }}</span>
+                      <span class="dc-sub">Hover or select a slice</span>
+                    </template>
+                  </div>
+                </div>
 
-        <div class="kpi-card">
-          <div class="kpi-card-inner">
-            <div class="kpi-icon-wrap kpi-icon-wrap--blue">
-              <i class="fa-solid fa-bolt"></i>
-            </div>
-            <div class="kpi-body">
-              <p class="kpi-label">Today's Sales</p>
-              <p class="kpi-value kpi-value--blue">₱{{ formatNumber(displayedTodaySales) }}</p>
-              <p class="kpi-sub">{{ transactionsToday }} transactions</p>
-            </div>
-          </div>
-          <div class="kpi-accent-bar kpi-accent-bar--blue"></div>
-        </div>
-
-        <div class="kpi-card">
-          <div class="kpi-card-inner">
-            <div class="kpi-icon-wrap kpi-icon-wrap--violet">
-              <i class="fa-solid fa-box-open"></i>
-            </div>
-            <div class="kpi-body">
-              <p class="kpi-label">Items Sold Today</p>
-              <p class="kpi-value kpi-value--violet">{{ formatNumber(displayedItemsSoldToday) }}</p>
-              <p class="kpi-sub">Products moved</p>
-            </div>
-          </div>
-          <div class="kpi-accent-bar kpi-accent-bar--violet"></div>
-        </div>
-
-      </div>
-
-      <!-- ── MAIN CHART (simplified glance view — full trend lives on Reports) ── -->
-      <div class="card card--main">
-        <div class="card-header">
-          <div>
-            <p class="card-eyebrow">Trend</p>
-            <h2 class="card-title">Sales &amp; Profit, {{ rangeLabel }}</h2>
-          </div>
-          <router-link to="/reports" class="card-header-link">
-            Full trend &amp; export<i class="fa-solid fa-arrow-right"></i>
-          </router-link>
-        </div>
-        <div class="chart-area chart-area--medium">
-          <canvas id="monthlySalesChart" v-if="hasPeriodSales"></canvas>
-          <div v-else class="chart-empty-state">
-            <i class="fa-solid fa-chart-line chart-empty-icon"></i>
-            <p class="chart-empty-title">No sales recorded yet</p>
-            <p class="chart-empty-sub">This isn't loading — there's simply no sales data for {{ rangeLabel.toLowerCase() }} so far.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- ── SECOND ROW ── -->
-      <div class="row-2">
-
-        <!-- Today's Margin — a genuine whole split into two real parts
-             (profit vs. cost of goods for today's sales), so a donut
-             is the honest chart here, unlike the old "Today's Sales /
-             Today's Profit / Items Sold" trio which weren't parts of
-             one total. -->
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <p class="card-eyebrow">Snapshot</p>
-              <h2 class="card-title">Today's Margin</h2>
-            </div>
-          </div>
-          <div class="chart-area chart-area--donut">
-            <template v-if="hasTodaySales">
-              <canvas id="todayMarginChart"></canvas>
-              <div class="donut-center">
-                <p class="donut-center-value">{{ todaysMarginPct }}%</p>
-                <p class="donut-center-label">Margin</p>
+                <ul class="mix-list">
+                  <li v-for="(r, i) in mixRows" :key="r.name + i" :class="{ 'mix-item--sel': mixIdx === i }">
+                    <button type="button" class="mix-row" :class="{ 'mix-row--on': focusIdx === i && mixIdx !== i }" :aria-pressed="mixIdx === i" @click="pickMix(i)" @mouseenter="hoverIdx = i" @mouseleave="hoverIdx = null" @focus="hoverIdx = i" @blur="hoverIdx = null">
+                      <span class="mix-top">
+                        <i class="mix-dot" :style="{ background: r.color }"></i>
+                        <span class="mix-name">{{ r.name }}</span>
+                        <span class="mix-amt">{{ mixMetric === 'qty' ? formatNumber(r.qty) + ' units' : '₱' + price(r.sales) }}</span>
+                        <span class="mix-pct">{{ r.pct.toFixed(1) }}%</span>
+                      </span>
+                      <span class="mix-bar"><span class="mix-bar-fill" :style="{ width: (mixReady ? r.pct : 0) + '%', background: r.color }"></span></span>
+                    </button>
+                    <dl v-if="mixIdx === i" class="mix-detail">
+                      <div><dt>Sales</dt><dd>₱{{ price(r.sales) }}</dd></div>
+                      <template v-if="r.qty !== null">
+                        <div><dt>Units sold</dt><dd>{{ formatNumber(r.qty) }}</dd></div>
+                        <div><dt>Average price</dt><dd>₱{{ price(r.qty ? r.sales / r.qty : 0) }}</dd></div>
+                      </template>
+                      <div v-else><dt>Includes</dt><dd>All other products</dd></div>
+                    </dl>
+                  </li>
+                </ul>
               </div>
-            </template>
-            <div v-else class="donut-empty-state">
-              <div class="donut-empty-ring"></div>
-              <div class="donut-empty-center">
-                <i class="fa-regular fa-moon donut-empty-icon"></i>
-                <p class="donut-empty-title">No sales yet</p>
-                <p class="donut-empty-sub">today</p>
-              </div>
-            </div>
-          </div>
-          <div class="donut-legend">
-            <div class="donut-row">
-              <span class="donut-dot donut-dot--green"></span>
-              <span class="donut-row-label">Profit</span>
-              <strong>₱{{ formatNumber(todaysProfit) }}</strong>
-            </div>
-            <div class="donut-row">
-              <span class="donut-dot donut-dot--orange"></span>
-              <span class="donut-row-label">Cost of Goods</span>
-              <strong>₱{{ formatNumber(todaysCost) }}</strong>
-            </div>
-          </div>
-        </div>
 
-        <!-- Inventory — gauges only (the bar chart below repeated the
-             same four numbers, so it's been dropped in favor of one
-             clear view) -->
-        <div class="card card--wide">
-          <div class="card-header">
-            <div>
-              <p class="card-eyebrow">Stock Status</p>
-              <h2 class="card-title">Inventory Summary</h2>
+              <router-link :to="{ name: 'reports' }" class="link-btn mix-link">See the full ranking in Reports<i class="fa-solid fa-arrow-right"></i></router-link>
             </div>
-          </div>
 
-          <div class="inv-grid">
-            <div class="inv-gauge-card">
-              <div class="inv-gauge">
-                <canvas id="gaugeActive"></canvas>
-                <div class="inv-gauge-center">
-                  <span class="inv-gauge-num">{{ inventorySummary.active_items ?? 0 }}</span>
+            <div v-else class="empty">
+              <span class="empty-ico"><i class="fa-solid fa-chart-pie"></i></span>
+              <p class="empty-title">No sales this month yet</p>
+              <p class="empty-sub">Product shares will appear after your first sale.</p>
+            </div>
+          </section>
+
+          <section class="card" style="--d: 280ms" aria-labelledby="hm-stock">
+            <header class="card-header">
+              <div class="card-head-l">
+                <span class="card-icon card-icon--amber"><i class="fa-solid fa-boxes-stacked"></i></span>
+                <div>
+                  <h2 id="hm-stock" class="card-title">Needs attention</h2>
+                  <p class="card-sub">Stock on the shelf right now</p>
                 </div>
               </div>
-              <p class="inv-gauge-label">Active Items</p>
-              <p class="inv-gauge-sub">of {{ inventorySummary.total_items ?? 0 }} groups</p>
+            </header>
+
+            <div class="tile-grid">
+              <router-link :to="{ name: 'products' }" class="tile">
+                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-cubes"></i></span><i class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
+                <p class="tile-label">In hand</p>
+                <p class="tile-value">{{ formatNumber(anim.inHand) }}</p>
+                <p class="tile-sub">{{ formatNumber(inventorySummary.quantity_to_receive) }} incoming</p>
+              </router-link>
+              <router-link :to="{ name: 'products', query: { stockFilter: 'low' } }" class="tile" :class="{ 'tile--warn': lowStockCount > 0 }">
+                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-triangle-exclamation"></i></span><i class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
+                <p class="tile-label">Low stock</p>
+                <p class="tile-value">{{ formatNumber(anim.low) }}</p>
+                <p class="tile-sub">{{ lowStockCount > 0 ? 'Reorder soon' : 'Nothing running low' }}</p>
+              </router-link>
+              <router-link :to="{ name: 'products', query: { stockFilter: 'out' } }" class="tile" :class="{ 'tile--alert': outOfStockCount > 0 }">
+                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-circle-xmark"></i></span><i class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
+                <p class="tile-label">Out of stock</p>
+                <p class="tile-value">{{ formatNumber(anim.out) }}</p>
+                <p class="tile-sub">{{ outOfStockCount > 0 ? 'Restock now' : 'All available' }}</p>
+              </router-link>
             </div>
 
-            <div class="inv-gauge-card">
-              <div class="inv-gauge">
-                <canvas id="gaugeStock"></canvas>
-                <div class="inv-gauge-center">
-                  <span class="inv-gauge-num">{{ inventorySummary.quantity_in_hand ?? 0 }}</span>
-                </div>
+            <div v-if="stockCoverage" class="coverage">
+              <div class="coverage-head">
+                <span>{{ formatNumber(stockCoverage.active) }} of {{ formatNumber(stockCoverage.total) }} items active</span>
+                <strong>{{ stockCoverage.pct }}%</strong>
               </div>
-              <p class="inv-gauge-label">In Hand</p>
-              <p class="inv-gauge-sub">{{ inventorySummary.quantity_to_receive ?? 0 }} incoming</p>
+              <div class="goal-track"><div class="goal-fill goal-fill--done" :style="{ width: (barsReady ? stockCoverage.pct : 0) + '%' }"></div></div>
             </div>
 
-            <div class="inv-gauge-card inv-gauge-card--alert">
-              <div class="inv-gauge">
-                <canvas id="gaugeLow"></canvas>
-                <div class="inv-gauge-center">
-                  <span class="inv-gauge-num inv-gauge-num--red">{{ inventorySummary.low_stock_items ?? 0 }}</span>
-                </div>
-              </div>
-              <p class="inv-gauge-label">Low Stock</p>
-              <p class="inv-gauge-sub inv-gauge-sub--red">Needs reorder</p>
+            <div class="link-list">
+              <router-link :to="{ name: 'products' }"><i class="fa-solid fa-boxes-stacked"></i>Manage products<i class="fa-solid fa-chevron-right"></i></router-link>
+              <router-link :to="{ name: 'inventory-logs' }"><i class="fa-solid fa-clock-rotate-left"></i>Inventory logs<i class="fa-solid fa-chevron-right"></i></router-link>
+              <router-link :to="{ name: 'suppliers' }"><i class="fa-solid fa-truck"></i>Suppliers<i class="fa-solid fa-chevron-right"></i></router-link>
             </div>
-          </div>
+          </section>
         </div>
 
-      </div>
-
-      <!-- ── TOP SELLING (trimmed to top 5, no controls — full ranked
-           breakdown with sort/pin/tooltip lives on Reports) ── -->
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <p class="card-eyebrow">Performance</p>
-            <h2 class="card-title">Top Selling Items</h2>
-          </div>
-          <router-link to="/reports" class="card-header-link">
-            Full breakdown<i class="fa-solid fa-arrow-right"></i>
-          </router-link>
-        </div>
-
-        <div class="top-list top-list--compact">
-          <div
-            v-for="item in rankedTopItems"
-            :key="item.ProductName"
-            class="top-row top-row--static"
-            :class="`top-row--rank${item.rank <= 3 ? item.rank : 'default'}`"
-            :style="{ transitionDelay: (item.rank - 1) * 40 + 'ms' }"
-          >
-            <div class="top-row-rank" :class="`top-row-rank--${item.rank <= 3 ? item.rank : 'default'}`">
-              <i v-if="item.rank === 1" class="fa-solid fa-crown"></i>
-              <span v-else>{{ item.rank }}</span>
-            </div>
-
-            <div class="top-row-main">
-              <div class="top-row-head">
-                <span class="top-row-name">{{ item.ProductName }}</span>
-                <span class="top-row-value">₱{{ formatNumber(item.total_sales) }}</span>
-              </div>
-              <div class="top-row-bar-track">
-                <div
-                  class="top-row-bar-fill"
-                  :class="`top-row-bar-fill--rank${item.rank <= 3 ? item.rank : 'default'}`"
-                  :style="{ width: (barsReady ? item.barPct : 0) + '%' }"
-                ></div>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="!rankedTopItems.length" class="top-empty-state">
-            <i class="fa-solid fa-box-open top-empty-icon"></i>
-            <p class="top-empty-title">No sales recorded for this period yet</p>
-            <p class="top-empty-sub">This list isn't stuck loading — items will show up here as soon as sales come in.</p>
-          </div>
-        </div>
       </div>
     </div>
   </Layout>
 </template>
 
 <script>
-import Chart from 'chart.js/auto'
 import api from '@/api/axios'
 import Layout from '@/components/Layout.vue'
 
-// Maps each date-range preset to the preset that represents "the period
-// right before it," so the Total Sales trend badge can do a genuine
-// period-over-period comparison. Only covers the presets actually in
-// the picker now — deeper history (last month, last year, etc.) lives
-// on the Reports page instead.
-const PREVIOUS_PERIOD_MAP = {
-  today: { key: 'yesterday', label: 'yesterday' },
-  this_week: { key: 'last_week', label: 'last week' },
-  this_month: { key: 'last_month', label: 'last month' },
-}
+// Protected route (auth:sanctum). See routes/api.php.
+const DASHBOARD_URL = '/api/dashboard'
+const TARGET_KEY = 'home.target'
+const pad = (n) => String(n).padStart(2, '0')
 
-const RANGE_LABELS = {
-  today: 'Today',
-  this_week: 'This Week',
-  this_month: 'This Month',
-}
-
-/* ── CROSSHAIR PLUGIN ────────────────────────────────────
-   Draws a soft dashed vertical guide at the hovered index so
-   it's obvious which data point a tooltip belongs to.
-──────────────────────────────────────────────────────────── */
-const crosshairPlugin = {
-  id: 'homeDashboardCrosshair',
-  afterDraw(chart) {
-    try {
-      const active = typeof chart.getActiveElements === 'function' ? chart.getActiveElements() : []
-      if (!active || !active.length) return
-      const { ctx, chartArea } = chart
-      const x = active[0].element.x
-      ctx.save()
-      ctx.beginPath()
-      ctx.setLineDash([4, 4])
-      ctx.lineWidth = 1
-      ctx.strokeStyle = 'rgba(148,163,184,0.55)'
-      ctx.moveTo(x, chartArea.top)
-      ctx.lineTo(x, chartArea.bottom)
-      ctx.stroke()
-      ctx.restore()
-    } catch (e) {
-      /* no-op */
-    }
-  },
-}
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 export default {
   name: 'HomeView',
@@ -327,7 +356,6 @@ export default {
 
   data() {
     return {
-      selectedDateRange: 'this_month',
       todaySales: 0,
       itemsSoldToday: 0,
       transactionsToday: 0,
@@ -337,585 +365,388 @@ export default {
       topSellingItems: [],
       totalProfit: 0,
       monthlyTotal: 0,
-      charts: {},
-      isDark: false,
-      themeObserver: null,
+      yesterdayTotal: null,
+      lastMonthTotal: null,
 
-      // Animated "counting up" copies of the headline KPI numbers.
-      displayedMonthlyTotal: 0,
-      displayedTotalProfit: 0,
-      displayedTodaySales: 0,
-      displayedItemsSoldToday: 0,
+      targetModes: [
+        { key: 'yesterday', label: 'Yesterday' },
+        { key: 'average', label: 'Average' },
+        { key: 'custom', label: 'Custom' },
+      ],
+      targetMode: 'yesterday',
+      customTarget: 0,
+      calMetric: 'total',
+      selectedKey: null,
+      weekdays: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
 
-      // Period-over-period comparison for the Total Sales trend badge.
-      previousPeriodTotal: null,
-      comparisonLabel: '',
+      mixMetric: 'sales',
+      mixIdx: null,
+      hoverIdx: null,
+      mixReady: false,
 
-      // Whether bars are allowed to be at their real width yet (toggled
-      // false→true to trigger the "grow in" animation).
+      // Entrance animation state: counting numbers + progress bars that
+      // start at 0 and grow to their real value once data has loaded.
+      anim: {
+        today: 0, month: 0, tx: 0, items: 0, avg: 0, todayProfit: 0,
+        profit: 0, margin: 0, inHand: 0, low: 0, out: 0, day: 0,
+      },
       barsReady: false,
+      splitReady: false,
+      raf: 0,
+      dayRaf: 0,
+
+      firstLoad: true,
+      loading: false,
+      loadError: '',
+      lastUpdated: '',
+      requestSeq: 0,
     }
   },
 
   computed: {
-    rangeLabel() {
-      return RANGE_LABELS[this.selectedDateRange] || 'This Period'
+    todayKey() { return new Date().toLocaleDateString('en-CA') },
+    todayLabel() { return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) },
+    monthName() { return new Date().toLocaleDateString('en-US', { month: 'long' }) },
+    dayOfMonth() { return new Date().getDate() },
+    daysInMonth() { const n = new Date(); return new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate() },
+    monthProgress() { return (this.dayOfMonth / this.daysInMonth) * 100 },
+    /* The single best day of the month so far. */
+    bestDay() {
+      const rows = this.monthRows.filter((r) => r.total > 0)
+      return rows.length ? rows.reduce((a, r) => (r.total > a.total ? r : a)) : null
+    },
+    bestDayLabel() {
+      const d = this.bestDay
+      if (!d) return ''
+      return d.key === this.todayKey
+        ? 'Today'
+        : new Date(d.key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
     },
 
-    // Whether the currently selected date range actually has any sales
-    // or profit recorded. Drives the empty-state for the trend chart
-    // and sparkline so a genuinely empty period (e.g. the first day of
-    // a new month) reads as "no data yet" instead of looking like a
-    // chart that's stuck loading.
-    hasPeriodSales() {
-      const salesTotal = this.monthlySales.reduce((sum, s) => sum + this.num(s.total), 0)
-      const profitTotal = this.dailyProfit.reduce((sum, p) => sum + this.num(p.profit), 0)
-      return salesTotal > 0 || profitTotal > 0
+    /* Month so far vs last month in full — plain numbers, no forecast. */
+    monthGap() { return Math.max(this.num(this.lastMonthTotal) - this.num(this.monthlyTotal), 0) },
+    monthBeat() { return this.num(this.lastMonthTotal) > 0 && this.num(this.monthlyTotal) >= this.num(this.lastMonthTotal) },
+
+    /* LOW = above 0 but at/below reorder level. OUT = exactly 0. They never overlap. */
+    lowStockCount() { return this.num(this.inventorySummary.low_stock_items) },
+    outOfStockCount() { return this.num(this.inventorySummary.out_of_stock_items) },
+    avgTodaySale() { return this.transactionsToday ? this.num(this.todaySales) / this.num(this.transactionsToday) : 0 },
+    monthMarginPct() {
+      const t = this.num(this.monthlyTotal)
+      return t ? ((this.num(this.totalProfit) / t) * 100).toFixed(1) : '0.0'
+    },
+    todayTrend() { return this.makeTrend(this.todaySales, this.yesterdayTotal) },
+
+    /* daily target */
+    avgDaily() {
+      const rows = this.monthRows.filter((r) => r.key !== this.todayKey && r.total > 0)
+      return rows.length ? rows.reduce((a, r) => a + r.total, 0) / rows.length : 0
+    },
+    target() {
+      if (this.targetMode === 'custom') return this.num(this.customTarget)
+      if (this.targetMode === 'average') return this.avgDaily
+      return this.num(this.yesterdayTotal)
+    },
+    goalPct() { return this.target ? Math.round((this.num(this.todaySales) / this.target) * 100) : 0 },
+    goalBarPct() { return this.barsReady ? Math.min(this.goalPct, 100) : 0 },
+    monthBarPct() { return this.barsReady ? this.monthProgress : 0 },
+    goalLabel() {
+      const base = { yesterday: 'Match yesterday', average: 'Match your daily average', custom: 'Daily target' }[this.targetMode]
+      return this.goalPct >= 100 ? 'Target reached' : base
+    },
+    goalText() {
+      if (!this.target) return this.targetMode === 'custom' ? 'Enter an amount to track your progress.' : 'Not enough earlier sales to set a target.'
+      const diff = this.num(this.todaySales) - this.target
+      return diff >= 0 ? `₱${this.price(diff)} past the target (${this.goalPct}%)` : `₱${this.price(-diff)} to go (${this.goalPct}%)`
     },
 
-    // Whether today specifically has any sales yet. Drives the empty
-    // state for the Today's Margin donut — without this, zero sales
-    // would fall back to a misleading 50/50 split instead of a clear
-    // "no sales yet" indicator.
-    hasTodaySales() {
-      return this.num(this.todaySales) > 0
-    },
-
-    salesTrend() {
-      if (this.previousPeriodTotal === null) {
-        return { direction: 'flat', percent: '0.0', available: false }
-      }
-      const prev = this.num(this.previousPeriodTotal)
-      const current = this.num(this.monthlyTotal)
-      if (!prev) {
-        return { direction: current > 0 ? 'up' : 'flat', percent: '0.0', available: true }
-      }
-      const change = ((current - prev) / prev) * 100
-      if (!Number.isFinite(change)) return { direction: 'flat', percent: '0.0', available: true }
-      return {
-        direction: change > 0.5 ? 'up' : change < -0.5 ? 'down' : 'flat',
-        percent: Math.abs(change).toFixed(1),
-        available: true,
-      }
-    },
-
-    trendIcon() {
-      if (this.salesTrend.direction === 'up') return 'fa-solid fa-arrow-trend-up'
-      if (this.salesTrend.direction === 'down') return 'fa-solid fa-arrow-trend-down'
-      return 'fa-solid fa-minus'
-    },
-
-    profitMarginPct() {
-      const total = this.num(this.monthlyTotal)
-      if (!total) return '0.0'
-      return ((this.num(this.totalProfit) / total) * 100).toFixed(1)
-    },
-
-    // Looks up today's entry in the normalized dailyProfit array so the
-    // margin donut shows "Today's Profit" instead of the profit for
-    // the whole selected date range.
     todaysProfit() {
-      const todayKey = new Date().toLocaleDateString('en-CA') // 'YYYY-MM-DD', local time
-      const row = this.dailyProfit.find((p) => (p.date || '').slice(0, 10) === todayKey)
+      const row = this.dailyProfit.find((p) => String(p.date || '').slice(0, 10) === this.todayKey)
       return row ? this.num(row.profit) : 0
     },
 
-    // The other half of today's sales — what's left once profit is
-    // taken out. Together with todaysProfit this is a genuine whole,
-    // which is what makes a donut the right chart for it.
-    todaysCost() {
-      return Math.max(this.num(this.todaySales) - this.num(this.todaysProfit), 0)
+    /* days */
+    monthRows() {
+      const profitMap = {}
+      this.dailyProfit.forEach((p) => { profitMap[String(p.date || '').slice(0, 10)] = this.num(p.profit) })
+      return this.monthlySales.map((s) => {
+        const key = String(s.date || '').slice(0, 10)
+        return { key, total: this.num(s.total), profit: profitMap[key] ?? 0 }
+      })
     },
 
-    todaysMarginPct() {
-      const sales = this.num(this.todaySales)
-      if (!sales) return '0.0'
-      return ((this.num(this.todaysProfit) / sales) * 100).toFixed(1)
+    /* sparkline — daily sales for up to the last 14 days of this month */
+    spark() {
+      const now = new Date()
+      const y = now.getFullYear()
+      const m = now.getMonth()
+      const end = now.getDate()
+      const start = Math.max(1, end - 13)
+      const map = {}
+      this.monthRows.forEach((r) => { map[r.key] = r.total })
+      const values = []
+      for (let d = start; d <= end; d++) values.push(map[`${y}-${pad(m + 1)}-${pad(d)}`] || 0)
+      if (values.length < 2 || !values.some((v) => v > 0)) return null
+
+      const W = 120, H = 40, P = 4
+      const max = Math.max(...values, 1)
+      const pts = values.map((v, i) => [(i / (values.length - 1)) * W, H - P - (v / max) * (H - P * 2)])
+      const line = 'M' + pts.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' L')
+      return { line, area: `${line} L${W} ${H} L0 ${H} Z`, days: values.length }
     },
 
-    // Top 5 by sales only — the sort toggle, tooltip, and pin panel
-    // live on the Reports page's full leaderboard instead.
-    rankedTopItems() {
+    calendar() {
+      const now = new Date()
+      const y = now.getFullYear()
+      const m = now.getMonth()
+      const map = {}
+      this.monthRows.forEach((r) => { map[r.key] = r })
+      const max = Math.max(...this.monthRows.map((r) => r[this.calMetric]), 0)
+      const cells = Array(new Date(y, m, 1).getDay()).fill(null)
+      for (let d = 1; d <= this.daysInMonth; d++) {
+        const key = `${y}-${pad(m + 1)}-${pad(d)}`
+        const v = map[key] ? map[key][this.calMetric] : 0
+        const ratio = max ? v / max : 0
+        cells.push({ d, key, v, future: d > now.getDate(), level: v <= 0 ? 0 : ratio > 0.75 ? 4 : ratio > 0.5 ? 3 : ratio > 0.25 ? 2 : 1 })
+      }
+      return cells
+    },
+    activeRow() {
+      const key = this.selectedKey ?? this.todayKey
+      return this.monthRows.find((r) => r.key === key) || { key, total: 0, profit: 0 }
+    },
+    activeIsToday() { return this.activeRow.key === this.todayKey },
+    activeLabel() { return new Date(this.activeRow.key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) },
+    activeCost() { return Math.max(this.activeRow.total - this.activeRow.profit, 0) },
+    activeMargin() { const r = this.activeRow; return r.total ? ((r.profit / r.total) * 100).toFixed(1) : '0.0' },
+    activeProfitPct() { const r = this.activeRow; return r.total ? Math.min(100, Math.max(0, (r.profit / r.total) * 100)) : 0 },
+    activeShare() { const t = this.num(this.monthlyTotal); return t ? ((this.activeRow.total / t) * 100).toFixed(1) : '0.0' },
+    activeVsAvg() {
+      const rows = this.monthRows.filter((r) => r.total > 0)
+      const avg = rows.length ? rows.reduce((a, r) => a + r.total, 0) / rows.length : 0
+      return avg ? ((this.activeRow.total - avg) / avg) * 100 : 0
+    },
+
+    /* sales mix */
+    mixRows() {
+      const palette = ['#EA580C', '#6366F1', '#10B981', '#3B82F6', '#F59E0B']
+      const byQty = this.mixMetric === 'qty'
       const items = this.topSellingItems
-        .map((i) => ({
-          ...i,
-          total_sales: this.num(i.total_sales),
-          total_quantity: this.num(i.total_quantity),
-        }))
-        .sort((a, b) => b.total_sales - a.total_sales)
+        .map((i) => ({ name: i.ProductName, sales: this.num(i.total_sales), qty: this.num(i.total_quantity) }))
+        .sort((a, b) => (byQty ? b.qty - a.qty : b.sales - a.sales))
         .slice(0, 5)
+        .map((r, idx) => ({ ...r, color: palette[idx], rank: idx + 1 }))
+      if (!byQty) {
+        const other = Math.max(this.num(this.monthlyTotal) - items.reduce((a, r) => a + r.sales, 0), 0)
+        if (other > 0.5) items.push({ name: 'Other items', sales: other, qty: null, color: '#94A3B8', rank: null })
+      }
+      const val = (r) => (byQty ? r.qty : r.sales)
+      const base = items.reduce((a, r) => a + val(r), 0) || 1
+      return items.map((r) => ({ ...r, pct: (val(r) / base) * 100 }))
+    },
+    hasMix() { return this.mixRows.some((r) => r.pct > 0) },
+    mixTotal() { return this.mixRows.reduce((a, r) => a + (this.mixMetric === 'qty' ? r.qty : r.sales), 0) },
+    focusIdx() { return this.hoverIdx ?? this.mixIdx },
+    focusRow() { return this.focusIdx === null ? null : this.mixRows[this.focusIdx] || null },
+    mixArcs() {
+      const C = 2 * Math.PI * 74
+      const gap = this.mixRows.length > 1 ? 3 : 0
+      let acc = 0
+      return this.mixRows.map((r) => {
+        const full = (r.pct / 100) * C
+        const arc = { len: Math.max(full - gap, 0.5), offset: -acc, C }
+        acc += full
+        return arc
+      })
+    },
+    mixInsight() {
+      const lead = this.mixRows.find((r) => r.rank === 1)
+      if (!lead) return ''
+      return this.mixMetric === 'qty'
+        ? `${lead.name} is ${lead.pct.toFixed(1)}% of the units sold among your top products.`
+        : `${lead.name} brings in ${lead.pct.toFixed(1)}% of ${this.monthName} sales.`
+    },
+    mixConcentrated() {
+      const lead = this.mixRows.find((r) => r.rank === 1)
+      return this.mixMetric === 'sales' && !!lead && lead.pct >= 60
+    },
 
-      const maxVal = Math.max(...items.map((i) => i.total_sales), 1)
-
-      return items.map((i, idx) => ({
-        ...i,
-        rank: idx + 1,
-        barPct: Math.max((i.total_sales / maxVal) * 100, 2),
-      }))
+    stockCoverage() {
+      const total = this.num(this.inventorySummary.total_items)
+      const active = this.num(this.inventorySummary.active_items)
+      return total ? { total, active, pct: Math.min(100, Math.round((active / total) * 100)) } : null
     },
   },
 
   mounted() {
-    this.isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-    this.themeObserver = new MutationObserver(() => {
-      this.isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-      this.rebuildAllCharts()
-    })
-    this.themeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
-    })
+    try {
+      const saved = JSON.parse(localStorage.getItem(TARGET_KEY) || '{}')
+      if (['yesterday', 'average', 'custom'].includes(saved.mode)) this.targetMode = saved.mode
+      this.customTarget = this.num(saved.custom)
+    } catch (e) { /* no-op */ }
     this.loadDashboard()
-    this.animateBarsIn()
   },
 
   beforeUnmount() {
-    if (this.themeObserver) this.themeObserver.disconnect()
+    this.requestSeq++
+    cancelAnimationFrame(this.raf)
+    cancelAnimationFrame(this.dayRaf)
   },
 
   methods: {
-    async loadDashboard() {
-      try {
-        const [res] = await Promise.all([
-          api.get('/api/dashboard', { params: { date_range: this.selectedDateRange } }),
-          this.fetchPreviousPeriodTotal(),
-        ])
+    num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0 },
+    formatNumber(n) { return Math.round(this.num(n)).toLocaleString('en-US') },
+    price(v) { return this.num(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+    compact(v) { return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(this.num(v)) },
 
-        const prev = {
-          monthlyTotal: this.displayedMonthlyTotal,
-          totalProfit: this.displayedTotalProfit,
-          todaySales: this.displayedTodaySales,
-          itemsSoldToday: this.displayedItemsSoldToday,
-        }
-
-        Object.assign(this, res.data)
-        this.normalizeProfitData()
-
-        this.animateValue('displayedMonthlyTotal', prev.monthlyTotal, this.monthlyTotal)
-        this.animateValue('displayedTotalProfit', prev.totalProfit, this.totalProfit)
-        this.animateValue('displayedTodaySales', prev.todaySales, this.todaySales)
-        this.animateValue('displayedItemsSoldToday', prev.itemsSoldToday, this.itemsSoldToday)
-
-        this.$nextTick(() => {
-          this.rebuildAllCharts()
-          this.animateBarsIn()
-        })
-      } catch (err) {
-        console.error('Dashboard load error:', err)
-      }
+    makeTrend(current, previous) {
+      if (previous === null || previous === undefined) return { direction: 'flat', text: '', available: false }
+      const prev = this.num(previous)
+      const cur = this.num(current)
+      if (!prev) return cur > 0 ? { direction: 'up', text: 'New', available: true } : { direction: 'flat', text: '0.0%', available: true }
+      const change = ((cur - prev) / prev) * 100
+      return { direction: change > 0.5 ? 'up' : change < -0.5 ? 'down' : 'flat', text: `${Math.abs(change).toFixed(1)}%`, available: true }
+    },
+    trendIcon(t) {
+      return t.direction === 'up' ? 'fa-solid fa-arrow-trend-up' : t.direction === 'down' ? 'fa-solid fa-arrow-trend-down' : 'fa-solid fa-minus'
     },
 
-    async fetchPreviousPeriodTotal() {
-      const mapping = PREVIOUS_PERIOD_MAP[this.selectedDateRange]
-      if (!mapping) {
-        this.previousPeriodTotal = null
-        this.comparisonLabel = ''
+    setTargetMode(mode) { this.targetMode = mode; this.saveTarget() },
+    saveTarget() {
+      if (!(this.customTarget >= 0)) this.customTarget = 0
+      try { localStorage.setItem(TARGET_KEY, JSON.stringify({ mode: this.targetMode, custom: this.customTarget })) } catch (e) { /* no-op */ }
+    },
+
+    /* day selection — count the amount up and regrow the split bar */
+    selectDay(key) {
+      this.selectedKey = key === this.todayKey ? null : key
+      this.animateDay()
+    },
+    backToToday() {
+      this.selectedKey = null
+      this.animateDay()
+    },
+    animateDay() {
+      this.animateTo({ day: this.activeRow.total }, 500, 'dayRaf')
+      this.grow('splitReady')
+    },
+
+    /* sales mix */
+    pickMix(i) { this.mixIdx = this.mixIdx === i ? null : i },
+    setMixMetric(m) {
+      if (this.mixMetric === m) return
+      this.mixMetric = m
+      this.mixIdx = null
+      this.hoverIdx = null
+      this.animateMix()
+    },
+    animateMix() {
+      this.grow('mixReady')
+    },
+
+    /* ── ENTRANCE ANIMATION ─────────────────────────────────
+       Counts the given numbers from their current value to the target
+       with an ease-out curve. `rafKey` lets the day-picker run its own
+       tween without cancelling the main one. Honors reduced motion. */
+    animateTo(targets, duration = 800, rafKey = 'raf') {
+      cancelAnimationFrame(this[rafKey])
+
+      if (prefersReducedMotion()) {
+        Object.assign(this.anim, targets)
         return
       }
-      try {
-        const res = await api.get('/api/dashboard', { params: { date_range: mapping.key } })
-        this.previousPeriodTotal = this.num(res.data?.monthlyTotal)
-        this.comparisonLabel = mapping.label
-      } catch (err) {
-        console.error('Previous period fetch error:', err)
-        this.previousPeriodTotal = null
-        this.comparisonLabel = ''
-      }
-    },
 
-    rebuildAllCharts() {
-      // Each chart is rendered independently — if one throws (bad data,
-      // a plugin edge case, etc.) the rest still draw instead of the
-      // whole dashboard going blank.
-      const renderers = [
-        this.renderMainChart,
-        this.renderSparkline,
-        this.renderTodayMarginChart,
-        this.renderInventoryGauges,
-      ]
-      renderers.forEach((renderFn) => {
-        try {
-          renderFn.call(this)
-        } catch (err) {
-          console.error(`Chart render failed (${renderFn.name}):`, err)
-        }
-      })
-    },
-
-    normalizeProfitData() {
-      const profitMap = {}
-      this.dailyProfit.forEach((p) => { profitMap[p.date] = p.profit })
-      this.dailyProfit = this.monthlySales.map((s) => ({
-        date: s.date,
-        profit: profitMap[s.date] ?? 0,
-      }))
-    },
-
-    destroyChart(id) {
-      if (this.charts[id]) {
-        this.charts[id].destroy()
-        delete this.charts[id]
-      }
-      // Safety net: if a previous render threw partway through (before
-      // `this.charts[id]` got assigned), Chart.js may still have an
-      // instance attached to this canvas internally. Without this,
-      // the next render throws "Canvas is already in use".
-      const el = document.getElementById(id)
-      if (el) {
-        const orphan = Chart.getChart(el)
-        if (orphan) orphan.destroy()
-      }
-    },
-
-    // Some API responses serialize decimals as strings (e.g. "1234.50").
-    // Using "+" to sum those concatenates instead of adding, so every
-    // arithmetic touchpoint should coerce through this first.
-    num(v) {
-      const n = Number(v)
-      return Number.isFinite(n) ? n : 0
-    },
-
-    formatNumber(n) {
-      return Math.round(this.num(n)).toLocaleString()
-    },
-
-    formatDate(date) {
-      if (!date) return ''
-      return new Date(date).toLocaleDateString('en-US', { month: 'short', day: '2-digit' })
-    },
-
-    // Eases a data() property from `from` to `to` over `duration` ms.
-    animateValue(key, from, to, duration = 750) {
+      const from = {}
+      Object.keys(targets).forEach((k) => { from[k] = this.anim[k] })
       const start = performance.now()
+
       const tick = (now) => {
-        const progress = Math.min((now - start) / duration, 1)
-        const eased = 1 - Math.pow(1 - progress, 3)
-        this[key] = from + (to - from) * eased
-        if (progress < 1) requestAnimationFrame(tick)
-        else this[key] = to
-      }
-      requestAnimationFrame(tick)
-    },
-
-    // Drops every leaderboard bar to 0 width, then flips them to their
-    // real width on the next paint so the CSS width transition actually
-    // has something to animate from.
-    animateBarsIn() {
-      this.barsReady = false
-      this.$nextTick(() => {
-        requestAnimationFrame(() => {
-          this.barsReady = true
-        })
-      })
-    },
-
-    /* ── THEME HELPERS ─────────────────────────────────────
-       All chart colors resolve through these helpers so a
-       single isDark flag flips every chart at once.
-    ─────────────────────────────────────────────────────── */
-    th() {
-      const dark = this.isDark
-      return {
-        gridColor:    dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)',
-        tickColor:    dark ? '#8B90A8'                : '#A8A29E',
-        tooltipBg:    dark ? '#1E2130'                : '#1C1917',
-        tooltipTitle: dark ? '#8B90A8'                : '#A8A29E',
-        tooltipBody:  dark ? '#E8EAF0'                : '#F5F5F4',
-        tooltipBorder:dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.06)',
-      }
-    },
-
-    tooltip() {
-      const t = this.th()
-      return {
-        enabled: true,
-        backgroundColor: t.tooltipBg,
-        titleColor: t.tooltipTitle,
-        titleFont: { size: 11, weight: '600', family: 'Inter' },
-        bodyColor: t.tooltipBody,
-        bodyFont: { size: 12.5, weight: '600', family: 'Inter' },
-        padding: 12,
-        cornerRadius: 10,
-        caretSize: 6,
-        borderColor: t.tooltipBorder,
-        borderWidth: 1,
-        displayColors: true,
-        boxWidth: 8,
-        boxHeight: 8,
-        boxPadding: 4,
-      }
-    },
-
-    // Simplified vs. the Reports trend chart on purpose: no legend
-    // toggle, no margin footer callout — just enough to see the shape
-    // of the period at a glance. Full drill-down lives on Reports.
-    // Guarded by hasPeriodSales in the template (the canvas isn't
-    // rendered at all when there's no data), so `el` will simply be
-    // null here and the function no-ops via the early return below.
-    renderMainChart() {
-      const el = document.getElementById('monthlySalesChart')
-      if (!el) return
-      this.destroyChart('monthlySalesChart')
-      const t = this.th()
-
-      const merged = this.monthlySales.map((sale) => {
-        const profitRow = this.dailyProfit.find((p) => p.date === sale.date)
-        return { date: sale.date, total: this.num(sale.total), profit: this.num(profitRow?.profit) }
-      }).filter((d) => d.total > 0 || d.profit > 0)
-
-      const labels = merged.map((d) => this.formatDate(d.date))
-      const ctx = el.getContext('2d')
-
-      const orangeGrad = ctx.createLinearGradient(0, 0, 0, 200)
-      orangeGrad.addColorStop(0, 'rgba(234,88,12,0.24)')
-      orangeGrad.addColorStop(1, 'rgba(234,88,12,0)')
-
-      const greenGrad = ctx.createLinearGradient(0, 0, 0, 200)
-      greenGrad.addColorStop(0, 'rgba(16,185,129,0.24)')
-      greenGrad.addColorStop(1, 'rgba(16,185,129,0)')
-
-      this.charts['monthlySalesChart'] = new Chart(el, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            {
-              label: 'Daily Sales',
-              data: merged.map((d) => d.total),
-              borderColor: '#EA580C',
-              backgroundColor: orangeGrad,
-              tension: 0.42, fill: true,
-              pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 14,
-              pointHoverBackgroundColor: '#EA580C',
-              pointHoverBorderColor: '#fff',
-              pointHoverBorderWidth: 2,
-              borderWidth: 2.5,
-            },
-            {
-              label: 'Daily Profit',
-              data: merged.map((d) => d.profit),
-              borderColor: '#10b981',
-              backgroundColor: greenGrad,
-              tension: 0.42, fill: true,
-              pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 14,
-              pointHoverBackgroundColor: '#10b981',
-              pointHoverBorderColor: '#fff',
-              pointHoverBorderWidth: 2,
-              borderWidth: 2.5,
-            },
-          ],
-        },
-        plugins: [crosshairPlugin],
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: { duration: 800, easing: 'easeOutQuart' },
-          interaction: { mode: 'index', intersect: false },
-          onHover: this.hoverCursor,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              ...this.tooltip(),
-              callbacks: {
-                title: (items) => {
-                  const row = merged[items[0]?.dataIndex]
-                  return row ? this.formatDate(row.date) : ''
-                },
-                label: (ctx) => ` ${ctx.dataset.label}: ₱${Number(ctx.raw).toLocaleString()}`,
-              },
-            },
-          },
-          scales: {
-            x: {
-              grid: { display: false },
-              ticks: { color: t.tickColor, font: { size: 11, family: 'Inter' }, maxRotation: 0 },
-              border: { display: false },
-            },
-            y: {
-              grid: { color: t.gridColor, drawBorder: false },
-              ticks: {
-                color: t.tickColor,
-                font: { size: 11, family: 'Inter' },
-                callback: (v) => '₱' + Number(v).toLocaleString(),
-              },
-              border: { display: false },
-            },
-          },
-        },
-      })
-    },
-
-    // Guarded by hasPeriodSales in the template — same reasoning as
-    // renderMainChart above.
-    renderSparkline() {
-      const el = document.getElementById('sparklineChart')
-      if (!el) return
-      this.destroyChart('sparklineChart')
-
-      const data = this.monthlySales.map((d) => this.num(d.total))
-      const ctx = el.getContext('2d')
-
-      const grad = ctx.createLinearGradient(0, 0, 0, 56)
-      grad.addColorStop(0, 'rgba(234,88,12,0.32)')
-      grad.addColorStop(1, 'rgba(234,88,12,0)')
-
-      this.charts['sparklineChart'] = new Chart(el, {
-        type: 'line',
-        data: {
-          labels: data.map((_, i) => i),
-          datasets: [{
-            data,
-            borderColor: '#EA580C',
-            backgroundColor: grad,
-            tension: 0.4, fill: true,
-            pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 10,
-            pointHoverBackgroundColor: '#EA580C',
-            pointHoverBorderColor: '#fff',
-            pointHoverBorderWidth: 2,
-            borderWidth: 2,
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: { duration: 700, easing: 'easeOutQuart' },
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              ...this.tooltip(),
-              displayColors: false,
-              callbacks: {
-                title: (items) => this.formatDate(this.monthlySales[items[0]?.dataIndex]?.date),
-                label: (ctx) => ` ₱${Number(ctx.raw).toLocaleString()}`,
-              },
-            },
-          },
-          scales: { x: { display: false }, y: { display: false } },
-        },
-      })
-    },
-
-    // Today's Sales split into two real parts — Profit and Cost of
-    // Goods. Unlike the old "Today's Sales / Today's Profit / Items
-    // Sold" trio, these two numbers genuinely sum to a whole, which is
-    // what makes a donut the right chart for it (rather than the
-    // misleading whole-implying slices the old design would've needed).
-    // Guarded by hasTodaySales in the template: when today has no
-    // sales yet, the canvas isn't rendered at all (avoiding the old
-    // 0.01/0.01 fallback, which drew a misleading 50/50 split), and an
-    // explicit "No sales yet" empty state is shown instead.
-    renderTodayMarginChart() {
-      const el = document.getElementById('todayMarginChart')
-      if (!el) return
-      this.destroyChart('todayMarginChart')
-
-      const profitVal = this.num(this.todaysProfit) || 0.01
-      const costVal = this.num(this.todaysCost) || 0.01
-
-      this.charts['todayMarginChart'] = new Chart(el, {
-        type: 'doughnut',
-        data: {
-          labels: ['Profit', 'Cost of Goods'],
-          datasets: [{
-            data: [profitVal, costVal],
-            backgroundColor: ['#10b981', '#EA580C'],
-            borderWidth: 0,
-            hoverOffset: 8,
-            hoverBorderWidth: 2,
-            hoverBorderColor: this.isDark ? '#1E2130' : '#ffffff',
-            spacing: 2,
-            borderRadius: 6,
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          cutout: '78%',
-          animation: { duration: 700, easing: 'easeOutQuart' },
-          onHover: this.hoverCursor,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              ...this.tooltip(),
-              callbacks: {
-                label: (ctx) => {
-                  const val = this.num(ctx.raw)
-                  const total = ctx.dataset.data.reduce((a, b) => this.num(a) + this.num(b), 0)
-                  const pct = total ? ((val / total) * 100).toFixed(1) : '0.0'
-                  return ` ${ctx.label}: ₱${val.toLocaleString()} (${pct}%)`
-                },
-              },
-            },
-          },
-        },
-      })
-    },
-
-    renderInventoryGauges() {
-      const inv = this.inventorySummary
-      const dark = this.isDark
-
-      const makeGauge = (id, value, max, color, trackColor, extraLabel) => {
-        const el = document.getElementById(id)
-        if (!el) return
-        this.destroyChart(id)
-        const pct = max > 0 ? Math.min(value / max, 1) : 0
-        this.charts[id] = new Chart(el, {
-          type: 'doughnut',
-          data: {
-            labels: [extraLabel, 'Remaining'],
-            datasets: [{
-              data: [pct, 1 - pct],
-              backgroundColor: [color, trackColor],
-              borderWidth: 0,
-              borderRadius: 8,
-              hoverOffset: 4,
-            }],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '74%',
-            rotation: -90,
-            circumference: 360,
-            animation: { duration: 700, easing: 'easeOutQuart' },
-            onHover: this.hoverCursor,
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                ...this.tooltip(),
-                displayColors: false,
-                filter: (item) => item.dataIndex === 0,
-                callbacks: {
-                  title: () => extraLabel,
-                  label: () => ` ${this.formatNumber(value)} of ${this.formatNumber(max)} (${Math.round(pct * 100)}%)`,
-                },
-              },
-            },
-          },
-        })
-      }
-
-      const totalItems = inv.total_items || 1
-      const stockTotal = (inv.quantity_in_hand ?? 0) + (inv.quantity_to_receive ?? 0) || 1
-
-      makeGauge('gaugeActive', inv.active_items ?? 0, totalItems,
-        '#10b981', dark ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.12)', 'Active Items')
-      makeGauge('gaugeStock', inv.quantity_in_hand ?? 0, stockTotal,
-        '#6366f1', dark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.12)', 'In Hand')
-      makeGauge('gaugeLow', inv.low_stock_items ?? 0, totalItems,
-        '#f43f5e', dark ? 'rgba(244,63,94,0.15)' : 'rgba(244,63,94,0.12)', 'Low Stock')
-    },
-
-    // Shared onHover so every interactive chart shows a pointer cursor
-    // over hoverable elements — a small cue that data is inspectable.
-    hoverCursor(evt, elements) {
-      try {
-        if (evt?.native?.target) {
-          evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'
+        const p = Math.min((now - start) / duration, 1)
+        if (p >= 1) {
+          Object.assign(this.anim, targets)
+          return
         }
-      } catch (e) {
-        /* no-op */
+        const e = 1 - Math.pow(1 - p, 3)
+        Object.keys(targets).forEach((k) => {
+          this.anim[k] = from[k] + (targets[k] - from[k]) * e
+        })
+        this[rafKey] = requestAnimationFrame(tick)
+      }
+      this[rafKey] = requestAnimationFrame(tick)
+    },
+
+    /* Resets a flag to false, waits for the DOM to render that 0-width
+       state, then flips it to true so the CSS transition actually plays. */
+    async grow(flag) {
+      this[flag] = false
+      await this.$nextTick()
+      void document.body.offsetHeight
+      requestAnimationFrame(() => requestAnimationFrame(() => { this[flag] = true }))
+    },
+
+    animateBars() {
+      this.grow('barsReady')
+      this.grow('splitReady')
+    },
+
+    animateAll() {
+      this.animateTo({
+        today: this.num(this.todaySales),
+        month: this.num(this.monthlyTotal),
+        tx: this.num(this.transactionsToday),
+        items: this.num(this.itemsSoldToday),
+        avg: this.avgTodaySale,
+        todayProfit: this.todaysProfit,
+        profit: this.num(this.totalProfit),
+        margin: Number(this.monthMarginPct),
+        inHand: this.num(this.inventorySummary.quantity_in_hand),
+        low: this.lowStockCount,
+        out: this.outOfStockCount,
+        day: this.activeRow.total,
+      })
+      this.animateBars()
+      this.animateMix()
+    },
+
+    /* data */
+    async fetchTotal(range) {
+      try {
+        const res = await api.get(DASHBOARD_URL, { params: { date_range: range } })
+        return this.num(res.data?.monthlyTotal)
+      } catch (err) {
+        console.error(`Comparison fetch failed (${range}):`, err)
+        return null
+      }
+    },
+    async loadDashboard() {
+      const seq = ++this.requestSeq
+      this.loading = true
+      this.loadError = ''
+      try {
+        const [res, yesterday, lastMonth] = await Promise.all([
+          api.get(DASHBOARD_URL, { params: { date_range: 'this_month' } }),
+          this.fetchTotal('yesterday'),
+          this.fetchTotal('last_month'),
+        ])
+        if (seq !== this.requestSeq) return
+        Object.assign(this, res.data)
+        this.yesterdayTotal = yesterday
+        this.lastMonthTotal = lastMonth
+        this.barsReady = false      // bars mount at 0 width…
+        this.splitReady = false
+        this.mixReady = false
+        this.firstLoad = false
+        this.lastUpdated = new Date().toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
+        await this.$nextTick()
+        if (seq !== this.requestSeq) return
+        this.animateAll()           // …then numbers count up and bars grow
+      } catch (err) {
+        if (seq !== this.requestSeq) return
+        console.error('Dashboard load error:', err)
+        this.loadError = err?.response?.data?.message || 'Could not load the dashboard. Check your connection and try again.'
+        this.firstLoad = false
+      } finally {
+        if (seq === this.requestSeq) this.loading = false
       }
     },
   },
@@ -923,674 +754,328 @@ export default {
 </script>
 
 <style scoped>
-/* ─── ROOT ─────────────────────────────────────────────── */
 .dash {
-  /* Semantic color tokens — resolve from global theme.css */
-  --d-bg:             var(--c-bg);
-  --d-surface:        var(--c-surface);
-  --d-surface-raised: var(--c-surface-raised);
-  --d-surface-sunken: var(--c-surface-sunken);
-  --d-border:         var(--c-border);
-  --d-border-strong:  var(--c-border-strong);
-  --d-text-primary:   var(--c-text-primary);
-  --d-text-secondary: var(--c-text-secondary);
-  --d-text-muted:     var(--c-text-muted);
-  --d-text-faint:     var(--c-text-faint);
-  --d-accent:         var(--c-accent);
-  --d-accent-soft:    var(--c-accent-soft);
-  --d-accent-border:  var(--c-accent-border);
-  --d-shadow-sm:      var(--c-shadow-sm);
-  --d-shadow-md:      var(--c-shadow-md);
+  --d-bg: var(--c-bg); --d-surface: var(--c-surface); --d-raised: var(--c-surface-raised); --d-sunken: var(--c-surface-sunken);
+  --d-border: var(--c-border); --d-border-strong: var(--c-border-strong);
+  --d-text: var(--c-text-primary); --d-text-2: var(--c-text-secondary); --d-muted: var(--c-text-muted); --d-faint: var(--c-text-faint);
+  --d-accent: var(--c-accent); --d-accent-soft: var(--c-accent-soft); --d-accent-border: var(--c-accent-border);
+  --d-green: #10b981; --d-green-soft: rgba(16,185,129,.12);
+  --d-blue: #3b82f6; --d-blue-soft: rgba(59,130,246,.12);
+  --d-violet: #6366f1; --d-violet-soft: rgba(99,102,241,.12);
+  --d-red: #f43f5e; --d-red-soft: rgba(244,63,94,.12);
+  --d-amber: #f59e0b; --d-amber-soft: rgba(245,158,11,.14);
 
-  /* Semantic chart palette — consistent in both modes */
-  --d-green:          #10b981;
-  --d-green-soft:     rgba(16,185,129,0.12);
-  --d-blue:           #3b82f6;
-  --d-blue-soft:      rgba(59,130,246,0.10);
-  --d-violet:         #6366f1;
-  --d-violet-soft:    rgba(99,102,241,0.12);
-  --d-red:            #f43f5e;
-  --d-red-soft:       rgba(244,63,94,0.12);
-  --d-amber:          #f59e0b;
+  /* premium surface tokens */
+  --d-shadow: 0 1px 2px rgba(16,24,40,.04), 0 10px 28px -14px rgba(16,24,40,.14);
+  --d-shadow-hover: 0 2px 4px rgba(16,24,40,.05), 0 18px 40px -16px rgba(16,24,40,.22);
+  --d-shine: rgba(255,255,255,.7);
+  --d-ease: cubic-bezier(.16, 1, .3, 1);
 
-  /* Dark-mode softened icon backgrounds */
-  --d-green-icon:     #D1FAE5;
-  --d-blue-icon:      #DBEAFE;
-  --d-violet-icon:    #E0E7FF;
-  --d-red-icon:       #FFE4E6;
-
-  --radius: 16px;
-
-  min-height: 100%;
-  background: var(--d-bg);
-  padding: 28px 28px 56px;
+  min-height: 100%; background: var(--d-bg); padding: 28px 28px 56px;
   font-family: 'Inter', system-ui, sans-serif;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  transition: background-color 0.22s ease;
+  display: flex; flex-direction: column; gap: 20px;
+  -webkit-font-smoothing: antialiased;
 }
-
-/* Dark mode overrides for icon bg — less saturated on dark */
 html[data-theme="dark"] .dash {
-  --d-green-icon:   rgba(16,185,129,0.18);
-  --d-blue-icon:    rgba(59,130,246,0.18);
-  --d-violet-icon:  rgba(99,102,241,0.18);
-  --d-red-icon:     rgba(244,63,94,0.18);
-  --d-green-soft:   rgba(16,185,129,0.16);
-  --d-blue-soft:    rgba(59,130,246,0.14);
-  --d-violet-soft:  rgba(99,102,241,0.16);
-  --d-red-soft:     rgba(244,63,94,0.16);
+  --d-green-soft: rgba(16,185,129,.16); --d-blue-soft: rgba(59,130,246,.18); --d-violet-soft: rgba(99,102,241,.2);
+  --d-red-soft: rgba(244,63,94,.16); --d-amber-soft: rgba(245,158,11,.16);
+  --d-shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.55);
+  --d-shadow-hover: 0 2px 4px rgba(0,0,0,.35), 0 20px 44px -16px rgba(0,0,0,.7);
+  --d-shine: rgba(255,255,255,.07);
 }
+.dash button:focus-visible, .dash a:focus-visible, .dash input:focus-visible { outline: 2px solid var(--d-accent); outline-offset: 2px; }
+.dash-body { display: flex; flex-direction: column; gap: 20px; transition: opacity .2s ease; }
+.dash-body.is-loading { opacity: .7; }
+.green { color: var(--d-green); }
+.red { color: var(--d-red); }
+.muted { margin: 12px 0 0; font-size: 12.5px; color: var(--d-muted); }
 
-/* ─── PAGE HEADER ──────────────────────────────────────── */
-.page-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.page-eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  color: var(--d-accent);
-  text-transform: uppercase;
-  margin: 0 0 5px;
-}
-.page-title {
-  font-size: 26px;
-  font-weight: 800;
-  color: var(--d-text-primary);
-  letter-spacing: -.03em;
-  margin: 0;
-}
-.page-header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+/* ── header ── */
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.page-title { font-size: 28px; font-weight: 800; color: var(--d-text); letter-spacing: -.03em; margin: 0; }
+.page-sub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 5px 0 0; font-size: 13.5px; font-weight: 500; color: var(--d-text-2); }
+.status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--d-muted); padding: 2px 10px 2px 8px; background: var(--d-surface); border: 1px solid var(--d-border); border-radius: 999px; }
+.status--busy { color: var(--d-accent); font-weight: 600; padding-left: 10px; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--d-green); box-shadow: 0 0 0 0 rgba(16,185,129,.5); animation: pulse 2.2s ease-out infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,.45); } 70%, 100% { box-shadow: 0 0 0 7px rgba(16,185,129,0); } }
+.page-header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-/* Link out to the full report — the "escape hatch" from the glance
-   view into the detailed one */
-.full-report-link {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--d-accent);
-  background: var(--d-accent-soft);
-  border: 1px solid var(--d-accent-border);
-  border-radius: 10px;
-  padding: 8px 14px;
-  text-decoration: none;
-  transition: background-color .16s ease, transform .12s ease;
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 16px;
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-decoration: none;
+  color: var(--d-text-2); background: var(--d-surface); border: 1px solid var(--d-border-strong); border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(16,24,40,.05);
+  transition: border-color .15s ease, color .15s ease, transform .15s ease, box-shadow .15s ease, filter .15s ease;
 }
-.full-report-link i { font-size: 10px; transition: transform .16s ease; }
-.full-report-link:hover { transform: translateY(-1px); }
-.full-report-link:hover i { transform: translateX(2px); }
+.btn:hover:not(:disabled) { border-color: var(--d-accent-border); color: var(--d-text); transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgba(16,24,40,.18); }
+.btn:active:not(:disabled) { transform: translateY(0); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn i { font-size: 11px; }
+.btn--primary { background: var(--d-accent); border-color: var(--d-accent); color: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.12), inset 0 1px 0 rgba(255,255,255,.18); }
+.btn--primary:hover:not(:disabled) { color: #fff; border-color: var(--d-accent); filter: brightness(1.07); }
 
-.card-header-link {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--d-accent);
-  text-decoration: none;
-  white-space: nowrap;
-  transition: opacity .16s ease;
-}
-.card-header-link i { font-size: 9px; transition: transform .16s ease; }
-.card-header-link:hover { opacity: .75; }
-.card-header-link:hover i { transform: translateX(2px); }
+.link-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--d-accent); padding: 5px 9px; border-radius: 8px; text-decoration: none; white-space: nowrap; transition: background-color .15s ease; }
+.link-btn:hover { background: var(--d-accent-soft); }
+.link-btn i { font-size: 9px; transition: transform .2s var(--d-ease); }
+.link-btn:hover i { transform: translateX(3px); }
 
-/* ─── DATE SELECT ──────────────────────────────────────── */
-.range-select-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-.range-icon {
-  position: absolute;
-  left: 11px;
-  color: var(--d-text-muted);
-  font-size: 12px;
-  pointer-events: none;
-}
-.range-caret {
-  position: absolute;
-  right: 10px;
-  color: var(--d-text-muted);
-  font-size: 9px;
-  pointer-events: none;
-}
-.range-select {
-  appearance: none;
-  -webkit-appearance: none;
-  background: var(--d-surface);
-  border: 1.5px solid var(--d-border-strong);
-  border-radius: 10px;
-  padding: 8px 32px 8px 30px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--d-text-secondary);
-  cursor: pointer;
-  transition: border-color .18s ease, box-shadow .18s ease, background-color 0.22s ease, color 0.22s ease;
-  font-family: inherit;
-  letter-spacing: .01em;
-}
-.range-select:hover { border-color: var(--d-accent-border); }
-.range-select:focus { outline: none; border-color: var(--d-accent); box-shadow: 0 0 0 3px var(--c-accent-ring); }
+/* ── notices ── */
+.notice { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-radius: 12px; font-size: 13px; animation: rise .5s var(--d-ease) backwards; }
+.notice > span { flex: 1; min-width: 200px; color: var(--d-text-2); }
+.notice strong { color: var(--d-text); font-weight: 700; }
+.notice > i { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+.notice--error { background: var(--d-red-soft); border: 1px solid rgba(244,63,94,.28); }
+.notice--error > i { color: var(--d-red); background: rgba(244,63,94,.14); }
+.notice--warn { background: var(--d-amber-soft); border: 1px solid rgba(245,158,11,.32); }
+.notice--warn > i { color: var(--d-amber); background: rgba(245,158,11,.16); }
+.notice-btn { border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--d-accent); padding: 6px 12px; border-radius: 8px; text-decoration: none; white-space: nowrap; transition: background-color .15s ease; }
+.notice-btn:hover { background: var(--d-accent-soft); }
 
-/* ─── KPI STRIP ────────────────────────────────────────── */
-.kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-}
-
-.kpi-card {
-  background: var(--d-surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--d-border);
-  box-shadow: var(--d-shadow-sm);
-  padding: 20px 20px 16px;
-  position: relative;
-  overflow: hidden;
-  transition: transform .2s ease, box-shadow .2s ease, background-color 0.22s ease, border-color 0.22s ease;
-  display: flex;
-  flex-direction: column;
-}
-.kpi-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--d-shadow-md);
-}
-
-.kpi-card--featured {
-  background: var(--d-accent-soft);
-  border-color: var(--d-accent-border);
-}
-
-.kpi-card-inner {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.kpi-icon-wrap {
-  width: 38px; height: 38px;
-  border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 15px;
-  flex-shrink: 0;
-  transition: background-color 0.22s ease;
-}
-.kpi-icon-wrap--orange { background: var(--d-accent-soft);   color: var(--d-accent); }
-.kpi-icon-wrap--green  { background: var(--d-green-icon);    color: var(--d-green); }
-.kpi-icon-wrap--blue   { background: var(--d-blue-icon);     color: var(--d-blue); }
-.kpi-icon-wrap--violet { background: var(--d-violet-icon);   color: var(--d-violet); }
-.kpi-icon-wrap--red    { background: var(--d-red-icon);      color: var(--d-red); }
-
-.kpi-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.kpi-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--d-text-muted);
-  text-transform: uppercase;
-  letter-spacing: .07em;
-  white-space: nowrap;
-}
-.kpi-value {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--d-text-primary);
-  letter-spacing: -.04em;
-  line-height: 1.1;
-  margin-top: 4px;
-  transition: color 0.22s ease;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.kpi-value--green  { color: var(--d-green); }
-.kpi-value--blue   { color: var(--d-blue); }
-.kpi-value--violet { color: var(--d-violet); }
-.kpi-value--red    { color: var(--d-red); }
-
-.kpi-sub {
-  font-size: 11px;
-  color: var(--d-text-faint);
-  margin-top: 3px;
-}
-
-/* Momentum badge next to the Total Sales figure */
-.kpi-trend {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: -.01em;
-  padding: 2px 8px;
-  border-radius: 20px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: default;
-}
-.kpi-trend i { font-size: 9.5px; }
-.kpi-trend.up   { color: var(--d-green); background: var(--d-green-soft); }
-.kpi-trend.down { color: var(--d-red);   background: var(--d-red-soft); }
-.kpi-trend.flat { color: var(--d-text-muted); background: var(--d-surface-raised); }
-
-.kpi-sparkline { position: relative; height: 40px; margin-top: 14px; }
-
-/* Empty state for the sparkline — a faint dashed line with a small
-   pill label, so a period with no sales yet reads as "no data" at a
-   glance instead of an unexplained blank strip. */
-.sparkline-empty {
-  position: relative;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.sparkline-empty-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  border-top: 1.5px dashed var(--d-border-strong);
-}
-.sparkline-empty-text {
-  position: relative;
-  background: var(--d-surface);
-  padding: 2px 8px;
-  border-radius: 20px;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--d-text-faint);
-  letter-spacing: .02em;
-  z-index: 1;
-}
-
-.kpi-accent-bar {
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
-  height: 3px;
-  border-radius: 0 0 var(--radius) var(--radius);
-}
-.kpi-accent-bar--orange { background: linear-gradient(90deg, var(--d-accent), #FB923C); }
-.kpi-accent-bar--green  { background: var(--d-green); }
-.kpi-accent-bar--blue   { background: var(--d-blue); }
-.kpi-accent-bar--violet { background: var(--d-violet); }
-.kpi-accent-bar--red    { background: var(--d-red); }
-
-/* ─── CARDS ────────────────────────────────────────────── */
+/* ── cards ── */
 .card {
+  position: relative; min-width: 0; padding: 22px 24px;
   background: var(--d-surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--d-border);
-  box-shadow: var(--d-shadow-sm);
-  padding: 22px 24px 20px;
-  transition: background-color 0.22s ease, border-color 0.22s ease;
+  border: 1px solid var(--d-border); border-radius: 18px;
+  box-shadow: var(--d-shadow);
+  transition: box-shadow .3s var(--d-ease), border-color .3s ease, transform .3s var(--d-ease);
+  animation: rise .7s var(--d-ease) backwards;
+  animation-delay: var(--d, 0ms);
 }
-.card--wide { min-width: 0; }
+.card::before {
+  /* hairline highlight along the top edge */
+  content: ''; position: absolute; top: 0; left: 24px; right: 24px; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--d-shine), transparent);
+}
+.card:hover { box-shadow: var(--d-shadow-hover); border-color: var(--d-border-strong); }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 
-/* ─── CARD HEADER ──────────────────────────────────────── */
-.card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  gap: 12px;
-  flex-wrap: wrap;
+.card--hero { overflow: hidden; }
+.card--hero::after {
+  /* soft accent glow in the corner */
+  content: ''; position: absolute; top: -90px; right: -70px; width: 280px; height: 280px; pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--d-accent) 16%, transparent) 0%, transparent 68%);
 }
-.card-eyebrow {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  color: var(--d-accent);
-  text-transform: uppercase;
-  margin: 0 0 4px;
-}
-.card-title {
-  font-size: 15.5px;
-  font-weight: 700;
-  color: var(--d-text-primary);
-  margin: 0;
-  letter-spacing: -.01em;
-  transition: color 0.22s ease;
-}
+.card--hero > * { position: relative; z-index: 1; }
 
-/* ─── CHART AREAS ──────────────────────────────────────── */
-.chart-area { position: relative; width: 100%; max-width: 100%; }
-.chart-area canvas { max-width: 100%; }
-.chart-area--medium { height: 190px; }
-.chart-area--donut {
-  height: 200px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
+.card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.card-head-l { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.card-icon {
+  width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 15px;
+  color: var(--d-accent); background: var(--d-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--d-accent-border);
 }
+.card-icon--blue   { color: var(--d-blue);   background: var(--d-blue-soft);   box-shadow: inset 0 0 0 1px rgba(59,130,246,.22); }
+.card-icon--violet { color: var(--d-violet); background: var(--d-violet-soft); box-shadow: inset 0 0 0 1px rgba(99,102,241,.24); }
+.card-icon--green  { color: var(--d-green);  background: var(--d-green-soft);  box-shadow: inset 0 0 0 1px rgba(16,185,129,.24); }
+.card-icon--amber  { color: var(--d-amber);  background: var(--d-amber-soft);  box-shadow: inset 0 0 0 1px rgba(245,158,11,.28); }
+.card-title { font-size: 15.5px; font-weight: 700; color: var(--d-text); margin: 0; letter-spacing: -.015em; }
+.card-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--d-muted); }
+.row-two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; align-items: stretch; }
+.chip { font-size: 10.5px; font-weight: 700; letter-spacing: .02em; color: var(--d-accent); background: var(--d-accent-soft); border: 1px solid var(--d-accent-border); padding: 2px 10px; border-radius: 20px; }
 
-.donut-center {
-  position: absolute;
-  text-align: center;
-  pointer-events: none;
-}
-.donut-center-value {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--d-text-primary);
-  letter-spacing: -.03em;
-  margin: 0;
-  transition: color 0.22s ease;
-}
-.donut-center-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--d-text-muted);
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  margin: 2px 0 0;
-}
+/* ── segmented control ── */
+.seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--d-sunken); border: 1px solid var(--d-border); border-radius: 11px; }
+.seg-btn { border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; color: var(--d-muted); padding: 6px 12px; border-radius: 8px; transition: background-color .2s ease, color .2s ease, box-shadow .2s ease; }
+.seg-btn:hover:not(.seg-btn--active) { color: var(--d-text); }
+.seg-btn--active { background: var(--d-surface); color: var(--d-text); box-shadow: 0 1px 3px rgba(16,24,40,.16), 0 0 0 1px var(--d-border); }
 
-/* Empty state for the main trend chart — a clear "nothing recorded
-   yet" message rather than a blank canvas, which otherwise looks
-   indistinguishable from data still loading. */
-.chart-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  text-align: center;
-  gap: 5px;
-  padding: 0 24px;
-}
-.chart-empty-icon {
-  font-size: 22px;
-  color: var(--d-text-muted);
-  opacity: .55;
-  margin-bottom: 3px;
-}
-.chart-empty-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--d-text-secondary);
-  margin: 0;
-}
-.chart-empty-sub {
-  font-size: 11.5px;
-  color: var(--d-text-faint);
-  margin: 0;
-  max-width: 260px;
-  line-height: 1.5;
-}
+/* ── trend + big numbers ── */
+.kpi-trend { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 20px; display: inline-flex; align-items: center; gap: 5px; cursor: help; }
+.kpi-trend i { font-size: 9.5px; }
+.kpi-trend.up { color: var(--d-green); background: var(--d-green-soft); }
+.kpi-trend.down { color: var(--d-red); background: var(--d-red-soft); }
+.kpi-trend.flat { color: var(--d-muted); background: var(--d-raised); }
+.trend-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 0; font-size: 12.5px; color: var(--d-muted); }
+.big-value { margin: 0; font-size: clamp(32px, 4.2vw, 46px); font-weight: 800; color: var(--d-text); letter-spacing: -.04em; line-height: 1.02; font-variant-numeric: tabular-nums; }
+.big-value--sm { font-size: clamp(28px, 3.2vw, 36px); }
 
-/* Empty state for the Today's Margin donut — a dashed ring in place
-   of the chart, so zero sales never gets rendered as a misleading
-   50/50 split. */
-.donut-empty-state {
-  position: relative;
-  width: 150px;
-  height: 150px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.donut-empty-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 14px dashed var(--d-border);
-}
-.donut-empty-center { text-align: center; }
-.donut-empty-icon {
-  font-size: 15px;
-  color: var(--d-text-faint);
-  margin-bottom: 4px;
-  display: block;
-}
-.donut-empty-title {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--d-text-secondary);
-  margin: 0;
-}
-.donut-empty-sub {
-  font-size: 10.5px;
-  color: var(--d-text-faint);
-  margin: 2px 0 0;
-}
+.hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.hero-main { min-width: 0; }
 
-/* ─── SECOND ROW ───────────────────────────────────────── */
-.row-2 {
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 20px;
-}
+/* sparkline */
+.spark { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.spark svg { width: 150px; height: 46px; overflow: visible; }
+.spark-line { fill: none; stroke: var(--d-accent); stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset 1.4s var(--d-ease) .15s; }
+.spark-line.is-on { stroke-dashoffset: 0; }
+.spark-area { opacity: 0; transition: opacity 1s ease .5s; }
+.spark-area.is-on { opacity: 1; }
+.spark-cap { font-size: 11px; font-weight: 500; color: var(--d-faint); }
 
-/* ─── DONUT LEGEND ─────────────────────────────────────── */
-.donut-legend {
-  margin-top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border-top: 1px solid var(--d-border);
-  padding-top: 14px;
-  transition: border-color 0.22s ease;
+/* ── progress ── */
+.goal { margin-top: 22px; }
+.goal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; font-size: 12.5px; font-weight: 600; color: var(--d-text-2); margin-bottom: 8px; }
+.goal-head strong { font-weight: 700; color: var(--d-text); font-variant-numeric: tabular-nums; }
+.goal-input { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--d-border-strong); border-radius: 9px; background: var(--d-sunken); color: var(--d-muted); font-weight: 700; transition: border-color .15s ease, box-shadow .15s ease; }
+.goal-input:focus-within { border-color: var(--d-accent); box-shadow: 0 0 0 3px var(--d-accent-soft); }
+.goal-input input { width: 90px; border: none; background: transparent; font: inherit; font-weight: 700; color: var(--d-text); text-align: right; outline: none; }
+.goal-track { height: 10px; border-radius: 10px; background: var(--d-sunken); box-shadow: inset 0 1px 2px rgba(16,24,40,.08); overflow: hidden; }
+.goal-fill {
+  height: 100%; border-radius: 10px;
+  background: linear-gradient(90deg, var(--d-accent), color-mix(in srgb, var(--d-accent) 70%, #fbbf24));
+  box-shadow: 0 0 12px -2px color-mix(in srgb, var(--d-accent) 60%, transparent);
+  transition: width 1.1s var(--d-ease);
 }
-.donut-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  color: var(--d-text-muted);
-}
-.donut-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.donut-dot--green  { background: var(--d-green); }
-.donut-dot--orange { background: var(--d-accent); }
+.goal-fill--done { background: linear-gradient(90deg, #059669, var(--d-green)); box-shadow: 0 0 12px -2px rgba(16,185,129,.55); }
+.goal-fill--blue { background: linear-gradient(90deg, #2563eb, var(--d-blue)); box-shadow: 0 0 12px -2px rgba(59,130,246,.55); }
+.goal-sub { margin: 8px 0 0; font-size: 12px; color: var(--d-muted); }
 
-.donut-row-label { flex: 1; }
-.donut-row strong {
-  font-weight: 700;
-  color: var(--d-text-primary);
-  font-size: 12.5px;
-  transition: color 0.22s ease;
-}
+/* ── mini stats ── */
+.mini-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; margin: 22px 0 0; }
+.mini-stats--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ms { padding: 12px 14px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 12px; min-width: 0; transition: border-color .2s ease, transform .2s var(--d-ease); }
+.ms:hover { border-color: var(--d-accent-border); transform: translateY(-2px); }
+.mini-stats dt { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: var(--d-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-stats dt i { font-size: 10px; color: var(--d-faint); }
+.mini-stats dd { margin: 5px 0 0; font-size: 16px; font-weight: 700; color: var(--d-text); letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-stats dd.green { color: var(--d-green); }
+.ms-sub { display: block; margin-top: 3px; font-size: 11.5px; color: var(--d-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ─── INVENTORY GAUGES ─────────────────────────────────── */
-.inv-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-.inv-gauge-card {
-  background: var(--d-surface-raised);
-  border: 1px solid var(--d-border);
-  border-radius: 14px;
-  padding: 16px 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  transition: background-color 0.22s ease, border-color 0.22s ease, transform .18s ease;
-}
-.inv-gauge-card:hover { transform: translateY(-2px); }
-.inv-gauge-card--alert {
-  background: var(--d-red-soft);
-  border-color: var(--d-red);
-  border-color: rgba(244,63,94,0.28);
-}
-.inv-gauge { position: relative; width: 76px; height: 76px; }
-.inv-gauge-center {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.inv-gauge-num {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--d-text-primary);
-  letter-spacing: -.03em;
-  transition: color 0.22s ease;
-}
-.inv-gauge-num--red { color: var(--d-red); }
-.inv-gauge-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--d-text-secondary);
-  margin-top: 4px;
-  transition: color 0.22s ease;
-}
-.inv-gauge-sub {
-  font-size: 10.5px;
-  color: var(--d-text-faint);
-  transition: color 0.22s ease;
-}
-.inv-gauge-sub--red { color: var(--d-red); font-weight: 600; }
 
-/* ─── TOP SELLING — COMPACT LIST (no hover tooltip / pin panel; just
-   the ranked bars for a fast read) ─────────────────────────────── */
-.top-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* ── calendar ── */
+.cal-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; --lv: 234,88,12; }
+.cal--profit { --lv: 16,185,129; }
+.cal-dow { text-align: center; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--d-faint); padding-bottom: 4px; }
+.cal-day {
+  aspect-ratio: 1.15; border: 1px solid transparent; border-radius: 10px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--d-text-2);
+  transition: transform .15s var(--d-ease), border-color .15s ease, box-shadow .15s ease, background-color .3s ease;
+  /* staggered entrance; `backwards` so it never overrides the hover transform afterwards */
+  animation: cal-pop .5s var(--d-ease) backwards;
+  animation-delay: calc(var(--i, 0) * 16ms + 200ms);
 }
+@keyframes cal-pop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+.cal-day:hover:not(:disabled) { transform: scale(1.1); border-color: rgb(var(--lv)); box-shadow: 0 6px 14px -6px rgba(var(--lv), .6); z-index: 1; }
+.cal-day:disabled { cursor: default; opacity: .35; }
+.cal-day--today { border-color: var(--d-text-2); }
+.cal-day--sel { border-color: rgb(var(--lv)); box-shadow: 0 0 0 3px rgba(var(--lv), .28); color: var(--d-text); }
+.lv0 { background: var(--d-sunken); }
+.lv1 { background: rgba(var(--lv), .16); }
+.lv2 { background: rgba(var(--lv), .34); }
+.lv3 { background: rgba(var(--lv), .58); color: var(--d-text); }
+.lv4 { background: rgba(var(--lv), .88); color: #fff; }
+.cal-scale { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 8px; font-size: 11px; color: var(--d-muted); }
+.cal-scale i { width: 14px; height: 14px; border-radius: 4px; }
+.cal-scale span:first-child { margin-right: 3px; }
+.cal-scale span:last-child { margin-left: 3px; }
 
-.top-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
-  background: var(--d-surface-raised);
-  border: 1px solid var(--d-border);
-  border-radius: 12px;
-  transition: background-color .18s ease, border-color .18s ease;
-}
-.top-row--static { cursor: default; }
-/* Subtle tint per rank tier, kept faint so the row list still reads as
-   one cohesive set rather than three different card styles */
-.top-row--rank1 { background: linear-gradient(90deg, rgba(245,158,11,0.08), var(--d-surface-raised) 55%); }
-.top-row--rank2 { background: linear-gradient(90deg, rgba(148,163,184,0.10), var(--d-surface-raised) 55%); }
-.top-row--rank3 { background: linear-gradient(90deg, rgba(194,112,61,0.10), var(--d-surface-raised) 55%); }
+.day { padding: 20px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 16px; }
+.day-head { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.day-title { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--d-text); }
+.day-head .link-btn { margin-left: auto; }
+.day-value { margin: 8px 0 14px; font-size: 30px; font-weight: 800; color: var(--d-text); letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.split-bar { display: flex; gap: 3px; height: 10px; border-radius: 10px; overflow: hidden; }
+.split-seg { display: block; height: 100%; cursor: help; transition: width 1s var(--d-ease); }
+.split-seg--profit { background: linear-gradient(90deg, #059669, var(--d-green)); border-radius: 10px 3px 3px 10px; }
+.split-seg--cost { background: linear-gradient(90deg, var(--d-accent), color-mix(in srgb, var(--d-accent) 75%, #fbbf24)); border-radius: 3px 10px 10px 3px; }
+.split-legend { display: flex; gap: 16px; margin-top: 9px; font-size: 11.5px; color: var(--d-muted); }
+.split-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sl { width: 8px; height: 8px; border-radius: 50%; }
+.sl--profit { background: var(--d-green); }
+.sl--cost { background: var(--d-accent); }
+.facts { margin: 16px 0 0; border-top: 1px solid var(--d-border); }
+.facts > div { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--d-border); }
+.facts > div:last-child { border-bottom: none; padding-bottom: 0; }
+.facts dt { font-size: 12.5px; color: var(--d-muted); }
+.facts dd { margin: 0; font-size: 13px; font-weight: 700; color: var(--d-text); font-variant-numeric: tabular-nums; }
 
-.top-row-rank {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 800;
-  background: var(--d-surface-sunken);
-  color: var(--d-text-secondary);
-}
-.top-row-rank--1 {
-  background: linear-gradient(135deg, #FCD34D, #F59E0B);
-  color: #78350F;
-  box-shadow: 0 0 0 3px rgba(245,158,11,0.18);
-  font-size: 12.5px;
-}
-.top-row-rank--2 {
-  background: linear-gradient(135deg, #E2E8F0, #94A3B8);
-  color: #334155;
-}
-.top-row-rank--3 {
-  background: linear-gradient(135deg, #FDBA74, #C2703D);
-  color: #431407;
-}
+/* ── sales mix ── */
+.mix { container-type: inline-size; display: flex; flex-direction: column; gap: 18px; }
+.mix-insight { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--d-accent-soft); border: 1px solid var(--d-accent-border); font-size: 12.5px; line-height: 1.55; color: var(--d-text-2); }
+.mix-insight i { margin-top: 2px; font-size: 12px; color: var(--d-accent); }
+.mix-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: center; }
+@container (max-width: 520px) { .mix-body { grid-template-columns: minmax(0, 1fr); } .donut { margin: 0 auto; } }
 
-.top-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
-.top-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.top-row-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--d-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.top-row-value {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--d-text-secondary);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
+.donut { position: relative; width: 200px; max-width: 100%; aspect-ratio: 1; }
+.donut svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 6px 14px rgba(16,24,40,.12)); }
+.donut-track { fill: none; stroke: var(--d-sunken); stroke-width: 22; }
+.donut-seg { fill: none; stroke-width: 22; stroke-linecap: butt; cursor: pointer; outline: none; transition: stroke-dasharray 1s var(--d-ease), stroke-width .2s ease, opacity .2s ease; }
+.donut-seg.is-on { stroke-width: 28; }
+.donut-seg.is-dim { opacity: .28; }
+.donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0 46px; text-align: center; pointer-events: none; }
+.donut-center strong { font-size: 22px; font-weight: 800; color: var(--d-text); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.dc-name { max-width: 100%; font-size: 12px; font-weight: 600; color: var(--d-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-sub { font-size: 11px; color: var(--d-muted); line-height: 1.3; }
 
-.top-row-bar-track {
-  position: relative;
-  height: 7px;
-  border-radius: 6px;
-  background: var(--d-surface-sunken);
-  overflow: hidden;
-}
-.top-row-bar-fill {
-  position: absolute;
-  inset: 0;
-  width: 0;
-  border-radius: 6px;
-  transition: width .8s cubic-bezier(.16, 1, .3, 1);
-}
-.top-row-bar-fill--rank1   { background: linear-gradient(90deg, #F59E0B, #FCD34D); }
-.top-row-bar-fill--rank2   { background: linear-gradient(90deg, #94A3B8, #CBD5E1); }
-.top-row-bar-fill--rank3   { background: linear-gradient(90deg, #C2703D, #FDBA74); }
-.top-row-bar-fill--default { background: linear-gradient(90deg, #6366F1, #818CF8); }
+.mix-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mix-list li { border: 1px solid transparent; border-radius: 12px; transition: background-color .2s ease, border-color .2s ease; }
+.mix-list li.mix-item--sel { background: var(--d-accent-soft); border-color: var(--d-accent-border); }
+.mix-row { display: flex; flex-direction: column; gap: 9px; width: 100%; padding: 11px 13px; border: none; border-radius: 12px; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; transition: background-color .2s ease; }
+.mix-row:hover { background: var(--d-raised); }
+.mix-row--on { background: var(--d-raised); }
+.mix-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mix-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px var(--d-surface); }
+.mix-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--d-text); overflow-wrap: anywhere; }
+.mix-amt { font-size: 12.5px; color: var(--d-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mix-pct { width: 48px; text-align: right; font-size: 12.5px; font-weight: 700; color: var(--d-text-2); font-variant-numeric: tabular-nums; }
+.mix-bar { display: block; height: 6px; border-radius: 6px; background: var(--d-sunken); overflow: hidden; }
+.mix-bar-fill { display: block; height: 100%; border-radius: 6px; transition: width 1s var(--d-ease); }
+.mix-detail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 2px 13px 13px 33px; }
+.mix-detail dt { font-size: 11.5px; color: var(--d-muted); }
+.mix-detail dd { margin: 2px 0 0; font-size: 13px; font-weight: 700; color: var(--d-text); font-variant-numeric: tabular-nums; }
+.mix-link { align-self: flex-start; }
 
-/* Empty state for the Top Selling list — explains why the list is
-   blank rather than leaving the user guessing whether it's loading. */
-.top-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 5px;
-  padding: 32px 20px;
-}
-.top-empty-icon {
-  font-size: 20px;
-  color: var(--d-text-muted);
-  opacity: .55;
-  margin-bottom: 3px;
-}
-.top-empty-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--d-text-secondary);
-  margin: 0;
-}
-.top-empty-sub {
-  font-size: 11.5px;
-  color: var(--d-text-faint);
-  margin: 0;
-  max-width: 300px;
-  line-height: 1.5;
-}
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 32px 12px; }
+.empty-ico { width: 52px; height: 52px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--d-faint); background: var(--d-sunken); margin-bottom: 6px; }
+.empty-title { margin: 0; font-size: 14px; font-weight: 700; color: var(--d-text-2); }
+.empty-sub { margin: 0; font-size: 12.5px; color: var(--d-muted); max-width: 300px; line-height: 1.5; }
 
-/* ─── RESPONSIVE ───────────────────────────────────────── */
-@media (max-width: 1200px) { .kpi-strip { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 900px) {
-  .row-2     { grid-template-columns: 1fr; }
-  .kpi-strip { grid-template-columns: repeat(2, 1fr); }
-  .inv-grid  { grid-template-columns: repeat(3, 1fr); }
-  .dash      { padding: 16px 16px 40px; }
+/* ── stock ── */
+.tile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tile { display: block; text-decoration: none; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 14px; padding: 14px 16px 16px; transition: border-color .2s ease, transform .25s var(--d-ease), box-shadow .25s ease; }
+.tile:hover { border-color: var(--d-accent-border); transform: translateY(-3px); box-shadow: 0 12px 24px -14px rgba(16,24,40,.28); }
+.tile-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.tile-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--d-violet); background: var(--d-violet-soft); }
+.tile-go { font-size: 10px; color: var(--d-faint); opacity: 0; transform: translate(-3px, 3px); transition: opacity .2s ease, transform .2s var(--d-ease); }
+.tile:hover .tile-go { opacity: 1; transform: translate(0, 0); }
+.tile-label { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--d-muted); }
+.tile-value { margin: 4px 0 2px; font-size: 28px; font-weight: 800; color: var(--d-text); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.tile-sub { margin: 0; font-size: 12px; color: var(--d-muted); }
+.tile--warn { background: var(--d-amber-soft); border-color: rgba(245,158,11,.35); }
+.tile--warn .tile-ico { color: var(--d-amber); background: rgba(245,158,11,.18); }
+.tile--warn .tile-value, .tile--warn .tile-sub { color: #b45309; }
+html[data-theme="dark"] .tile--warn .tile-value,
+html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
+.tile--alert { background: var(--d-red-soft); border-color: rgba(244,63,94,.28); }
+.tile--alert .tile-ico { color: var(--d-red); background: rgba(244,63,94,.16); }
+.tile--alert .tile-value, .tile--alert .tile-sub { color: var(--d-red); }
+.coverage { margin-top: 18px; padding: 14px 16px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 14px; }
+.coverage-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--d-muted); margin-bottom: 10px; }
+.coverage-head strong { color: var(--d-text); font-weight: 700; }
+.link-list { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
+.link-list a { display: flex; align-items: center; gap: 12px; padding: 11px 10px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--d-text-2); text-decoration: none; transition: background-color .15s ease, color .15s ease; }
+.link-list a:hover { background: var(--d-raised); color: var(--d-accent); }
+.link-list a i:first-child { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--d-sunken); color: var(--d-muted); font-size: 11.5px; transition: background-color .15s ease, color .15s ease; }
+.link-list a:hover i:first-child { background: var(--d-accent-soft); color: var(--d-accent); }
+.link-list a i:last-child { margin-left: auto; font-size: 9px; color: var(--d-faint); transition: transform .2s var(--d-ease); }
+.link-list a:hover i:last-child { transform: translateX(3px); color: var(--d-accent); }
+
+/* ── skeleton ── */
+.sk-card { display: flex; flex-direction: column; gap: 16px; animation: none; }
+.sk { background: linear-gradient(90deg, var(--d-sunken) 25%, var(--d-raised) 50%, var(--d-sunken) 75%); background-size: 200% 100%; animation: sk 1.4s ease-in-out infinite; border-radius: 10px; }
+@keyframes sk { to { background-position: -200% 0; } }
+.sk-line { height: 14px; width: 35%; }
+.sk-big { height: 44px; width: 55%; }
+.sk-bar { height: 10px; border-radius: 10px; }
+.sk-block { height: 90px; border-radius: 14px; }
+.sk-tall { height: 240px; }
+
+/* ── responsive ── */
+@media (max-width: 1000px) { .row-two, .cal-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) { .dash { padding: 16px 16px 40px; gap: 16px; } .dash-body { gap: 16px; } .row-two { gap: 16px; } }
+@media (max-width: 600px) {
+  .card { padding: 18px 16px; border-radius: 16px; }
+  .page-header { flex-direction: column; align-items: stretch; }
+  .page-title { font-size: 24px; }
+  .mini-stats, .mini-stats--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .spark { align-items: flex-start; }
+  .day { padding: 16px; }
+  .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 500px) {
-  .kpi-strip { grid-template-columns: 1fr; }
-  .kpi-value { font-size: 20px; }
-  .inv-grid  { grid-template-columns: 1fr; }
-  .top-row-head { flex-direction: column; align-items: flex-start; gap: 2px; }
-  .page-header-right { width: 100%; justify-content: space-between; }
+@media (prefers-reduced-motion: reduce) {
+  .dash * { transition: none !important; animation: none !important; }
+  .spark-line { stroke-dashoffset: 0; }
+  .spark-area { opacity: 1; }
 }
 </style>

@@ -21,12 +21,17 @@ class SalesItem extends Model
         'Quantity',
         'PriceAtSale',
         'CostAtSale',
+        // Line TOTALS for cut-piece / leftover lines (NULL on normal lines).
+        'AllocatedCost',
+        'AllocatedProfit',
     ];
 
     protected $casts = [
-        'Quantity'    => 'integer',
-        'PriceAtSale' => 'decimal:2',
-        'CostAtSale'  => 'decimal:2',
+        'Quantity'        => 'integer',
+        'PriceAtSale'     => 'decimal:2',
+        'CostAtSale'      => 'decimal:2',
+        'AllocatedCost'   => 'decimal:2',
+        'AllocatedProfit' => 'decimal:2',
     ];
 
     /**
@@ -44,6 +49,16 @@ class SalesItem extends Model
         }
 
         return round($fullCost, 2);
+    }
+
+    /** Profit of this line: the allocated profit when set, else (price - cost) x qty. */
+    public function lineProfit(): float
+    {
+        if ($this->AllocatedProfit !== null) {
+            return (float) $this->AllocatedProfit;
+        }
+
+        return round(((float) $this->PriceAtSale - (float) ($this->CostAtSale ?? 0)) * (int) $this->Quantity, 2);
     }
 
     public function product(): BelongsTo

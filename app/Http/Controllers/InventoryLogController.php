@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\InventoryLog;
 use App\Services\SaleTracker;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
@@ -15,6 +18,13 @@ class InventoryLogController extends Controller
 
     /** The POS writes this into the note of every cut sale. */
     private const CUT_NOTE_LIKE = '%(cut piece)%';
+
+    /** Name of the sizes table, if the project has one. */
+    private function variantTable(): ?string
+    {
+        return collect(['product_variants', 'variants'])
+            ->first(fn ($t) => Schema::hasTable($t));
+    }
 
     public function index(Request $request)
     {
@@ -76,8 +86,7 @@ class InventoryLogController extends Controller
         };
 
         // Size label on each log row — only if the tables/columns exist.
-        $variantTable = collect(['product_variants', 'variants'])
-            ->first(fn ($t) => Schema::hasTable($t));
+        $variantTable = $this->variantTable();
         $withVariant = $variantTable
             && Schema::hasColumn('inventory_logs', 'VariantID')
             && Schema::hasColumn($variantTable, 'VariantID')
@@ -114,39 +123,6 @@ class InventoryLogController extends Controller
                 );
                 return $row;
             });
-
-        // ── LEFTOVER PIECES (product_remnants) ──
-        // Stock on hand is a current state, so every AVAILABLE leftover is listed
-        // regardless of the date filter. Used / scrapped ones show only when
-        // they were created inside the selected period.
-        $remnants = collect();
-        if (Schema::hasTable('product_remnants')) {
-            $remLabel = $withVariant
-                ? DB::raw("COALESCE(r.VariantLabel, {$variantTable}.Label) as VariantLabel")
-                : DB::raw('r.VariantLabel as VariantLabel');
-
-            $remnants = DB::table('product_remnants as r')
-                ->join('products', 'r.ProductID', '=', 'products.ProductID')
-                ->when($withVariant, fn ($q) => $q->leftJoin(
-                    $variantTable, 'r.VariantID', '=', "{$variantTable}.VariantID"
-                ))
-                ->where(function ($w) use ($range) {
-                    $w->where('r.Status', 'available');
-                    if ($r = $range()) {
-                        $w->orWhereBetween('r.created_at', $r);
-                    }
-                })
-                ->select(
-                    'r.*',
-                    'products.ProductName',
-                    'products.SKU',
-                    DB::raw("{$unitCol} as ProductUnit"),   // r.Unit stays the LENGTH unit (ft / m / in)
-                    $remLabel
-                )
-                ->orderByRaw("CASE r.Status WHEN 'available' THEN 0 ELSE 1 END")
-                ->orderBy('r.created_at', 'desc')
-                ->get();
-        }
 
         // ── EXTRA SERVICES (from sales in the same period) ──
         // Use a status column only if the sales table really has one.
@@ -201,9 +177,47 @@ class InventoryLogController extends Controller
                 ->limit($topLimit)
                 ->get(),
             'inventory_logs'  => $inventoryLogs->values(),
-            'remnants'        => $remnants->values(),
             'services'        => $services,
         ], 200);
+    }
+
+    /**
+     * GET /api/inventory/remnants
+     * Every leftover piece (available, used, scrapped) for the Inventory page.
+     * This is a current-state list, so it is NOT date filtered.
+     * Available pieces come first, then the newest used / scrapped ones.
+     */
+    public function remnants()
+    {
+        if (!Schema::hasTable('product_remnants')) {
+            return response()->json([]);
+        }
+
+        $unitCol      = 'products.' . self::UNIT_COLUMN;
+        $variantTable = $this->variantTable();
+        $withVariant  = $variantTable && Schema::hasColumn($variantTable, 'Label');
+
+        $remLabel = $withVariant
+            ? DB::raw("COALESCE(r.VariantLabel, {$variantTable}.Label) as VariantLabel")
+            : DB::raw('r.VariantLabel as VariantLabel');
+
+        $rows = DB::table('product_remnants as r')
+            ->join('products', 'r.ProductID', '=', 'products.ProductID')
+            ->when($withVariant, fn ($q) => $q->leftJoin(
+                $variantTable, 'r.VariantID', '=', "{$variantTable}.VariantID"
+            ))
+            ->select(
+                'r.*',
+                'products.ProductName',
+                'products.SKU',
+                DB::raw("{$unitCol} as ProductUnit"),   // r.Unit stays the LENGTH unit (ft / m / in)
+                $remLabel
+            )
+            ->orderByRaw("CASE r.Status WHEN 'available' THEN 0 ELSE 1 END")
+            ->orderBy('r.created_at', 'desc')
+            ->get();
+
+        return response()->json($rows->values());
     }
 
     /**
@@ -230,10 +244,10 @@ class InventoryLogController extends Controller
             'updated_at' => now(),
         ]);
 
-        // Leave a trace in the inventory history. Quantity is 0 because no WHOLE
-        // piece enters or leaves stock — only the leftover's status changes.
-        // The leftover's length + unit are stored on the log row
-        // (cut_remaining_length / cut_unit) so the history can show exactly
+        // Leave a trace in the inventory history (shown on the Inventory Logs page).
+        // Quantity is 0 because no WHOLE piece enters or leaves stock — only the
+        // leftover's status changes. The leftover's length + unit are stored on the
+        // log row (cut_remaining_length / cut_unit) so the history can show exactly
         // which leftover was used / scrapped / put back.
         // If your `type` column is an ENUM that rejects these values, the status
         // change above still stands; only the history row is skipped.
@@ -248,7 +262,7 @@ class InventoryLogController extends Controller
                     'available' => 'put back as available',
                 ][$data['status']];
 
-                \App\Models\InventoryLog::create([
+                InventoryLog::create([
                     'ProductID'            => $remnant->ProductID,
                     'SaleID'               => $remnant->SaleID,
                     'VariantID'            => $remnant->VariantID,
@@ -260,12 +274,12 @@ class InventoryLogController extends Controller
                     'cut_remaining_length' => $remnant->Length,
                     'cut_unit'             => $remnant->Unit,
                     'notes'                => "Leftover {$len} {$remnant->Unit} (from sale #{$remnant->SaleID}) {$what}",
-                    'created_by'           => \Illuminate\Support\Facades\Auth::id() ?? 1,
+                    'created_by'           => Auth::id() ?? 1,
                 ]);
             } catch (\Throwable $e) {
                 $logged = false;
                 $logError = config('app.debug') ? $e->getMessage() : null;
-                \Illuminate\Support\Facades\Log::warning('Leftover history row skipped: ' . $e->getMessage());
+                Log::warning('Leftover history row skipped: ' . $e->getMessage());
             }
         }
 

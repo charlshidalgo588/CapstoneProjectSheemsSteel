@@ -1,5 +1,17 @@
 <template>
-  <div class="app-shell" v-bind="$attrs" :style="{ '--sw': sidebarOpen ? '260px' : '64px' }">
+  <div
+    class="app-shell"
+    v-bind="shellAttrs"
+    :style="{ '--sw': sidebarOpen ? '260px' : '68px' }"
+    @mouseover="onTipOver"
+    @focusin="onTipOver"
+    @mouseleave="hideTip"
+    @focusout="hideTip"
+    @click="hideTip"
+  >
+    <!-- Keyboard users: jump straight past the sidebar + topbar. -->
+    <a href="#main-content" class="skip-link">Skip to content</a>
+
     <!-- ═══════════════════════════════════════════════════
          GLOBAL LOADING OVERLAY — full-screen, blocking. Reserved for
          the initial auth check on first load only (there's genuinely
@@ -20,17 +32,14 @@
 
     <!-- SLIM TOP PROGRESS BAR — non-blocking busy indicator for every
          other API call (navigating pages, submitting forms, etc). Sits
-         above everything but never intercepts clicks or dims the UI, so
-         the app still feels responsive while work happens in the background. -->
+         above everything but never intercepts clicks or dims the UI. -->
     <transition name="topbar-fade">
       <div v-if="apiBusy" class="top-progress-bar" aria-hidden="true">
         <div class="top-progress-fill"></div>
       </div>
     </transition>
 
-    <!-- MOBILE SIDEBAR BACKDROP — only exists on phone/small-tablet
-         widths while the drawer is open. Tapping it closes the drawer,
-         same as tapping outside any other overlay in this app. -->
+    <!-- MOBILE SIDEBAR BACKDROP -->
     <transition name="fade">
       <div
         v-if="isMobile && sidebarOpen"
@@ -41,15 +50,27 @@
     </transition>
 
     <!-- SIDEBAR -->
-    <aside class="sidebar" :class="{ 'sidebar--mobile': isMobile, 'sidebar--open': sidebarOpen }">
+    <aside
+      class="sidebar"
+      :class="{ 'sidebar--mobile': isMobile, 'sidebar--open': sidebarOpen }"
+      aria-label="Main navigation"
+    >
       <div class="sidebar-header">
-        <button class="burger" @click="sidebarOpen = !sidebarOpen" aria-label="Toggle sidebar">
+        <button
+          class="burger"
+          :aria-expanded="sidebarOpen"
+          aria-label="Toggle sidebar"
+          :data-tip="sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'"
+          data-tip-desc="Show or hide menu labels"
+          data-tip-icon="fa-solid fa-table-columns"
+          @click="sidebarOpen = !sidebarOpen"
+        >
           <span class="bline" />
           <span class="bline bline--mid" :class="{ 'bline--mid-hidden': !sidebarOpen }" />
           <span class="bline" />
         </button>
         <router-link v-show="sidebarOpen" to="/home" class="brand-wrap">
-          <img :src="logo" class="brand-logo" alt="Sheem Steel" />
+          <img :src="logo" class="brand-logo" alt="" />
           <div class="brand-text">
             <span class="brand-name">Sheem Steel</span>
             <span class="brand-sub">POS &amp; Inventory</span>
@@ -57,10 +78,11 @@
         </router-link>
       </div>
 
-      <div class="sidebar-divider" />
-
       <nav class="sidebar-nav">
-        <NavLink to="/home"           icon="fa-solid fa-house"         label="Home"           :collapsed="!sidebarOpen" />
+        <NavLink to="/home" icon="fa-solid fa-house" label="Home" :collapsed="!sidebarOpen" />
+
+        <div class="nav-divider" role="separator" />
+
         <SidebarDropdown label="Inventory" icon="fa-solid fa-boxes-stacked" :open="inventoryOpen" :collapsed="!sidebarOpen" @toggle="inventoryOpen = !inventoryOpen">
           <NavLink to="/products"        menu-item label="Product List" icon="fa-solid fa-list"        :collapsed="false" />
           <NavLink to="/products/create" menu-item label="Add Item"     icon="fa-solid fa-plus"        :collapsed="false" />
@@ -71,42 +93,69 @@
           <NavLink to="/sales-transaction" menu-item label="Transaction" icon="fa-solid fa-receipt"       :collapsed="false" />
           <NavLink to="/customers"         menu-item label="Customers"   icon="fa-solid fa-users"         :collapsed="false" />
         </SidebarDropdown>
-        <NavLink to="/suppliers"      label="Suppliers"      icon="fa-solid fa-truck-field"  :collapsed="!sidebarOpen" />
-        <NavLink to="/reports"        label="Reports"        icon="fa-solid fa-chart-line"   :collapsed="!sidebarOpen" />
-        <NavLink to="/inventory-logs" label="Inventory Logs" icon="fa-solid fa-folder-open"  :collapsed="!sidebarOpen" />
+
+        <div class="nav-divider" role="separator" />
+
+        <NavLink to="/suppliers"      label="Suppliers"      icon="fa-solid fa-truck-field" :collapsed="!sidebarOpen" />
+        <NavLink to="/reports"        label="Reports"        icon="fa-solid fa-chart-line"  :collapsed="!sidebarOpen" />
+        <NavLink to="/inventory-logs" label="Inventory Logs" icon="fa-solid fa-folder-open" :collapsed="!sidebarOpen" />
       </nav>
 
       <!-- SIDEBAR FOOTER — user card doubles as the account menu trigger -->
       <div class="sidebar-footer">
-        <div class="sidebar-divider" />
         <button
           ref="userMiniRef"
           class="user-mini"
           :class="{ 'user-mini--center': !sidebarOpen, 'user-mini--open': userMenuOpen }"
+          aria-haspopup="menu"
+          :aria-expanded="userMenuOpen"
+          :data-tip="user?.name || 'User'"
+          data-tip-desc="Account and sign out"
+          data-tip-icon="fa-solid fa-user"
+          data-tip-collapsed
           @click="toggleUserMenu"
         >
           <div class="user-avatar-wrap">
-            <!-- Vector profile icon in a branded circle, instead of a
-                 static clipart image — crisp at any size and matches
-                 the icon style used everywhere else in the sidebar. -->
             <div class="user-avatar-sm user-avatar-vector" aria-hidden="true">
               <i class="fa-solid fa-user"></i>
             </div>
-            <span class="user-status-dot"></span>
+            <span class="user-status-dot" :class="{ 'user-status-dot--offline': !isOnline }"></span>
           </div>
           <div v-show="sidebarOpen" class="user-mini-info">
             <p class="user-mini-name">{{ user?.name || 'User' }}</p>
             <p class="user-mini-role">Administrator</p>
           </div>
-          <i v-show="sidebarOpen" class="fa-solid fa-chevron-down user-mini-caret" :class="{ 'user-mini-caret--up': userMenuOpen }"></i>
+          <i v-show="sidebarOpen" class="fa-solid fa-chevron-up user-mini-caret" :class="{ 'user-mini-caret--down': userMenuOpen }" aria-hidden="true"></i>
         </button>
       </div>
     </aside>
 
+    <!-- THEMED TOOLTIP — replaces the browser's plain native `title`
+         tooltip everywhere in the shell (sidebar icons, topbar buttons):
+         icon chip, label, short description, "You're here" marker.
+         Driven by event delegation on .app-shell (see onTipOver), so any
+         element can opt in with data-tip / data-tip-desc / data-tip-icon. -->
+    <transition name="tip">
+      <div
+        v-if="tip.show"
+        class="nav-tip"
+        :class="`nav-tip--${tip.place}`"
+        role="tooltip"
+        :style="tip.style"
+      >
+        <span class="nav-tip-icon" aria-hidden="true"><i :class="tip.icon"></i></span>
+        <span class="nav-tip-text">
+          <span class="nav-tip-label">{{ tip.label }}</span>
+          <span v-if="tip.desc" class="nav-tip-desc">{{ tip.desc }}</span>
+        </span>
+        <span v-if="tip.current" class="nav-tip-current">You're here</span>
+      </div>
+    </transition>
+
     <!-- TELEPORTED ACCOUNT POPUP — escapes the sidebar's overflow:hidden -->
     <Teleport to="body">
       <transition name="dropdown">
-        <div v-if="userMenuOpen" class="user-popup-menu" ref="userPopupRef" :style="userMenuStyle">
+        <div v-if="userMenuOpen" class="user-popup-menu" ref="userPopupRef" role="menu" :style="userMenuStyle">
           <div class="user-popup-header">
             <div class="pmenu-avatar-wrap">
               <div class="profile-menu-avatar user-avatar-vector" aria-hidden="true">
@@ -114,20 +163,20 @@
               </div>
               <span class="pmenu-status-dot"></span>
             </div>
-            <div>
+            <div class="user-popup-id">
               <p class="profile-menu-name">{{ user?.name || 'User' }}</p>
               <p class="profile-menu-email">admin@sheemsteel.com</p>
             </div>
           </div>
           <div class="pmenu-divider" />
-          <router-link to="/settings" class="pmenu-item" @click="userMenuOpen = false">
+          <router-link to="/settings" class="pmenu-item" role="menuitem" @click="userMenuOpen = false">
             <span class="pmenu-icon-wrap"><i class="fa-solid fa-gear"></i></span>
             Settings
           </router-link>
           <div class="pmenu-divider" />
-          <button class="pmenu-item pmenu-item--danger" @click="showLogoutModal = true; userMenuOpen = false">
+          <button class="pmenu-item pmenu-item--danger" role="menuitem" @click="showLogoutModal = true; userMenuOpen = false">
             <span class="pmenu-icon-wrap pmenu-icon-wrap--danger"><i class="fa-solid fa-right-from-bracket"></i></span>
-            Sign Out
+            Sign out
           </button>
         </div>
       </transition>
@@ -136,67 +185,90 @@
     <!-- MAIN COLUMN -->
     <div class="main-column">
 
-      <!-- TOP BAR -->
-      <header class="topbar">
-        <!-- MOBILE MENU TRIGGER — the sidebar's own burger is inside the
-             off-canvas drawer, so once it's closed there's nothing left
-             on screen to reopen it from. This lives in the topbar instead,
-             and only exists at mobile widths. -->
+      <!-- TOP BAR — gains a soft shadow once the page content scrolls
+           beneath it, so it reads as a fixed layer instead of a flat strip. -->
+      <header class="topbar" :class="{ 'topbar--scrolled': pageScrolled }">
         <button v-if="isMobile" class="icon-btn mobile-menu-btn" aria-label="Open menu" @click="sidebarOpen = true">
           <i class="fa-solid fa-bars"></i>
         </button>
 
-        <!-- GREETING — icon chip shifts color/glyph with time of day
-             (sunrise amber → midday gold → accent evening → indigo
-             night), paired with a matching greeting phrase. The date
-             line now also carries a live clock, separated by a dot,
-             both driven off the same ticking `now` ref so neither can
-             drift out of sync with the other. -->
+        <!-- GREETING — the logo only shows here while the sidebar is
+             collapsed (it's hidden inside the sidebar in that state). -->
         <div class="topbar-greeting">
-          <!-- The sidebar's own logo (brand-wrap, up in .sidebar-header) is
-               hidden once the sidebar collapses to icon-only width — it's
-               behind v-show="sidebarOpen". Rather than filling that gap
-               with a decorative time-of-day icon that just duplicated the
-               brand mark, show the real logo here instead, and only while
-               it's genuinely missing from the sidebar. -->
-          <router-link v-if="!sidebarOpen" to="/home" class="greeting-logo-link" aria-label="Sheem Steel home">
-            <img :src="logo" class="greeting-logo" alt="Sheem Steel" />
+          <router-link
+            v-if="!sidebarOpen"
+            to="/home"
+            class="greeting-logo-link"
+            aria-label="Sheem Steel home"
+          >
+            <img :src="logo" class="greeting-logo" alt="" />
           </router-link>
           <div class="greeting-text">
             <p class="greeting-name">{{ greetingPhrase }}, <span>{{ user?.name || 'User' }}</span></p>
-            <p class="greeting-sub">
-              <span class="greeting-date">{{ todayLabel }}</span>
-              <span class="greeting-sep">·</span>
-              <span class="greeting-clock">{{ clockLabel }}</span>
-            </p>
+            <p class="greeting-sub">{{ todayLabel }}</p>
           </div>
         </div>
 
         <div class="search-wrap">
-          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
           <input
             ref="searchInputRef"
             v-model="search"
+            type="search"
+            aria-label="Search products"
             @keyup.enter="goToProducts"
+            @keydown.esc="$event.target.blur()"
             @focus="searchFocused = true"
             @blur="searchFocused = false"
             class="search-input"
-            placeholder="Search products…"
+            placeholder="Search products"
           />
-          <kbd v-if="!searchFocused" class="search-kbd">/</kbd>
+          <button v-if="search" class="search-clear" aria-label="Clear search" @click="clearSearch">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+          <kbd v-else-if="!searchFocused" class="search-kbd" aria-hidden="true">/</kbd>
         </div>
 
         <div class="topbar-actions">
-          <router-link to="/products/create">
-            <button class="action-btn action-btn--primary" title="Add Product">
+          <!-- Only appears when the connection drops — a POS that silently
+               fails to save is worse than one that tells you up front. -->
+          <transition name="fade">
+            <span v-if="!isOnline" class="status-chip status-chip--offline" role="status">
+              <i class="fa-solid fa-wifi" aria-hidden="true"></i>
+              Offline
+            </span>
+          </transition>
+
+          <span class="topbar-clock" aria-label="Current time">{{ clockLabel }}</span>
+
+          <span class="topbar-sep" aria-hidden="true"></span>
+
+          <router-link to="/products/create" class="action-link" tabindex="-1">
+            <button
+              class="action-btn action-btn--primary"
+              aria-label="Add item"
+              data-tip="Add item"
+              data-tip-desc="Create a new product"
+              data-tip-icon="fa-solid fa-plus"
+            >
               <i class="fa-solid fa-plus"></i>
-              <span v-show="sidebarOpen">Add Item</span>
+              <span>Add item</span>
             </button>
           </router-link>
 
           <!-- NOTIFICATIONS -->
           <div class="notif-wrap" ref="notifWrapRef">
-            <button class="icon-btn" title="Notifications" style="position:relative" @click="notifOpen = !notifOpen">
+            <button
+              class="icon-btn"
+              aria-label="Notifications"
+              data-tip="Notifications"
+              :data-tip-desc="unreadCount > 0 ? unreadCount + ' unread' : 'No new alerts'"
+              data-tip-icon="fa-solid fa-bell"
+              aria-haspopup="true"
+              :aria-expanded="notifOpen"
+              :class="{ 'icon-btn--active': notifOpen }"
+              @click="notifOpen = !notifOpen"
+            >
               <i class="fa-solid fa-bell"></i>
               <span v-if="unreadCount > 0" class="notif-badge">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
             </button>
@@ -204,14 +276,18 @@
             <transition name="dropdown">
               <div v-if="notifOpen" class="notif-menu">
                 <div class="notif-menu-header">
-                  <p class="notif-menu-title">Notifications</p>
-                  <button v-if="unreadCount > 0" class="notif-mark-all" @click="notificationsStore.markAllRead()">Mark all read</button>
+                  <div class="notif-menu-heading">
+                    <p class="notif-menu-title">Notifications</p>
+                    <span v-if="unreadCount > 0" class="notif-count">{{ unreadCount }} new</span>
+                  </div>
+                  <button v-if="unreadCount > 0" class="notif-mark-all" @click="notificationsStore.markAllRead()">Mark all as read</button>
                 </div>
                 <div class="pmenu-divider" />
 
                 <div v-if="notifications.length === 0" class="notif-empty">
                   <i class="fa-regular fa-bell-slash"></i>
-                  <p>You're all caught up.</p>
+                  <p>You're all caught up</p>
+                  <span>New sales and stock alerts will show up here.</span>
                 </div>
 
                 <ul v-else class="notif-list">
@@ -220,7 +296,9 @@
                     :key="n.id"
                     class="notif-item"
                     :class="{ 'notif-item--unread': !n.read_at }"
+                    tabindex="0"
                     @click="goToNotification(n)"
+                    @keydown.enter="goToNotification(n)"
                   >
                     <span class="notif-item-icon" :class="`notif-item-icon--${n.type}`">
                       <i :class="notifIcon(n.type)"></i>
@@ -230,7 +308,7 @@
                       <p class="notif-item-desc">{{ n.description }}</p>
                       <p class="notif-item-time">{{ timeAgo(n.created_at) }}</p>
                     </div>
-                    <span v-if="!n.read_at" class="notif-item-dot"></span>
+                    <span v-if="!n.read_at" class="notif-item-dot" aria-label="Unread"></span>
                   </li>
                 </ul>
               </div>
@@ -240,7 +318,7 @@
       </header>
 
       <!-- PAGE CONTENT -->
-      <main class="page-content">
+      <main id="main-content" class="page-content" tabindex="-1" @scroll.passive="onPageScroll">
         <div class="content-inner">
           <slot />
         </div>
@@ -249,12 +327,19 @@
 
     <!-- ═══════════════════════════════════════════════════
          GLOBAL FLOATING "GO TO POS" BUTTON
+         Shows the full pill briefly, then auto-docks to the right edge
+         as an icon-only tab. Hover / focus pops it back out.
     ════════════════════════════════════════════════════ -->
     <router-link
       v-if="!isPosPage"
       to="/point-of-sale"
       class="pos-fab"
+      :class="{ 'pos-fab--docked': posFabDocked }"
       aria-label="Go to POS"
+      @mouseenter="expandPosFab"
+      @mouseleave="schedulePosFabDock"
+      @focus="expandPosFab"
+      @blur="schedulePosFabDock"
     >
       <span class="pos-fab-icon"><i class="fa-solid fa-cash-register"></i></span>
       <span class="pos-fab-label">Go to POS</span>
@@ -265,17 +350,17 @@
   <!-- LOGOUT MODAL -->
   <transition name="fade">
     <div v-if="showLogoutModal" class="modal-backdrop" @click.self="!loggingOut && (showLogoutModal = false)">
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="logout-title">
         <div class="modal-icon-wrap">
-          <i class="fa-solid fa-right-from-bracket" style="font-size:20px;color:var(--c-accent)"></i>
+          <i class="fa-solid fa-right-from-bracket" style="font-size:18px;color:var(--c-accent)"></i>
         </div>
-        <h2 class="modal-title">Sign out?</h2>
-        <p class="modal-desc">You'll need to sign in again to access the system.</p>
+        <h2 id="logout-title" class="modal-title">Sign out of Sheem Steel?</h2>
+        <p class="modal-desc">You'll need to sign in again to use the system.</p>
         <div class="modal-actions">
           <button class="btn-ghost" :disabled="loggingOut" @click="showLogoutModal = false">Cancel</button>
           <button class="btn-danger" :disabled="loggingOut" @click="confirmLogout">
             <i v-if="loggingOut" class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
-            <span>{{ loggingOut ? 'Signing out…' : 'Sign Out' }}</span>
+            <span>{{ loggingOut ? 'Signing out…' : 'Sign out' }}</span>
           </button>
         </div>
       </div>
@@ -284,7 +369,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useAttrs } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import api from '@/api/axios'
@@ -298,6 +383,17 @@ import { useNotificationsStore } from '@/stores/notifications'
 
 defineOptions({ inheritAttrs: false })
 
+// Attributes passed down by the parent are forwarded to the shell root —
+// EXCEPT `title`. A page-level title (e.g. <Layout title="Home">) would
+// otherwise turn into a plain native browser tooltip over every part of the
+// shell that doesn't have its own.
+const attrs = useAttrs()
+const shellAttrs = computed(() => {
+  // eslint-disable-next-line no-unused-vars
+  const { title, ...rest } = attrs
+  return rest
+})
+
 const router = useRouter()
 const route  = useRoute()
 
@@ -309,11 +405,9 @@ const route  = useRoute()
 const authStore = useAuthStore()
 const { user, authenticated } = storeToRefs(authStore)
 
-// Notification state now lives in a Pinia store (a singleton for the
-// whole app session) instead of local refs here — see stores/notifications.js
-// for why: Layout.vue remounts on every navigation, so local refs had
-// no way to survive a route change, which is what made "mark as read"
-// unreliable no matter how the network call was sequenced.
+// Notification state lives in a Pinia store (a singleton for the whole
+// app session) instead of local refs here — Layout.vue remounts on every
+// navigation, so local refs couldn't survive a route change.
 const notificationsStore = useNotificationsStore()
 const { notifications, unreadCount } = storeToRefs(notificationsStore)
 
@@ -321,19 +415,13 @@ const search          = ref('')
 const inventoryOpen   = ref(false)
 const salesOpen       = ref(false)
 const showLogoutModal = ref(false)
-// Drives the spinner/disabled state on the logout modal's buttons — the
-// request itself already triggers the slim top progress bar via the
-// axios interceptors below, but that's a 3px line easy to miss under a
-// blurred modal backdrop. This puts feedback directly on the button
-// the user just clicked instead.
+// Drives the spinner/disabled state on the logout modal's buttons.
 const loggingOut      = ref(false)
 
 /* ─────────────────────────────────────────────────────────
-   LIVE CLOCK — backs the greeting phrase, date, and time-of-day icon.
-   `now` ticks every 30s (not computed once) so the topbar stays
-   accurate even if the page is left open across a day/hour boundary —
-   previously this only "worked" as a side effect of Layout remounting
-   on every route change, which is not something to depend on.
+   LIVE CLOCK — backs the greeting phrase, date and time.
+   `now` ticks every 30s so the topbar stays accurate even if the page
+   is left open across a day/hour boundary.
 ───────────────────────────────────────────────────────── */
 const now = ref(new Date())
 let clockTimer = null
@@ -362,34 +450,47 @@ const greetingPhrase = computed(() => ({
 }[dayPeriod.value]))
 
 /* ─────────────────────────────────────────────────────────
-   RESPONSIVE BREAKPOINT — drives the sidebar's mode.
-   >768px:  sidebar lives in normal flow, `sidebarOpen` just toggles
-            between the 260px expanded / 64px icon-only widths (unchanged
-            desktop behavior).
-   ≤768px:  sidebar becomes a fixed off-canvas drawer. `sidebarOpen` now
-            means "drawer open/closed" instead of "expanded/collapsed",
-            and a backdrop appears behind it.
+   CONNECTION STATUS — a POS needs to say so when it's offline.
+   Drives the red "Offline" chip in the topbar and the status dot on
+   the sidebar's user card (green → grey).
+───────────────────────────────────────────────────────── */
+const isOnline = ref(navigator.onLine)
+function onOnline()  { isOnline.value = true;  notificationsStore.fetchNotifications() }
+function onOffline() { isOnline.value = false }
 
-   Computed eagerly (not in onMounted) so there's no flash of the
-   desktop-expanded sidebar before the breakpoint check runs.
+/* ─────────────────────────────────────────────────────────
+   TOPBAR SCROLL SHADOW — flips on once the page content has scrolled
+   past the very top, so the topbar separates from the content.
+───────────────────────────────────────────────────────── */
+const pageScrolled = ref(false)
+function onPageScroll(e) {
+  pageScrolled.value = e.target.scrollTop > 4
+}
+
+/* ─────────────────────────────────────────────────────────
+   RESPONSIVE BREAKPOINT — drives the sidebar's mode.
+   >768px:  sidebar lives in normal flow; `sidebarOpen` toggles between
+            the 260px expanded / 68px icon-only widths.
+            DEFAULT: collapsed (icon-only) — the user expands it on demand.
+   ≤768px:  sidebar becomes a fixed off-canvas drawer; `sidebarOpen`
+            means "drawer open/closed", and a backdrop appears behind it.
+            DEFAULT: closed.
 ───────────────────────────────────────────────────────── */
 const MOBILE_BREAKPOINT = 768
 const isMobile    = ref(window.innerWidth <= MOBILE_BREAKPOINT)
-const sidebarOpen = ref(!isMobile.value)
+// Minimized is the main state on every screen size.
+const sidebarOpen = ref(false)
 
 function onWindowResize() {
   const mobile = window.innerWidth <= MOBILE_BREAKPOINT
   if (mobile === isMobile.value) return
   isMobile.value = mobile
   // Crossing the breakpoint changes what sidebarOpen *means*, so reset
-  // to the sensible default for the mode we just entered rather than
-  // carrying over a value that meant something else a second ago.
-  sidebarOpen.value = !mobile
+  // to the default for the mode we just entered: minimized / closed.
+  sidebarOpen.value = false
 }
 
-// On mobile the drawer sits on top of the page; after navigating
-// somewhere new there's nothing left to see behind it worth hiding, so
-// close it automatically instead of making the user tap the backdrop.
+// On mobile, close the drawer automatically after navigating.
 watch(() => route.path, () => {
   if (isMobile.value) sidebarOpen.value = false
 })
@@ -400,39 +501,61 @@ watch(() => route.path, () => {
 const isPosPage = computed(() => route.path.startsWith('/point-of-sale'))
 
 /* ─────────────────────────────────────────────────────────
-   DARK MODE — the toggle UI lives only on the Settings page now.
-   Layout just needs to apply the persisted/preferred theme as soon as
-   it mounts, so there's no flash of the wrong theme before Settings
-   (or the composable's own system-preference listener) takes over.
+   "GO TO POS" BUTTON — AUTO-DOCK
+   Starts expanded (icon + label) so it's discoverable, then after
+   POS_FAB_DOCK_DELAY of no interaction it slides against the right edge
+   and collapses to just the icon.
+   - Hover / keyboard focus  → expands immediately and cancels the timer.
+   - Mouse leave / blur      → schedules the dock again.
+   - Leaving the POS page    → pops back out briefly, then re-docks.
+───────────────────────────────────────────────────────── */
+const POS_FAB_DOCK_DELAY = 3000 // ms before the button tucks itself away
+const posFabDocked = ref(false)
+let posFabTimer = null
+
+function clearPosFabTimer() {
+  if (posFabTimer) { clearTimeout(posFabTimer); posFabTimer = null }
+}
+function schedulePosFabDock() {
+  clearPosFabTimer()
+  posFabTimer = setTimeout(() => {
+    posFabDocked.value = true
+    posFabTimer = null
+  }, POS_FAB_DOCK_DELAY)
+}
+function expandPosFab() {
+  clearPosFabTimer()
+  posFabDocked.value = false
+}
+
+watch(isPosPage, (onPos) => {
+  if (onPos) { clearPosFabTimer(); return }
+  expandPosFab()
+  schedulePosFabDock()
+})
+
+/* ─────────────────────────────────────────────────────────
+   DARK MODE — the toggle UI lives only on the Settings page.
+   Layout just applies the persisted/preferred theme on mount.
 ───────────────────────────────────────────────────────── */
 const { initDarkMode } = useDarkMode()
 
 /* ─── LOADING ─────────────────────────────────────────────
-   Two separate busy states now, instead of one overlay driving both:
-
    - `initializing`: true only until the very first /api/user check
-     resolves. Drives the full-screen blocking overlay — appropriate
-     here because there's genuinely nothing behind it to show yet.
-   - `apiBusy`: drives the slim, non-blocking top progress bar for
-     every request AFTER that point (page navigations, form submits,
-     etc). It never dims or blocks the screen, so the app stays
-     interactive and feels fast even while a request is in flight.
+     resolves. Drives the full-screen blocking overlay.
+   - `apiBusy`: drives the slim, non-blocking top progress bar for every
+     request AFTER that point.
 
-   apiBusy still uses a show-delay / hide-grace pair so quick requests
-   don't flicker the bar on and off:
-   - SHOW_DELAY: don't reveal the bar unless a request is still pending
-     after this long — most calls finish well inside this window.
-   - HIDE_GRACE: once shown, hold briefly after the last request settles
-     so rapid sequential calls don't flash the bar on/off repeatedly.
+   SHOW_DELAY / HIDE_GRACE stop quick requests from flickering the bar.
 ─────────────────────────────────────────────────────────── */
 const initializing = ref(true)
 const apiBusy       = ref(false)
 let requestCount     = 0
-let showTimer        = null   // pending "reveal the bar" timer
-let hideTimer        = null   // pending "hide the bar" grace timer
+let showTimer        = null
+let hideTimer        = null
 
-const SHOW_DELAY = 150  // ms a request must be pending before we show anything
-const HIDE_GRACE = 120  // ms to hold the bar open after the last request settles
+const SHOW_DELAY = 150
+const HIDE_GRACE = 120
 
 function startLoading() {
   requestCount++
@@ -448,7 +571,7 @@ function stopLoading() {
   if (requestCount > 0) return
 
   if (showTimer) { clearTimeout(showTimer); showTimer = null }
-  if (!apiBusy.value) return // never actually shown, nothing to hide
+  if (!apiBusy.value) return
 
   if (hideTimer) clearTimeout(hideTimer)
   hideTimer = setTimeout(() => { apiBusy.value = false; hideTimer = null }, HIDE_GRACE)
@@ -471,10 +594,8 @@ function measureUserMenu() {
   const el = userMiniRef.value
   if (!el) return
   const rect = el.getBoundingClientRect()
-  // Clamp so the 230px popup can't run off the right edge on narrow
-  // screens (the sidebar drawer can sit close to the left edge, but
-  // the popup itself still needs to fit within the viewport).
-  const popupWidth = 230
+  // Clamp so the 240px popup can't run off the right edge on narrow screens.
+  const popupWidth = 240
   const maxLeft = window.innerWidth - popupWidth - 10
   userMenuCoords.value = {
     left:   Math.min(rect.left, Math.max(10, maxLeft)),
@@ -494,13 +615,9 @@ window.addEventListener('scroll', onScrollOrResizeUserMenu, true)
 window.addEventListener('resize', onScrollOrResizeUserMenu)
 
 /* ─── SEARCH — "/" TO FOCUS ────────────────────────────────
-   The kbd hint next to the search input now advertises a real global
-   shortcut instead of just decorating the Enter key (which already had
-   its own job: submitting the search). Pressing "/" anywhere outside
-   a text field jumps focus straight into search, same convention as
-   GitHub/Slack/etc. The hint itself hides once the field is focused,
-   since at that point it's no longer something the user needs to be
-   told about.
+   Pressing "/" anywhere outside a text field jumps focus straight into
+   search (GitHub/Slack convention). Escape closes whatever is open:
+   notifications, account menu, or the sign-out dialog.
 ──────────────────────────────────────────────────────────── */
 const searchInputRef = ref(null)
 const searchFocused  = ref(false)
@@ -512,6 +629,12 @@ function isTypingTarget(el) {
 }
 
 function onGlobalKeydown(e) {
+  if (e.key === 'Escape') {
+    if (showLogoutModal.value && !loggingOut.value) { showLogoutModal.value = false; return }
+    if (userMenuOpen.value) { userMenuOpen.value = false; userMiniRef.value?.focus(); return }
+    if (notifOpen.value)    { notifOpen.value = false; return }
+    return
+  }
   if (e.key !== '/') return
   if (e.metaKey || e.ctrlKey || e.altKey) return
   if (isTypingTarget(document.activeElement)) return
@@ -519,14 +642,144 @@ function onGlobalKeydown(e) {
   searchInputRef.value?.focus()
 }
 
+/* ─── THEMED TOOLTIPS ─────────────────────────────────────
+   Event delegation on .app-shell: whichever target the pointer (or
+   keyboard focus) lands on, we read its label, swap out the native
+   `title` (which would show the browser's plain black tooltip) and show
+   our own themed card beside it.
+
+   Who gets one:
+   - Any element with a `data-tip` attribute (topbar buttons, burger,
+     user card). Optional: data-tip-desc, data-tip-icon.
+     `data-tip-collapsed` = only while the sidebar is collapsed.
+   - Sidebar nav links, only while the sidebar is collapsed (when it's
+     expanded the label is already visible).
+   Dropdown triggers (<button>s that open a flyout) are skipped on
+   purpose — a tooltip would sit on top of their submenu.
+
+   Placement: right of the element for the sidebar, below it for the
+   topbar (flipped to right-aligned when close to the screen's edge so
+   it can never be clipped). Never shown on mobile (no hover on touch).
+──────────────────────────────────────────────────────────── */
+const TIP_DESCRIPTIONS = {
+  'home':           'Dashboard and daily overview',
+  'suppliers':      'Delivery partners and contacts',
+  'reports':        'Sales and profit analytics',
+  'inventory logs': 'History of every stock change',
+}
+const tip = ref({ show: false, label: '', desc: '', icon: '', current: false, place: 'right', style: {} })
+let tipTimer = null
+let tipEl = null
+
+function hideTip() {
+  if (tipTimer) { clearTimeout(tipTimer); tipTimer = null }
+  tipEl = null
+  tip.value.show = false
+}
+
+function onTipOver(e) {
+  if (isMobile.value) return
+  const target = e.target
+  if (!(target instanceof Element)) return
+
+  // Strip native `title`s on the target and every ancestor inside the
+  // sidebar / topbar, BEFORE any early return — otherwise the browser's plain
+  // tooltip still shows when we decide not to show ours (e.g. sidebar expanded).
+  for (let n = target; n; n = n.parentElement) {
+    if (n.hasAttribute('title') && n.closest('.sidebar, .topbar')) {
+      if (!n.dataset.tipLabel) n.dataset.tipLabel = n.getAttribute('title')
+      n.removeAttribute('title')
+    }
+    if (n === e.currentTarget) break
+  }
+
+  const el = target.closest('[data-tip], .sidebar-nav a')
+  if (!el) { hideTip(); return }
+  if (el === tipEl) return // already showing / pending for this one
+
+  const inSidebar = !!el.closest('.sidebar')
+  const hasTip    = el.hasAttribute('data-tip')
+
+  // Sidebar nav links only need a tooltip while collapsed; the user card
+  // (data-tip-collapsed) follows the same rule.
+  if (inSidebar && sidebarOpen.value && (!hasTip || el.hasAttribute('data-tip-collapsed'))) {
+    hideTip(); return
+  }
+  // The notification panel is open — don't float a tooltip over it.
+  if (notifOpen.value && el.closest('.notif-wrap')) { hideTip(); return }
+
+  const label = (
+    el.getAttribute('data-tip') ||
+    el.closest('[data-tip-label]')?.dataset.tipLabel ||
+    el.querySelector('[data-tip-label]')?.dataset.tipLabel ||
+    el.getAttribute('aria-label') ||
+    el.textContent || ''
+  ).replace(/\s+/g, ' ').trim()
+  if (!label) { hideTip(); return }
+
+  const icon =
+    el.getAttribute('data-tip-icon') ||
+    el.querySelector('i[class*="fa-"]')?.className ||
+    ''
+  const desc =
+    el.getAttribute('data-tip-desc') ||
+    TIP_DESCRIPTIONS[label.toLowerCase()] ||
+    ''
+  const current =
+    el.getAttribute('aria-current') === 'page' ||
+    el.classList.contains('router-link-active') ||
+    el.classList.contains('router-link-exact-active')
+
+  tipEl = el
+  if (tipTimer) clearTimeout(tipTimer)
+  // Short delay so sweeping the pointer across the UI doesn't flicker a
+  // tooltip on everything it crosses; an already-visible tooltip jumps instantly.
+  tipTimer = setTimeout(() => {
+    if (!tipEl || !tipEl.isConnected) return
+    const r = tipEl.getBoundingClientRect()
+    let place, style
+
+    if (inSidebar) {
+      place = 'right'
+      style = { top: r.top + r.height / 2 + 'px', left: r.right + 14 + 'px' }
+    } else if (r.left + r.width / 2 < 150) {
+      // near the left edge: left-align with the element
+      place = 'bottom-start'
+      style = {
+        top: r.bottom + 12 + 'px',
+        left: Math.max(8, r.left) + 'px',
+        '--arrow-x': Math.max(14, r.width / 2) + 'px',
+      }
+    } else if (r.left + r.width / 2 > window.innerWidth - 150) {
+      // near the right edge: right-align the tooltip with the element and
+      // slide the arrow so it still points at the element's centre
+      place = 'bottom-end'
+      style = {
+        top: r.bottom + 12 + 'px',
+        right: Math.max(8, window.innerWidth - r.right) + 'px',
+        '--arrow-x': Math.max(14, r.width / 2) + 'px',
+      }
+    } else {
+      place = 'bottom'
+      style = { top: r.bottom + 12 + 'px', left: r.left + r.width / 2 + 'px' }
+    }
+
+    tip.value = { show: true, label, desc, icon, current, place, style }
+    tipTimer = null
+  }, tip.value.show ? 0 : 140)
+}
+
+function clearSearch() {
+  search.value = ''
+  searchInputRef.value?.focus()
+}
+
 /* ─── NOTIFICATIONS ───────────────────────────────────── */
 const notifOpen      = ref(false)
 const notifWrapRef   = ref(null)
-// notifications / unreadCount now come from notificationsStore (see above)
 
 // Where clicking a given notification type should take the user.
-// Keyed the same way notifIcon() is, so both stay in sync — add a new
-// notification type to both maps together if the backend adds one.
+// Keyed the same way notifIcon() is — add new types to both together.
 const NOTIF_ROUTES = {
   sale:              '/sales-transaction',
   low_stock:         '/products',
@@ -537,13 +790,9 @@ const NOTIF_ROUTES = {
 
 // low_stock / out_of_stock descriptions embed the product name, e.g.
 // "rew has only 9 units left." or "rew is out of stock." — there's no
-// dedicated product_id field on the notification payload, so we pull
-// the name back out of the text and hand it to the Product List page
-// as a query param, which matches it against ProductName to scroll to
-// and highlight the right row. If the backend ever adds a proper
-// product reference to notifications, swap this out for that instead —
-// name-matching is a best-effort fallback, not bulletproof (won't
-// survive duplicate product names or a rename after the alert fired).
+// dedicated product_id field on the payload, so we pull the name back
+// out of the text and hand it to the Product List page as a query param.
+// Best-effort fallback: won't survive duplicate names or later renames.
 function extractProductName(n) {
   const desc = n.description || ''
   let m = desc.match(/^(.*?) has (?:only )?\d+ units? left\.?$/i)
@@ -553,37 +802,19 @@ function extractProductName(n) {
   return null
 }
 
-// fetchNotifications / markRead / markAllRead now live on notificationsStore
-// (see stores/notifications.js) so they survive Layout remounting on
-// every navigation. Thin local wrappers kept only where useful below.
-
 /** Marks the notification read, closes the dropdown, then navigates
- *  wherever that notification type is relevant — a sale notification
- *  goes to Transactions, a stock alert goes to the Product List so the
- *  user can act on it immediately, and a new-product notification also
- *  goes to the Product List.
+ *  wherever that notification type is relevant.
  *
- *  markRead() is intentionally NOT awaited here — it updates the
- *  notifications store instantly (see stores/notifications.js), and
- *  since that store is a singleton that survives navigation (unlike
- *  Layout.vue itself, which remounts on every route change), there's
- *  nothing left to race by navigating away immediately. Waiting on the
- *  network round trip here would only add a visible delay before the
- *  click does anything, for no correctness benefit.
+ *  markRead() is intentionally NOT awaited — it updates the store
+ *  instantly, and the store is a singleton that survives navigation, so
+ *  there's nothing to race by navigating away immediately.
  *
- *  For low_stock / out_of_stock alerts, we flip the Product List into
- *  its "Low Stock" filter and pass the product NAME (extracted from the
- *  description text) so that page can scroll to and highlight the exact
- *  row — these predate notifiable_id being populated on notifications.
+ *  low_stock / out_of_stock: Product List in its "Low Stock" filter,
+ *  highlighting the product by NAME (extracted from the description).
+ *  product_created / sale: notifiable_id is populated, so it's passed
+ *  straight through as highlightId / highlightSale.
  *
- *  For product_created and sale notifications, notifiable_id IS
- *  populated (see ProductController@store), so we pass that straight
- *  through as highlightId / highlightSale instead of guessing from
- *  text — Product List / Sales Transaction match it directly against
- *  ProductID / SaleID.
- *
- *  Unrecognized types just mark-as-read and close the dropdown without
- *  navigating anywhere. */
+ *  Unrecognized types just mark-as-read and close the dropdown. */
 function goToNotification(n) {
   notificationsStore.markRead(n.id)
   notifOpen.value = false
@@ -636,15 +867,12 @@ function timeAgo(dateStr) {
 }
 
 // Lets any page force an immediate notification refresh instead of
-// waiting on the 30s poll — e.g. POS dispatches this right after a
-// successful checkout so a new low/out-of-stock alert shows up instantly.
+// waiting on the 30s poll — e.g. POS dispatches this after checkout.
 function onNotifyRefresh() { notificationsStore.fetchNotifications() }
 
-// Pause background notification polling while the tab isn't visible —
-// no point burning a request every 30s on a hidden/inactive tab. Polling
-// itself is guarded inside the store (singleton), so even though this
-// fires from every Layout instance's onMounted, it can't stack up
-// duplicate timers across remounts.
+// Pause background notification polling while the tab isn't visible.
+// Polling is guarded inside the store (singleton), so it can't stack up
+// duplicate timers across Layout remounts.
 function onVisibilityChange() {
   if (document.hidden) {
     notificationsStore.stopPolling()
@@ -655,14 +883,9 @@ function onVisibilityChange() {
 }
 
 /* ─── CLICK-OUTSIDE-TO-CLOSE (notif dropdown + account popup) ────
-   Both popups were previously only closeable by clicking their own
-   trigger button again. This adds a single document-level listener
-   that closes whichever popup is open when a click lands outside of
-   it (and outside its trigger). It's attached in the capture-less
-   bubble phase, so it fires *after* the trigger's own @click handler
-   has already toggled the value — that's what stops a click that
-   just opened a popup from immediately closing it again on the same
-   event.
+   One document-level listener closes whichever popup is open when a
+   click lands outside it (and outside its trigger). Bubble phase, so it
+   fires after the trigger's own @click has toggled the value.
 ──────────────────────────────────────────────────────────────── */
 function onDocumentClick(e) {
   if (notifOpen.value && notifWrapRef.value && !notifWrapRef.value.contains(e.target)) {
@@ -681,10 +904,12 @@ onMounted(async () => {
   /* Init theme before anything renders */
   initDarkMode()
 
-  // Interceptors now respect a per-request `skipLoading` flag so silent
+  // Start the "Go to POS" button's auto-dock countdown for this page.
+  if (!isPosPage.value) schedulePosFabDock()
+
+  // Interceptors respect a per-request `skipLoading` flag so silent
   // background calls (notification polling, read receipts) don't flash
-  // the full-screen loading overlay. Regular navigational requests are
-  // unaffected and still show the loader as before.
+  // the progress bar.
   reqI = api.interceptors.request.use(
     c => { if (!c.skipLoading) startLoading(); return c },
     e => { if (!e?.config?.skipLoading) stopLoading(); return Promise.reject(e) }
@@ -696,22 +921,15 @@ onMounted(async () => {
 
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('online', onOnline)
+  window.addEventListener('offline', onOffline)
   document.addEventListener('click', onDocumentClick)
 
-  // Ticks the topbar's greeting/date/clock. 30s is frequent enough that
-  // the displayed minute is never stale for long, without generating
-  // any meaningful re-render cost.
   clockTimer = setInterval(() => { now.value = new Date() }, 30_000)
 
   // Auth check + first notifications fetch run in parallel — they're
-  // independent, so neither should wait on the other before starting.
-  //
-  // authStore.checkAuth() is a no-op network-wise if the router guard
-  // already resolved auth for this session (see auth.ts: `initialized`
-  // flag + in-flight de-dupe on fetchUser()). This is what stops
-  // Layout.vue from firing its own separate /api/user call on top of
-  // whatever the router guard already did — previously this page load
-  // alone could trigger /api/user 2-3x.
+  // independent. authStore.checkAuth() is a no-op network-wise if the
+  // router guard already resolved auth for this session.
   await Promise.allSettled([
     authStore.checkAuth(),
     notificationsStore.fetchNotifications(),
@@ -735,17 +953,18 @@ onBeforeUnmount(() => {
   if (showTimer) clearTimeout(showTimer)
   if (hideTimer) clearTimeout(hideTimer)
   if (clockTimer) clearInterval(clockTimer)
+  clearPosFabTimer()
+  if (tipTimer) clearTimeout(tipTimer)
   // Polling is NOT stopped here — it belongs to notificationsStore (a
-  // singleton), not this Layout instance. Stopping it on every
-  // navigation-triggered unmount would just make the next page's
-  // Layout start it right back up, and briefly leaves no poller running
-  // at all mid-navigation.
+  // singleton), not this Layout instance.
   document.removeEventListener('visibilitychange', onVisibilityChange)
   document.removeEventListener('click', onDocumentClick)
   window.removeEventListener('scroll', onScrollOrResizeUserMenu, true)
   window.removeEventListener('resize', onScrollOrResizeUserMenu)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('online', onOnline)
+  window.removeEventListener('offline', onOffline)
   window.removeEventListener('notifications:refresh', onNotifyRefresh)
 })
 
@@ -783,6 +1002,40 @@ const confirmLogout = async () => {
   font-family: 'Inter', system-ui, sans-serif;
   color: var(--c-text-primary);
   position: relative;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Skip link — invisible until focused with the keyboard */
+.skip-link {
+  position: fixed;
+  top: 10px; left: 10px;
+  z-index: 10001;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--c-accent);
+  color: #fff;
+  font-size: 13px; font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform .18s ease;
+}
+.skip-link:focus { transform: translateY(0); }
+
+/* Visible keyboard focus everywhere that's interactive in the shell */
+.burger:focus-visible,
+.icon-btn:focus-visible,
+.action-btn:focus-visible,
+.user-mini:focus-visible,
+.pos-fab:focus-visible,
+.search-clear:focus-visible,
+.notif-mark-all:focus-visible,
+.notif-item:focus-visible,
+.btn-ghost:focus-visible,
+.btn-danger:focus-visible,
+.greeting-logo-link:focus-visible,
+.brand-wrap:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -842,9 +1095,9 @@ const confirmLogout = async () => {
   40%           { transform: translateY(-8px); opacity: 1; }
 }
 .loading-text {
-  font-size: 11px; font-weight: 600;
+  font-size: 12px; font-weight: 500;
   color: var(--c-text-faint);
-  letter-spacing: 0.14em; text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .loader-fade-enter-active { transition: opacity .18s ease; }
 .loader-fade-leave-active { transition: opacity .30s ease; }
@@ -857,7 +1110,7 @@ const confirmLogout = async () => {
   position: fixed;
   top: 0; left: 0; right: 0;
   height: 3px;
-  z-index: 10000; /* above the sidebar/topbar, but never intercepts clicks */
+  z-index: 10000;
   pointer-events: none;
   background: var(--c-accent-ring);
   overflow: hidden;
@@ -887,8 +1140,8 @@ const confirmLogout = async () => {
 
 /* ─── SIDEBAR ─────────────────────────────────────────── */
 .sidebar {
-  width: var(--sw, 260px);
-  min-width: var(--sw, 260px);
+  width: var(--sw, 68px);
+  min-width: var(--sw, 68px);
   height: 100vh;
   background: var(--c-sidebar-bg);
   border-right: 1px solid var(--c-border);
@@ -913,10 +1166,7 @@ const confirmLogout = async () => {
 }
 
 /* Below the mobile breakpoint the sidebar leaves the flex flow entirely
-   and becomes a full-height drawer pinned to the left edge, hidden by
-   default (translated off-screen) and slid in when `sidebarOpen` is
-   true. Always full width here — the icon-only collapsed state only
-   makes sense when the sidebar shares space with page content. */
+   and becomes a full-height off-canvas drawer. */
 .sidebar--mobile {
   position: fixed;
   top: 0;
@@ -934,19 +1184,21 @@ const confirmLogout = async () => {
 .sidebar-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 10px;
-  min-height: 62px;
+  gap: 8px;
+  padding: 0 12px;
+  height: 64px;
+  min-height: 64px;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--c-border);
 }
 
 .burger {
-  width: 34px; height: 34px; min-width: 34px;
+  width: 40px; height: 40px; min-width: 40px;
   display: flex; flex-direction: column;
-  align-items: flex-start; justify-content: center;
-  gap: 5px;
+  align-items: center; justify-content: center;
+  gap: 4.5px;
   background: none; border: none; cursor: pointer;
-  padding: 6px; border-radius: 8px;
+  padding: 0; border-radius: 10px;
   transition: background 0.18s ease;
   flex-shrink: 0;
 }
@@ -958,54 +1210,64 @@ const confirmLogout = async () => {
   border-radius: 2px;
   transition: width .22s ease, opacity .22s ease, background-color 0.22s ease;
 }
-.bline--mid        { width: 12px; }
+.bline--mid        { width: 12px; align-self: flex-start; margin-left: 11px; }
 .bline--mid-hidden { opacity: 0; width: 0; }
 
 .brand-wrap {
-  display: flex; align-items: center; gap: 9px;
+  display: flex; align-items: center; gap: 10px;
   text-decoration: none; overflow: hidden; white-space: nowrap; flex: 1;
+  border-radius: 8px;
 }
-.brand-logo { width: 30px; height: 30px; object-fit: contain; border-radius: 7px; flex-shrink: 0; }
-.brand-text { display: flex; flex-direction: column; line-height: 1; }
-.brand-name { font-size: 13.5px; font-weight: 700; color: var(--c-text-primary); letter-spacing: .01em; }
-.brand-sub  { font-size: 10px; color: var(--c-text-faint); margin-top: 2px; font-weight: 500; letter-spacing: .02em; text-transform: uppercase; }
-
-.sidebar-divider { height: 1px; background: var(--c-border); margin: 0 14px; flex-shrink: 0; }
+.brand-logo { width: 32px; height: 32px; object-fit: contain; border-radius: 8px; flex-shrink: 0; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-name { font-size: 14px; font-weight: 700; color: var(--c-text-primary); letter-spacing: -.005em; }
+.brand-sub  { font-size: 11.5px; color: var(--c-text-faint); margin-top: 1px; font-weight: 500; }
 
 .sidebar-nav {
-  flex: 1; padding: 10px 8px;
+  flex: 1; padding: 12px 10px;
   overflow-y: auto; overflow-x: hidden;
-  display: flex; flex-direction: column; gap: 1px;
+  display: flex; flex-direction: column; gap: 2px;
   scrollbar-width: none;
 }
 .sidebar-nav::-webkit-scrollbar { display: none; }
 
-.sidebar-footer { padding: 8px 8px 14px; flex-shrink: 0; }
+/* Divider between nav groups (overview / daily work / management) */
+.nav-divider {
+  height: 1px;
+  background: var(--c-border);
+  margin: 8px 6px;
+  flex-shrink: 0;
+}
 
-/* user-mini is now a <button> acting as the account-menu trigger */
+.sidebar-footer {
+  padding: 10px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--c-border);
+}
+
+/* user-mini is a <button> acting as the account-menu trigger */
 .user-mini {
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 10px; border-radius: 10px;
-  overflow: hidden; white-space: nowrap; margin-top: 8px;
-  background: var(--c-surface-raised);
-  border: 1px solid var(--c-border);
-  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  padding: 8px 10px; border-radius: 10px;
+  overflow: hidden; white-space: nowrap;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background-color 0.18s ease, border-color 0.18s ease;
   cursor: pointer;
   width: 100%;
   font-family: inherit;
   text-align: left;
 }
-.user-mini--center { justify-content: center; }
+.user-mini--center { justify-content: center; padding: 8px 0; }
 .user-mini:hover,
-.user-mini--open   { background: var(--c-accent-soft); border-color: var(--c-accent-border); box-shadow: 0 0 0 3px var(--c-accent-ring); }
+.user-mini--open   { background: var(--c-surface-raised); border-color: var(--c-border); }
 
 .user-avatar-wrap  { position: relative; flex-shrink: 0; }
-.user-avatar-sm    { width: 32px; height: 32px; border-radius: 8px; object-fit: cover; display: block; }
-.user-status-dot   { position: absolute; bottom: -1px; right: -1px; width: 9px; height: 9px; background: var(--c-online); border-radius: 50%; border: 2px solid var(--c-sidebar-bg); }
+.user-avatar-sm    { width: 34px; height: 34px; border-radius: 9px; object-fit: cover; display: block; }
+.user-status-dot   { position: absolute; bottom: -2px; right: -2px; width: 10px; height: 10px; background: var(--c-online); border-radius: 50%; border: 2px solid var(--c-sidebar-bg); transition: background-color .2s ease; }
+.user-status-dot--offline { background: var(--c-text-faint); }
 
-/* Vector-icon avatar — used for both the sidebar-mini and the
-   teleported popup avatar (sizing/radius come from .user-avatar-sm /
-   .profile-menu-avatar, this just adds the fill + centers the icon). */
+/* Vector-icon avatar — shared by sidebar-mini and the teleported popup */
 .user-avatar-vector {
   display: flex;
   align-items: center;
@@ -1018,29 +1280,33 @@ const confirmLogout = async () => {
 .profile-menu-avatar.user-avatar-vector  { font-size: 17px; }
 
 .user-mini-info { overflow: hidden; flex: 1; }
-.user-mini-name { font-size: 12.5px; font-weight: 600; color: var(--c-text-primary); line-height: 1.2; }
-.user-mini-role { font-size: 10px; color: var(--c-accent); margin-top: 2px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.user-mini-name { font-size: 13px; font-weight: 600; color: var(--c-text-primary); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; }
+.user-mini-role { font-size: 11.5px; color: var(--c-text-faint); margin-top: 1px; font-weight: 500; }
 
 .user-mini-caret {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--c-text-faint);
   transition: transform .2s ease;
   flex-shrink: 0;
 }
-.user-mini-caret--up { transform: rotate(180deg); }
+.user-mini-caret--down { transform: rotate(180deg); }
 
 /* ─── MAIN COLUMN ─────────────────────────────────────── */
 .main-column { flex: 1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; min-width: 0; }
 
 /* ─── TOP BAR ─────────────────────────────────────────── */
 .topbar {
-  height: 65px; min-height: 65px;
+  height: 64px; min-height: 64px;
   background: var(--c-surface);
   border-bottom: 1px solid var(--c-border);
-  display: flex; align-items: center; gap: 16px;
-  padding: 0 24px;
+  display: flex; align-items: center; gap: 20px;
+  padding: 0 28px;
   z-index: 40; flex-shrink: 0;
-  transition: background-color 0.22s ease, border-color 0.22s ease;
+  position: relative;
+  transition: background-color 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+}
+.topbar--scrolled {
+  box-shadow: 0 1px 2px rgba(16,24,40,.05), 0 4px 12px -4px rgba(16,24,40,.08);
 }
 
 .mobile-menu-btn { flex-shrink: 0; }
@@ -1049,21 +1315,18 @@ const confirmLogout = async () => {
 .topbar-greeting {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   flex-shrink: 0;
   min-width: 0;
 }
 
-/* Stand-in for the sidebar's brand-logo while the sidebar is collapsed
-   and can't show it itself — same sizing language as .brand-logo, just
-   a touch larger since it's standing alone in the topbar. */
 .greeting-logo-link {
   display: flex;
   flex-shrink: 0;
   border-radius: 9px;
   transition: transform 0.15s ease;
 }
-.greeting-logo-link:hover { transform: scale(1.06); }
+.greeting-logo-link:hover { transform: scale(1.05); }
 .greeting-logo {
   width: 34px; height: 34px;
   object-fit: contain;
@@ -1074,103 +1337,145 @@ const confirmLogout = async () => {
 .greeting-text { min-width: 0; }
 
 .greeting-name {
-  font-size: 14px; font-weight: 700;
+  font-size: 14.5px; font-weight: 650;
   color: var(--c-text-primary);
-  line-height: 1.2;
+  line-height: 1.25;
   white-space: nowrap;
   letter-spacing: -0.01em;
 }
-.greeting-name span { color: var(--c-accent); }
+.greeting-name span { color: var(--c-text-primary); font-weight: 700; }
 
 .greeting-sub {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11px; color: var(--c-text-faint);
-  margin-top: 2px; white-space: nowrap; font-weight: 500;
-}
-.greeting-sep { opacity: 0.5; }
-.greeting-clock {
-  font-variant-numeric: tabular-nums;
-  color: var(--c-text-muted);
-  font-weight: 600;
+  font-size: 12px; color: var(--c-text-faint);
+  margin-top: 1px; white-space: nowrap; font-weight: 500;
 }
 
-.search-wrap { flex: 1; min-width: 0; max-width: 400px; margin: 0 auto; position: relative; }
-.search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--c-text-placeholder); font-size: 12px; pointer-events: none; }
+/* ─── SEARCH ──────────────────────────────────────────── */
+.search-wrap { flex: 1; min-width: 0; max-width: 440px; margin: 0 auto; position: relative; }
+.search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--c-text-placeholder); font-size: 12px; pointer-events: none; transition: color .18s ease; }
+.search-wrap:focus-within .search-icon { color: var(--c-accent); }
 .search-input {
-  width: 100%; height: 38px;
-  border: 1.5px solid var(--c-border-input);
+  width: 100%; height: 40px;
+  border: 1px solid var(--c-border-input);
   border-radius: 10px;
-  padding: 0 44px 0 36px;
-  font-size: 13px;
+  padding: 0 40px 0 36px;
+  font-size: 13.5px;
   color: var(--c-text-primary);
   background: var(--c-surface-sunken);
   outline: none;
   transition: border-color .18s ease, box-shadow .18s ease, background-color 0.22s ease, color 0.22s ease;
   font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
 }
+.search-input::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+.search-input:hover { border-color: var(--c-border-strong); }
 .search-input:focus { border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-ring); background: var(--c-surface); }
 .search-input::placeholder { color: var(--c-text-placeholder); }
 .search-kbd {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-  font-size: 10.5px; font-weight: 700;
+  font-size: 11px; font-weight: 600;
   color: var(--c-text-faint);
-  background: var(--c-border);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-strong);
+  border-bottom-width: 2px;
   border-radius: 5px;
-  padding: 2px 7px;
+  min-width: 20px;
+  padding: 0 6px;
+  line-height: 18px;
+  text-align: center;
   pointer-events: none;
   font-family: inherit;
 }
+.search-clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 6px;
+  background: transparent;
+  color: var(--c-text-faint);
+  font-size: 12px; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.search-clear:hover { background: var(--c-border); color: var(--c-text-primary); }
 
-.topbar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* ─── TOPBAR ACTIONS ──────────────────────────────────── */
+.topbar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.topbar-clock {
+  font-size: 13px; font-weight: 600;
+  color: var(--c-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.topbar-sep {
+  width: 1px; height: 22px;
+  background: var(--c-border-strong);
+  margin: 0 2px;
+}
+
+.status-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+}
+.status-chip--offline {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+.action-link { display: flex; text-decoration: none; }
 
 .action-btn {
-  display: flex; align-items: center; gap: 6px;
-  height: 36px; padding: 0 14px;
-  border-radius: 9px; border: none;
-  font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; gap: 7px;
+  height: 38px; padding: 0 16px;
+  border-radius: 10px; border: none;
+  font-size: 13.5px; font-weight: 600;
   cursor: pointer; font-family: inherit; text-decoration: none;
-  transition: background 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+  transition: background 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease, filter .18s ease;
 }
 .action-btn--primary {
-  background: linear-gradient(135deg, var(--c-accent) 0%, var(--c-accent-deep) 100%);
+  background: var(--c-accent);
   color: #fff;
-  box-shadow: var(--c-shadow-accent);
+  box-shadow: 0 1px 2px rgba(16,24,40,.12), inset 0 1px 0 rgba(255,255,255,.14);
 }
-.action-btn--primary:hover { transform: translateY(-1px); box-shadow: var(--c-shadow-accent-h); filter: brightness(1.08); }
+.action-btn--primary:hover { filter: brightness(1.07); box-shadow: var(--c-shadow-accent); }
+.action-btn--primary:active { transform: translateY(1px); filter: brightness(.97); }
 
 .icon-btn {
-  width: 36px; height: 36px;
-  border: 1.5px solid var(--c-border-strong);
-  border-radius: 9px;
+  width: 38px; height: 38px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: 10px;
   background: var(--c-surface);
   color: var(--c-text-muted);
   font-size: 14px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
   position: relative;
-  /* overflow: hidden removed — it was clipping the notif-badge, which
-     is intentionally positioned half outside the button's box to sit
-     on its corner. The button is a rounded square with no internal
-     content that needs clipping, so this is safe to drop. */
+  /* overflow stays visible — the notif-badge sits half outside the
+     button's box on purpose. */
 }
-.icon-btn:hover { background: var(--c-accent-soft); border-color: var(--c-accent-border); color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-ring); }
+.icon-btn:hover,
+.icon-btn--active { background: var(--c-accent-soft); border-color: var(--c-accent-border); color: var(--c-accent); }
+.icon-btn--active { box-shadow: 0 0 0 3px var(--c-accent-ring); }
 
-/* Notification count badge — replaces the old plain dot with an actual
-   number (capped at "9+") so it's a triage signal, not just a "something
-   happened" flag. */
+/* Notification count badge — a number (capped at "9+") so it's a
+   triage signal, not just a "something happened" flag. */
 .notif-badge {
   position: absolute;
-  top: -4px; right: -4px;
-  min-width: 17px; height: 17px;
-  padding: 0 4px;
+  top: -5px; right: -5px;
+  min-width: 18px; height: 18px;
+  padding: 0 5px;
   display: flex; align-items: center; justify-content: center;
   background: var(--c-accent);
   color: #fff;
-  font-size: 10px; font-weight: 700;
+  font-size: 10.5px; font-weight: 700;
   line-height: 1;
   border-radius: 999px;
   border: 2px solid var(--c-surface);
-  box-shadow: var(--c-shadow-accent);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ─── NOTIFICATIONS ───────────────────────────────────── */
@@ -1178,7 +1483,7 @@ const confirmLogout = async () => {
 
 .notif-menu {
   position: absolute; right: 0; top: calc(100% + 10px);
-  width: 320px; max-width: calc(100vw - 24px); max-height: 420px;
+  width: 360px; max-width: calc(100vw - 24px); max-height: 460px;
   display: flex; flex-direction: column;
   background: var(--c-surface-overlay);
   border: 1px solid var(--c-border);
@@ -1190,77 +1495,80 @@ const confirmLogout = async () => {
 
 .notif-menu-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 10px 10px;
+  gap: 10px;
+  padding: 10px 10px 10px;
 }
-.notif-menu-title { font-size: 13.5px; font-weight: 700; color: var(--c-text-primary); }
+.notif-menu-heading { display: flex; align-items: center; gap: 8px; }
+.notif-menu-title { font-size: 14px; font-weight: 700; color: var(--c-text-primary); }
+.notif-count {
+  font-size: 11.5px; font-weight: 600;
+  color: var(--c-accent);
+  background: var(--c-accent-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
 .notif-mark-all {
   background: none; border: none; cursor: pointer; font-family: inherit;
-  font-size: 11px; font-weight: 600; color: var(--c-accent);
-  padding: 3px 6px; border-radius: 6px;
+  font-size: 12px; font-weight: 600; color: var(--c-accent);
+  padding: 4px 8px; border-radius: 6px;
   transition: background-color .15s ease;
 }
 .notif-mark-all:hover { background: var(--c-accent-soft); }
 
-.notif-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.notif-list { list-style: none; margin: 4px 0 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 
 .notif-item {
-  display: flex; align-items: flex-start; gap: 10px;
+  display: flex; align-items: flex-start; gap: 12px;
   padding: 10px; border-radius: 10px; cursor: pointer; position: relative;
   transition: background-color .15s ease;
 }
-/* :not(.notif-item--unread) means these two hover rules can never both
-   apply to the same element — there's no specificity race to get wrong.
-   An unread item is only ever matched by the second rule below. */
+/* :not(.notif-item--unread) keeps the two hover rules from ever
+   applying to the same element. */
 .notif-item:not(.notif-item--unread):hover { background: var(--c-surface-raised); }
 .notif-item--unread { background: var(--c-accent-soft) !important; }
-/* FIX: was `background: var(--c-accent-soft) !important; filter: brightness(1.05);`
-   --c-accent-soft is a near-white SOLID color in light mode (#FFF7ED), so
-   brightness(1.05) clipped it to pure white on hover — that was the bug.
-   In dark mode --c-accent-soft is a low-alpha translucent overlay, so the
-   same filter looked fine there, which is why this only showed up in light
-   mode. Fixed by pointing at a dedicated, deliberately-tinted hover token
-   (--c-accent-soft-hover, defined per-theme in theme.css) instead of trying
-   to derive the hover color from --c-accent-soft with a filter. */
+/* Dedicated hover token (--c-accent-soft-hover, defined per-theme in
+   theme.css) — deriving it from --c-accent-soft with a filter clipped to
+   pure white in light mode. */
 .notif-item--unread:hover { background: var(--c-accent-soft-hover) !important; }
 
 .notif-item-icon {
-  width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; margin-top: 1px;
+  font-size: 13px;
   background: var(--c-surface-sunken); color: var(--c-text-muted);
 }
 .notif-item-icon--low_stock,
 .notif-item-icon--out_of_stock       { background: var(--c-danger-soft);   color: var(--c-danger); }
 .notif-item-icon--sale               { background: var(--c-accent-soft);   color: var(--c-accent); }
 .notif-item-icon--supplier_delivery  { background: var(--c-surface-sunken); color: var(--c-text-secondary); }
-/* New-product notifications get their own green (not accent/red) so
-   they read as a positive "something was added" event, distinct from
-   both sale activity (accent) and stock alerts (danger). */
+/* New-product notifications get their own green so they read as a
+   positive "something was added" event. */
 .notif-item-icon--product_created    { background: rgba(16,185,129,0.12); color: #10b981; }
 html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,185,129,0.18); color: #4ADE80; }
 
 .notif-item-body { flex: 1; min-width: 0; }
-.notif-item-title { font-size: 12.5px; font-weight: 600; color: var(--c-text-primary); line-height: 1.3; }
-.notif-item-desc  { font-size: 11.5px; color: var(--c-text-muted); margin-top: 2px; line-height: 1.4; }
-.notif-item-time  { font-size: 10px; color: var(--c-text-faint); margin-top: 4px; font-weight: 500; }
+.notif-item-title { font-size: 13px; font-weight: 600; color: var(--c-text-primary); line-height: 1.35; }
+.notif-item-desc  { font-size: 12.5px; color: var(--c-text-muted); margin-top: 2px; line-height: 1.45; }
+.notif-item-time  { font-size: 11.5px; color: var(--c-text-faint); margin-top: 4px; font-weight: 500; }
 
 .notif-item-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--c-accent);
+  width: 8px; height: 8px; border-radius: 50%; background: var(--c-accent);
   flex-shrink: 0; margin-top: 6px;
 }
 
 .notif-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 32px 10px; color: var(--c-text-faint); gap: 8px;
+  padding: 36px 20px; color: var(--c-text-faint); gap: 6px; text-align: center;
 }
-.notif-empty i { font-size: 22px; }
-.notif-empty p { font-size: 12.5px; font-weight: 500; }
+.notif-empty i { font-size: 24px; margin-bottom: 4px; }
+.notif-empty p { font-size: 13.5px; font-weight: 600; color: var(--c-text-secondary); }
+.notif-empty span { font-size: 12.5px; line-height: 1.5; max-width: 220px; }
 
 .pmenu-divider { height: 1px; background: var(--c-border); margin: 2px 0; }
 
 .pmenu-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; font-size: 13px;
+  padding: 8px 10px; font-size: 13.5px;
   color: var(--c-text-secondary);
   border-radius: 8px; text-decoration: none;
   background: none; border: none; width: 100%;
@@ -1287,10 +1595,22 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 /* ─── PAGE CONTENT ────────────────────────────────────── */
 .page-content {
   flex: 1; overflow-y: auto; overflow-x: hidden;
-  padding: 28px;
+  padding: 32px 32px 40px;
   background: var(--c-bg);
   transition: background-color 0.22s ease;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border-strong) transparent;
+  outline: none;
 }
+.page-content::-webkit-scrollbar { width: 10px; }
+.page-content::-webkit-scrollbar-track { background: transparent; }
+.page-content::-webkit-scrollbar-thumb {
+  background: var(--c-border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.page-content::-webkit-scrollbar-thumb:hover { background: var(--c-text-faint); background-clip: content-box; }
 .content-inner { max-width: 1600px; width: 100%; margin: 0 auto; }
 
 /* ─── GLOBAL FLOATING "GO TO POS" BUTTON ──────────────── */
@@ -1311,11 +1631,18 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
   font-size: 13px;
   font-weight: 700;
   letter-spacing: -.01em;
-  opacity: 0.88;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  opacity: 0.92;
   box-shadow: var(--c-shadow-accent), 0 2px 6px rgba(0,0,0,0.12);
-  transition: opacity .18s ease, transform .18s ease, box-shadow .18s ease, background-color .18s ease, filter .18s ease;
+  transition:
+    right .32s cubic-bezier(.4,0,.2,1),
+    gap .32s cubic-bezier(.4,0,.2,1),
+    padding .32s cubic-bezier(.4,0,.2,1),
+    border-radius .32s cubic-bezier(.4,0,.2,1),
+    transform .32s cubic-bezier(.4,0,.2,1),
+    opacity .22s ease,
+    box-shadow .18s ease,
+    background-color .18s ease,
+    filter .18s ease;
 }
 .pos-fab:hover {
   opacity: 1;
@@ -1336,8 +1663,31 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
   background: rgba(255,255,255,0.18);
   font-size: 12px;
   flex-shrink: 0;
+  transition: background-color .25s ease;
 }
-.pos-fab-label { white-space: nowrap; }
+.pos-fab-label {
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 120px;
+  opacity: 1;
+  transition: max-width .32s cubic-bezier(.4,0,.2,1), opacity .2s ease;
+}
+
+/* DOCKED — tucks into the right edge as a small icon-only tab. */
+.pos-fab--docked {
+  right: 0;
+  gap: 0;
+  padding: 11px 10px 11px 12px;
+  border-radius: 999px 0 0 999px;
+  opacity: 0.7;
+  transform: translateX(4px);
+}
+.pos-fab--docked:hover { transform: translateX(0); }
+.pos-fab--docked .pos-fab-label {
+  max-width: 0;
+  opacity: 0;
+}
+.pos-fab--docked .pos-fab-icon { background: transparent; }
 
 @media (max-width: 560px) {
   .pos-fab {
@@ -1348,22 +1698,28 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
   }
   .pos-fab-label { display: none; }
   .pos-fab-icon { width: 18px; height: 18px; background: transparent; }
+
+  .pos-fab--docked {
+    right: 0;
+    padding: 13px 10px 13px 13px;
+    border-radius: 999px 0 0 999px;
+  }
 }
 
 /* ─── LOGOUT MODAL ────────────────────────────────────── */
 .modal-backdrop {
   position: fixed; inset: 0;
   background: var(--c-overlay);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(6px);
   z-index: 9999;
   display: flex; align-items: center; justify-content: center;
   padding: 16px;
 }
 .modal {
   background: var(--c-surface-overlay);
-  border-radius: 20px;
-  padding: 36px 32px;
-  width: 360px;
+  border-radius: 16px;
+  padding: 32px 28px 24px;
+  width: 380px;
   max-width: 100%;
   box-shadow: var(--c-shadow-xl);
   text-align: center;
@@ -1371,21 +1727,22 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
   transition: background-color 0.22s ease, border-color 0.22s ease;
 }
 .modal-icon-wrap {
-  width: 52px; height: 52px;
+  width: 48px; height: 48px;
   background: var(--c-accent-soft);
-  border-radius: 14px;
+  border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
   margin: 0 auto 16px;
   border: 1px solid var(--c-accent-border);
 }
-.modal-title { font-size: 17px; font-weight: 700; color: var(--c-text-primary); margin-bottom: 8px; }
-.modal-desc  { font-size: 13px; color: var(--c-text-muted); margin-bottom: 26px; line-height: 1.7; }
-.modal-actions { display: flex; gap: 10px; justify-content: center; }
+.modal-title { font-size: 17px; font-weight: 700; color: var(--c-text-primary); margin-bottom: 6px; letter-spacing: -.01em; }
+.modal-desc  { font-size: 13.5px; color: var(--c-text-muted); margin-bottom: 24px; line-height: 1.6; }
+.modal-actions { display: flex; gap: 10px; }
+.modal-actions > button { flex: 1; }
 
 .btn-ghost {
-  padding: 9px 22px;
-  border: 1.5px solid var(--c-border-strong);
-  border-radius: 9px;
+  padding: 10px 22px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: 10px;
   background: var(--c-surface);
   font-size: 13.5px; font-weight: 600;
   color: var(--c-text-secondary);
@@ -1397,43 +1754,132 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 
 .btn-danger {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 9px 22px; border: none; border-radius: 9px;
-  background: linear-gradient(135deg, var(--c-danger) 0%, var(--c-danger-deep) 100%);
+  padding: 10px 22px; border: none; border-radius: 10px;
+  background: var(--c-danger);
   font-size: 13.5px; font-weight: 600; color: #fff;
   cursor: pointer; font-family: inherit;
-  box-shadow: var(--c-shadow-danger);
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  box-shadow: 0 1px 2px rgba(16,24,40,.12), inset 0 1px 0 rgba(255,255,255,.14);
+  transition: filter 0.18s ease, transform 0.18s ease;
 }
-.btn-danger:hover { opacity: .9; transform: translateY(-1px); }
+.btn-danger:hover { filter: brightness(1.08); }
+.btn-danger:active { transform: translateY(1px); }
 .btn-danger:disabled {
   opacity: 0.75; cursor: not-allowed; pointer-events: none; transform: none;
 }
-/* min-width keeps the button from visibly resizing when the label
-   switches between "Sign Out" and "Signing out…" */
-.btn-danger { min-width: 108px; }
+/* min-width keeps the button from resizing when the label switches
+   between "Sign out" and "Signing out…" */
+.btn-danger { min-width: 124px; }
+
+/* ─── THEMED TOOLTIP ──────────────────────────────────── */
+.nav-tip {
+  position: fixed;
+  z-index: 9990;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px 7px 7px;
+  background: var(--c-surface-overlay);
+  border: 1px solid var(--c-border-strong);
+  border-radius: 12px;
+  box-shadow: var(--c-shadow-lg);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.nav-tip--right      { transform: translateY(-50%); }
+.nav-tip--bottom     { transform: translateX(-50%); }
+.nav-tip--bottom-end,
+.nav-tip--bottom-start { transform: none; }
+
+/* little arrow pointing back at the trigger */
+.nav-tip::before {
+  content: '';
+  position: absolute;
+  width: 9px; height: 9px;
+  background: var(--c-surface-overlay);
+  border: 1px solid var(--c-border-strong);
+}
+.nav-tip--right::before {
+  left: -5px; top: 50%;
+  border-right: none; border-top: none;
+  transform: translateY(-50%) rotate(45deg);
+  border-bottom-left-radius: 2px;
+}
+.nav-tip--bottom::before {
+  top: -5px; left: 50%;
+  border-bottom: none; border-right: none;
+  transform: translateX(-50%) rotate(45deg);
+  border-top-left-radius: 2px;
+}
+.nav-tip--bottom-start::before {
+  top: -5px; left: var(--arrow-x, 20px);
+  border-bottom: none; border-right: none;
+  transform: translateX(-50%) rotate(45deg);
+  border-top-left-radius: 2px;
+}
+.nav-tip--bottom-end::before {
+  top: -5px; right: var(--arrow-x, 20px);
+  border-bottom: none; border-right: none;
+  transform: translateX(50%) rotate(45deg);
+  border-top-left-radius: 2px;
+}
+
+.nav-tip-icon {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  flex-shrink: 0;
+}
+.nav-tip-text { display: flex; flex-direction: column; line-height: 1.25; }
+.nav-tip-label { font-size: 13px; font-weight: 650; color: var(--c-text-primary); letter-spacing: -.005em; }
+.nav-tip-desc  { font-size: 11.5px; font-weight: 500; color: var(--c-text-faint); margin-top: 1px; }
+.nav-tip-current {
+  margin-left: 4px;
+  font-size: 11px; font-weight: 600;
+  color: var(--c-accent);
+  background: var(--c-accent-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.tip-enter-active { transition: opacity .16s ease, transform .16s cubic-bezier(.2,.8,.2,1); }
+.tip-leave-active { transition: opacity .1s ease; }
+.tip-enter-from, .tip-leave-to { opacity: 0; }
+.tip-enter-from.nav-tip--right      { transform: translate(-6px, -50%); }
+.tip-enter-from.nav-tip--bottom     { transform: translate(-50%, -6px); }
+.tip-enter-from.nav-tip--bottom-end,
+.tip-enter-from.nav-tip--bottom-start { transform: translateY(-6px); }
 
 /* ─── TRANSITIONS ─────────────────────────────────────── */
 .fade-enter-active, .fade-leave-active { transition: opacity .22s ease; }
 .fade-enter-from,  .fade-leave-to      { opacity: 0; }
 .dropdown-enter-active { transition: opacity .18s ease, transform .18s ease; }
 .dropdown-leave-active { transition: opacity .14s ease, transform .14s ease; }
-.dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-6px) scale(.97); }
+.dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-6px) scale(.98); }
+
+/* ═══════════════════════════════════════════════════════
+   RESPONSIVE — SMALL DESKTOP (≤1180px)
+   The live clock is the first thing to go when space gets tight.
+════════════════════════════════════════════════════════ */
+@media (max-width: 1180px) {
+  .topbar-clock, .topbar-sep { display: none; }
+}
 
 /* ═══════════════════════════════════════════════════════
    RESPONSIVE — TABLET (≤1024px)
-   Content gets tight next to a full 260px sidebar at this width, so
-   trim the topbar's breathing room a little before mobile kicks in.
 ════════════════════════════════════════════════════════ */
 @media (max-width: 1024px) {
-  .topbar { padding: 0 18px; gap: 12px; }
-  .search-wrap { max-width: 280px; }
-  .page-content { padding: 22px; }
+  .topbar { padding: 0 20px; gap: 14px; }
+  .search-wrap { max-width: 300px; }
+  .page-content { padding: 24px 22px 32px; }
 }
 
 /* ═══════════════════════════════════════════════════════
    RESPONSIVE — MOBILE (≤768px)
-   Sidebar is now an off-canvas drawer (see .sidebar--mobile above);
-   the topbar sheds secondary text and shrinks controls to fit.
+   Sidebar is an off-canvas drawer (see .sidebar--mobile above); the
+   topbar sheds secondary text and shrinks controls to fit.
 ════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
   .topbar { height: 58px; min-height: 58px; padding: 0 14px; gap: 10px; }
@@ -1442,13 +1888,11 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
   .greeting-logo { width: 28px; height: 28px; border-radius: 8px; }
   .search-kbd { display: none; }
   .search-wrap { max-width: none; }
-  .search-input { padding: 0 14px 0 34px; }
-  /* Overrides the v-show="sidebarOpen" inline style, which on mobile
-     tracks the drawer rather than available topbar width — the label
-     text isn't useful once the button is icon-sized regardless. */
+  .search-input { height: 38px; }
+  /* Collapses "Add item" to an icon-only button on small screens. */
   .action-btn--primary span { display: none; }
-  .action-btn--primary { padding: 0 10px; }
-  .page-content { padding: 16px; }
+  .action-btn--primary { padding: 0 11px; height: 38px; }
+  .page-content { padding: 16px 16px 28px; }
   .content-inner { max-width: 100%; }
 }
 
@@ -1457,8 +1901,19 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 }
 
 @media (max-width: 400px) {
-  .modal { padding: 28px 20px; }
+  .modal { padding: 26px 18px 20px; }
   .notif-menu { right: -8px; }
+}
+
+/* Respect reduced-motion: no sliding, pulsing or bouncing */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .pos-fab, .pos-fab-label, .dropdown-enter-active, .dropdown-leave-active,
+  .fade-enter-active, .fade-leave-active, .skip-link, .topbar, .tip-enter-active, .tip-leave-active {
+    transition-duration: .01ms !important;
+  }
+  .loading-bar-fill, .top-progress-fill, .loading-logo, .dot {
+    animation: none !important;
+  }
 }
 </style>
 
@@ -1468,7 +1923,7 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
    (same pattern as the flyout submenu in SidebarDropdown.vue). */
 .user-popup-menu {
   position: fixed;
-  width: 230px;
+  width: 240px;
   max-width: calc(100vw - 20px);
   background: var(--c-surface-overlay);
   border: 1px solid var(--c-border);
@@ -1478,8 +1933,9 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 }
 .user-popup-header { display: flex; align-items: center; gap: 10px; padding: 10px 10px 12px; }
 .pmenu-avatar-wrap   { position: relative; flex-shrink: 0; }
-.profile-menu-avatar { width: 38px; height: 38px; border-radius: 9px; object-fit: cover; display: block; }
-.pmenu-status-dot    { position: absolute; bottom: -1px; right: -1px; width: 9px; height: 9px; background: var(--c-online); border-radius: 50%; border: 2px solid var(--c-surface-overlay); }
-.profile-menu-name   { font-size: 13px; font-weight: 700; color: var(--c-text-primary); }
-.profile-menu-email  { font-size: 11px; color: var(--c-text-faint); margin-top: 1px; }
+.profile-menu-avatar { width: 38px; height: 38px; border-radius: 10px; object-fit: cover; display: block; }
+.pmenu-status-dot    { position: absolute; bottom: -2px; right: -2px; width: 10px; height: 10px; background: var(--c-online); border-radius: 50%; border: 2px solid var(--c-surface-overlay); }
+.user-popup-id       { min-width: 0; }
+.profile-menu-name   { font-size: 13.5px; font-weight: 700; color: var(--c-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-menu-email  { font-size: 12px; color: var(--c-text-faint); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

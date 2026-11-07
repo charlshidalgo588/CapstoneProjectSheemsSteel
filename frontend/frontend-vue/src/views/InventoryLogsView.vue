@@ -2,17 +2,35 @@
   <Layout title="Inventory Logs">
     <div id="inventory-print-area" class="inv-logs">
 
-      <!-- Print-only header -->
+      <!-- ══════════════ PRINT-ONLY LETTERHEAD ══════════════ -->
       <div class="print-only print-header">
-        <div class="print-header-top">
-          <span class="print-header-date">{{ printGeneratedAt }}</span>
-          <span class="print-header-company">Sheem Steel Construction Company</span>
+        <div class="ph-band"></div>
+        <div class="ph-row">
+          <div class="ph-brand">
+            <span class="ph-logo">SS</span>
+            <div>
+              <p class="ph-name">Sheem Steel Construction Company</p>
+              <p class="ph-tag">Inventory Management</p>
+            </div>
+          </div>
+          <dl class="ph-meta">
+            <div><dt>Report no.</dt><dd>{{ reportRef }}</dd></div>
+            <div><dt>Period</dt><dd>{{ filterLabel }}</dd></div>
+            <div><dt>Generated</dt><dd>{{ printGeneratedAt }}</dd></div>
+            <div><dt>Records</dt><dd>{{ formatNumber(inventoryLogs.length) }} movements</dd></div>
+          </dl>
         </div>
-        <h1 class="print-header-brand">Sheem Steel Construction Company</h1>
-        <p class="print-header-sub">Inventory Logs</p>
-        <p class="print-header-meta">Printed: {{ printGeneratedAt }}</p>
-        <p class="print-header-meta">Filtered range: {{ filterLabel }}</p>
-        <hr class="print-header-rule" />
+        <div class="ph-title-row">
+          <div>
+            <p class="ph-kicker">Stock movement report</p>
+            <h1 class="ph-title">Inventory Logs</h1>
+          </div>
+          <div class="ph-title-right">
+            <p class="ph-period">{{ filterLabel }}</p>
+            <span class="ph-chip" :class="isCurrentPeriod ? 'ph-chip--live' : 'ph-chip--closed'">{{ isCurrentPeriod ? 'In progress' : 'Closed period' }}</span>
+          </div>
+        </div>
+        <p class="ph-lead">{{ execSummary }}</p>
       </div>
 
       <!-- PAGE HEADER -->
@@ -29,10 +47,105 @@
             <button type="button" class="period-mode-seg" :class="{ 'period-mode-seg--active': periodMode === 'date' }" @click="setPeriodMode('date')">Specific Date</button>
           </div>
 
-          <div class="period-picker-wrap">
-            <input v-if="periodMode === 'month'" id="inv-month" type="month" class="period-picker-input" v-model="selectedMonth" @change="applyDateFilter" />
-            <input v-else id="inv-date" type="date" class="period-picker-input" v-model="selectedDate" @change="applyDateFilter" />
+          <div class="period-nav">
+            <button type="button" class="icon-btn" :disabled="!canGoPrev || isFiltering" :aria-label="`Previous ${periodNoun}`" @click="shiftPeriod(-1)">
+              <i class="fa-solid fa-chevron-left"></i>
+            </button>
+
+            <!-- Custom calendar picker (replaces the native month / date inputs) -->
+            <div class="picker" ref="pickerRoot">
+              <button
+                ref="pickerTrigger"
+                type="button"
+                class="picker-trigger"
+                :class="{ 'picker-trigger--open': pickerOpen }"
+                aria-haspopup="dialog"
+                :aria-expanded="pickerOpen"
+                :aria-label="`Choose ${periodNoun}. Selected: ${pickerLabel}`"
+                @click="togglePicker"
+              >
+                <i class="fa-solid fa-calendar-days picker-ico"></i>
+                <span>{{ pickerLabel }}</span>
+                <i class="fa-solid fa-chevron-down picker-caret"></i>
+              </button>
+
+              <Transition name="pop">
+                <div v-if="pickerOpen" class="picker-pop" role="dialog" :aria-label="`Choose ${periodNoun}`">
+                  <div class="pk-head">
+                    <button type="button" class="pk-nav" :class="{ 'pk-nav--hide': pickerView === 'years' }" :disabled="!pkCanPrev" aria-label="Previous" @click="pkShift(-1)">
+                      <i class="fa-solid fa-chevron-left"></i>
+                    </button>
+                    <button type="button" class="pk-title" :disabled="pickerView === 'years'" @click="pkUp">
+                      {{ pkTitle }}
+                      <i v-if="pickerView !== 'years'" class="fa-solid fa-chevron-down"></i>
+                    </button>
+                    <button type="button" class="pk-nav" :class="{ 'pk-nav--hide': pickerView === 'years' }" :disabled="!pkCanNext" aria-label="Next" @click="pkShift(1)">
+                      <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                  </div>
+
+                  <!-- Days -->
+                  <div v-if="pickerView === 'days'" class="pk-days">
+                    <span v-for="w in PK_WEEKDAYS" :key="w" class="pk-dow">{{ w }}</span>
+                    <template v-for="(c, i) in pkDayCells" :key="i">
+                      <span v-if="!c" class="pk-blank"></span>
+                      <button
+                        v-else
+                        type="button"
+                        class="pk-day"
+                        :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
+                        :disabled="c.future"
+                        :aria-pressed="c.selected"
+                        :aria-label="c.title"
+                        @click="pkPickDay(c.key)"
+                      >{{ c.d }}</button>
+                    </template>
+                  </div>
+
+                  <!-- Months -->
+                  <div v-else-if="pickerView === 'months'" class="pk-grid">
+                    <button
+                      v-for="c in pkMonthCells"
+                      :key="c.key"
+                      type="button"
+                      class="pk-cell"
+                      :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
+                      :disabled="c.future"
+                      :aria-pressed="c.selected"
+                      :aria-label="c.title"
+                      @click="pkPickMonth(c.m)"
+                    >{{ c.label }}</button>
+                  </div>
+
+                  <!-- Years -->
+                  <div v-else class="pk-grid">
+                    <button
+                      v-for="c in pkYearCells"
+                      :key="c.y"
+                      type="button"
+                      class="pk-cell"
+                      :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
+                      :aria-pressed="c.selected"
+                      @click="pkPickYear(c.y)"
+                    >{{ c.y }}</button>
+                  </div>
+
+                  <div class="pk-foot">
+                    <button type="button" class="pk-link pk-link--muted" @click="closePicker(true)">Close</button>
+                    <button type="button" class="pk-link" :disabled="isCurrentPeriod" @click="pkGoCurrent">
+                      <i class="fa-solid fa-location-crosshairs"></i>{{ currentLabel }}
+                    </button>
+                  </div>
+                </div>
+              </Transition>
+            </div>
+
+            <button type="button" class="icon-btn" :disabled="!canGoNext || isFiltering" :aria-label="`Next ${periodNoun}`" @click="shiftPeriod(1)">
+              <i class="fa-solid fa-chevron-right"></i>
+            </button>
           </div>
+
+          <button v-if="!isCurrentPeriod" type="button" class="link-btn" :disabled="isFiltering" @click="goCurrent">{{ currentLabel }}</button>
 
           <span class="date-filter-loading" v-if="isFiltering">
             <i class="fa-solid fa-spinner fa-spin"></i>
@@ -131,36 +244,17 @@
             </div>
             <div class="kpi-accent-bar kpi-accent-bar--green"></div>
           </div>
-
-          <!-- Leftover pieces on hand (current state — not date filtered) -->
-          <div class="kpi-card kpi-card--wide kpi-card--clickable" role="button" tabindex="0"
-            @click="scrollToRemnants" @keydown.enter="scrollToRemnants" @keydown.space.prevent="scrollToRemnants">
-            <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap kpi-icon-wrap--blue"><i class="fa-solid fa-ruler-horizontal"></i></div>
-              <div class="kpi-body">
-                <p class="kpi-label">Leftover Pieces On Hand</p>
-                <p class="kpi-value kpi-value--blue">{{ formatNumber(availableCount) }}</p>
-                <div v-if="remnantTotalsByUnit.length" class="il-unit-chips il-unit-chips--tight">
-                  <span v-for="u in remnantTotalsByUnit" :key="u.unit" class="il-unit-chip il-unit-chip--rem">
-                    {{ lenText(u.total) }} {{ u.unit }} total
-                  </span>
-                </div>
-                <p v-else class="kpi-hint">No leftovers on hand</p>
-              </div>
-            </div>
-            <div class="kpi-accent-bar kpi-accent-bar--blue"></div>
-          </div>
         </div>
       </div>
 
-      <!-- Recent Activity -->
-      <div class="section">
+      <!-- Recent Activity (screen only: the printed report lists every movement in the Full History section) -->
+      <div class="section section--screen">
         <div class="card">
           <div class="card-header">
             <div>
               <p class="card-eyebrow">Latest</p>
               <h2 class="card-title">Recent Activity</h2>
-              <p class="card-sub">Quantity is the number of whole pieces moved. For cut sales it also shows how much length was sold and how much was left over.</p>
+              <p class="card-sub">Quantity is the number of whole pieces moved. For cut sales it also shows how much length was sold and how much was left over. Leftover pieces themselves are managed on the Inventory page.</p>
             </div>
           </div>
           <div class="table-wrap">
@@ -215,82 +309,6 @@
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
-
-      <!-- Leftover pieces (remnants) — plain table, not DataTables -->
-      <div class="section" id="remnants-section">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <p class="card-eyebrow">Cut tracking</p>
-              <h2 class="card-title">Leftover Pieces</h2>
-              <p class="card-sub">What is left of a piece after a cut, e.g. 18 in piece − 10 in sold = 8 in leftover. These are not counted as whole pieces in stock.</p>
-            </div>
-            <div class="rem-filters no-print" role="group" aria-label="Filter leftover pieces">
-              <button v-for="f in REMNANT_FILTERS" :key="f.key" type="button"
-                class="rem-filter" :class="{ 'rem-filter--on': remnantFilter === f.key }"
-                @click="remnantFilter = f.key">
-                {{ f.label }}
-                <span class="rem-filter-count">{{ remnantCount(f.key) }}</span>
-              </button>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table data-table--plain data-table--fixed data-table--stack">
-              <thead>
-                <tr>
-                  <th style="width:24%">Product</th>
-                  <th style="width:14%">Leftover piece</th>
-                  <th style="width:12%">Total length</th>
-                  <th style="width:10%">Sale</th>
-                  <th style="width:12%">Date</th>
-                  <th style="width:10%">Status</th>
-                  <th style="width:18%" class="no-print">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="r in visibleRemnants" :key="r.id">
-                  <td data-label="Product">
-                    <div class="cell-product">{{ r.ProductName }}</div>
-                    <div class="cell-sku">
-                      {{ r.SKU }}
-                      <span v-if="r.ProductUnit" class="unit-pill">{{ unitLabel(r.ProductUnit) }}</span>
-                    </div>
-                    <div v-if="r.VariantLabel" class="cell-sku">Size: {{ r.VariantLabel }}</div>
-                  </td>
-                  <td data-label="Leftover piece" class="cell-positive">{{ r.qty }} × {{ lenText(r.length) }} {{ r.unit }}</td>
-                  <td data-label="Total length" class="cell-muted">{{ lenText(r.qty * r.length) }} {{ r.unit }}</td>
-                  <td data-label="Sale" class="cell-muted">{{ r.sale_id ? receiptNo(r.sale_id) : '—' }}</td>
-                  <td data-label="Date" class="cell-date" :title="r.created_at">
-                    <div class="cell-date-day">{{ dateOnly(r.created_at) }}</div>
-                    <div class="cell-date-time">{{ timeOnly(r.created_at) }}</div>
-                  </td>
-                  <td data-label="Status">
-                    <span class="status-pill"
-                      :class="{
-                        'status-pill--in':      r.status === 'available',
-                        'status-pill--neutral': r.status === 'used',
-                        'status-pill--out':     r.status === 'scrapped',
-                      }">{{ r.status }}</span>
-                  </td>
-                  <td data-label="Action" class="no-print">
-                    <div class="rem-actions">
-                      <template v-if="r.status === 'available'">
-                        <button type="button" class="rem-btn" :disabled="remnantBusyId === r.id" @click="setRemnantStatus(r, 'used')">Mark used</button>
-                        <button type="button" class="rem-btn rem-btn--danger" :disabled="remnantBusyId === r.id" @click="setRemnantStatus(r, 'scrapped')">Scrap</button>
-                      </template>
-                      <button v-else type="button" class="rem-btn" :disabled="remnantBusyId === r.id" @click="setRemnantStatus(r, 'available')">Put back</button>
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="!visibleRemnants.length">
-                  <td colspan="7" class="il-empty">{{ remnantEmptyText }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p v-if="remnantError" class="rem-error" role="alert">{{ remnantError }}</p>
         </div>
       </div>
 
@@ -449,7 +467,7 @@
         </div>
       </div>
 
-      <!-- Breakdown modal -->
+      <!-- Breakdown modal (product total + one line per size) -->
       <div v-if="breakdown.open" class="il-modal-backdrop" @click.self="closeBreakdown">
         <div class="il-modal" role="dialog" aria-modal="true" :aria-label="breakdownTitle">
           <div class="il-modal-head">
@@ -470,19 +488,40 @@
           <div class="il-modal-body">
             <table class="il-break-table" v-if="breakdownRows.length">
               <thead>
-                <tr><th>Product</th><th>Movements</th><th>Quantity</th></tr>
+                <tr><th>Product / Size</th><th>Movements</th><th>Quantity</th></tr>
               </thead>
               <tbody>
-                <tr v-for="r in breakdownRows" :key="r.key">
-                  <td>
-                    <div class="cell-product">{{ r.name }}</div>
-                    <div class="cell-sku">{{ r.sku }}</div>
-                  </td>
-                  <td class="cell-muted">{{ r.count }}</td>
-                  <td :class="breakdown.type === 'stock_in' ? 'cell-positive' : 'cell-negative'">
-                    {{ breakdown.type === 'stock_in' ? '+' : '-' }}{{ formatQty(r.total, r.unit) }}
-                  </td>
-                </tr>
+                <template v-for="r in breakdownRows" :key="r.key">
+                  <!-- Product total -->
+                  <tr :class="{ 'il-prod-row--has-sizes': r.variants.length }">
+                    <td>
+                      <div class="cell-product">{{ r.name }}</div>
+                      <div class="cell-sku">{{ r.sku }}</div>
+                    </td>
+                    <td class="cell-muted">{{ r.count }}</td>
+                    <td :class="breakdown.type === 'stock_in' ? 'cell-positive' : 'cell-negative'">
+                      {{ breakdown.type === 'stock_in' ? '+' : '-' }}{{ formatQty(r.total, r.unit) }}
+                    </td>
+                  </tr>
+
+                  <!-- One line per size -->
+                  <tr v-for="v in r.variants" :key="r.key + '|' + v.key" class="il-var-row">
+                    <td>
+                      <div class="il-var-name">
+                        <span class="il-var-dot"></span>
+                        <span>{{ v.label }}</span>
+                        <span v-if="v.price != null" class="il-var-price">{{ peso(v.price) }}</span>
+                      </div>
+                      <div v-if="v.cutCount" class="il-var-note">
+                        <i class="fa-solid fa-scissors"></i> {{ v.cutCount }} cut sale{{ v.cutCount > 1 ? 's' : '' }}
+                      </div>
+                    </td>
+                    <td class="cell-muted">{{ v.count }}</td>
+                    <td :class="breakdown.type === 'stock_in' ? 'cell-positive' : 'cell-negative'">
+                      {{ breakdown.type === 'stock_in' ? '+' : '-' }}{{ formatQty(v.total, r.unit) }}
+                    </td>
+                  </tr>
+                </template>
               </tbody>
             </table>
             <p v-else class="il-empty">Nothing recorded for this period.</p>
@@ -490,10 +529,26 @@
         </div>
       </div>
 
-      <!-- Print-only footer -->
-      <div class="print-only print-footer">
-        <span>Sheem Steel Construction Company &middot; Inventory Logs</span>
-        <span>Confidential &mdash; Internal Use Only</span>
+      <!-- ══════════════ PRINT-ONLY NOTES, SIGN-OFF & END ══════════════ -->
+      <div class="print-only print-notes">
+        <p class="pn-title">Notes &amp; approval</p>
+        <ul>
+          <li><b>Quantities</b> are recorded per movement. Cut sales also show the length sold, the leftover length and the full piece length.</li>
+          <li><b>Leftover used</b> is counted as a stock out of that leftover piece.</li>
+          <li><b>Extra services</b> are split between the worker's pass-through share and the owner's share.</li>
+          <li><b>Times</b> are shown in local time (Asia/Manila).</li>
+          <li v-if="isCurrentPeriod"><b>Partial figures.</b> This period is still in progress, so totals may change.</li>
+        </ul>
+        <div class="pn-sign">
+          <div><span></span><p>Prepared by</p></div>
+          <div><span></span><p>Reviewed by</p></div>
+          <div><span></span><p>Date</p></div>
+        </div>
+      </div>
+
+      <div class="print-only print-end">
+        <span>Sheem Steel Construction Company · Inventory Logs · {{ filterLabel }} · Ref. {{ reportRef }}</span>
+        <span>Generated {{ printGeneratedAt }}</span>
       </div>
 
     </div>
@@ -533,22 +588,33 @@ const recentActivity      = ref([])
 const topAdjustedProducts = ref([])
 const inventoryLogs       = ref([])
 const services            = ref([])
-const remnants            = ref([])
 
-// ── Period filter state ──
-const periodMode = ref('month')
+/* ════════════════════════════════════════════════════════════
+   PERIOD FILTER + CALENDAR PICKER
+════════════════════════════════════════════════════════════ */
+const periodMode = ref('month') // 'month' | 'date'
 
+const pad = (n) => String(n).padStart(2, '0')
 function currentMonthValue() {
   const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
 }
 function currentDateValue() {
   const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
+const toDayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const toMonthStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
 
-const selectedMonth = ref(currentMonthValue())
-const selectedDate  = ref(currentDateValue())
+const todayDate  = new Date()
+const CUR_MONTH  = currentMonthValue()
+const CUR_DATE   = currentDateValue()
+const CUR_YEAR   = todayDate.getFullYear()
+const yearOptions = Array.from({ length: 12 }, (_, i) => CUR_YEAR - i) // newest first (clean 3 × 4 grid)
+const MIN_YEAR   = yearOptions[yearOptions.length - 1]
+
+const selectedMonth = ref(CUR_MONTH)
+const selectedDate  = ref(CUR_DATE)
 const isFiltering   = ref(false)
 
 const currentTopLimit = ref(10)
@@ -557,6 +623,187 @@ const currentTopLimit = ref(10)
 const copyState = ref('idle')
 const printGeneratedAt = ref('')
 
+const periodNoun   = computed(() => (periodMode.value === 'month' ? 'month' : 'day'))
+const currentLabel = computed(() => (periodMode.value === 'month' ? 'This month' : 'Today'))
+
+const isCurrentPeriod = computed(() =>
+  periodMode.value === 'month' ? selectedMonth.value >= CUR_MONTH : selectedDate.value >= CUR_DATE
+)
+const canGoNext = computed(() => !isCurrentPeriod.value)
+const canGoPrev = computed(() =>
+  periodMode.value === 'month' ? selectedMonth.value > `${MIN_YEAR}-01` : selectedDate.value > `${MIN_YEAR}-01-01`
+)
+
+/* ── calendar popover (days → months → years) ── */
+const PK_WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+const MONTH_NAMES = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'long' }))
+const MONTH_SHORT = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'short' }))
+
+const pickerOpen    = ref(false)
+const pickerView    = ref('months') // 'days' | 'months' | 'years'
+const browseYear    = ref(CUR_YEAR)
+const browseMonth   = ref(todayDate.getMonth()) // 0-11
+const pickerRoot    = ref(null)
+const pickerTrigger = ref(null)
+
+const pickerLabel = computed(() => {
+  if (periodMode.value === 'month') {
+    const [y, m] = (selectedMonth.value || CUR_MONTH).split('-').map(Number)
+    return `${MONTH_NAMES[m - 1]} ${y}`
+  }
+  const d = new Date(`${selectedDate.value || CUR_DATE}T00:00:00`)
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+})
+
+function openPicker() {
+  if (periodMode.value === 'date') {
+    const [y, m] = (selectedDate.value || CUR_DATE).split('-').map(Number)
+    browseYear.value = y
+    browseMonth.value = m - 1
+    pickerView.value = 'days'
+  } else {
+    browseYear.value = Number((selectedMonth.value || CUR_MONTH).slice(0, 4))
+    pickerView.value = 'months'
+  }
+  pickerOpen.value = true
+}
+function closePicker(refocus = false) {
+  if (!pickerOpen.value) return
+  pickerOpen.value = false
+  if (refocus) nextTick(() => pickerTrigger.value && pickerTrigger.value.focus())
+}
+function togglePicker() { pickerOpen.value ? closePicker() : openPicker() }
+
+function onDocPointer(e) {
+  if (pickerOpen.value && pickerRoot.value && !pickerRoot.value.contains(e.target)) pickerOpen.value = false
+}
+
+const pkTitle = computed(() => {
+  if (pickerView.value === 'days')   return `${MONTH_NAMES[browseMonth.value]} ${browseYear.value}`
+  if (pickerView.value === 'months') return String(browseYear.value)
+  return `${MIN_YEAR} – ${CUR_YEAR}`
+})
+const pkCanPrev = computed(() => {
+  if (pickerView.value === 'days')   return browseYear.value * 12 + browseMonth.value > MIN_YEAR * 12
+  if (pickerView.value === 'months') return browseYear.value > MIN_YEAR
+  return false
+})
+const pkCanNext = computed(() => {
+  if (pickerView.value === 'days')   return browseYear.value * 12 + browseMonth.value < CUR_YEAR * 12 + todayDate.getMonth()
+  if (pickerView.value === 'months') return browseYear.value < CUR_YEAR
+  return false
+})
+function pkShift(delta) {
+  if (delta < 0 && !pkCanPrev.value) return
+  if (delta > 0 && !pkCanNext.value) return
+  if (pickerView.value === 'days') {
+    const d = new Date(browseYear.value, browseMonth.value + delta, 1)
+    browseYear.value = d.getFullYear()
+    browseMonth.value = d.getMonth()
+  } else if (pickerView.value === 'months') {
+    browseYear.value += delta
+  }
+}
+// Clicking the title zooms out: days → months → years.
+function pkUp() {
+  if (pickerView.value === 'days') pickerView.value = 'months'
+  else if (pickerView.value === 'months') pickerView.value = 'years'
+}
+
+const pkDayCells = computed(() => {
+  const y = browseYear.value
+  const m = browseMonth.value
+  const count = new Date(y, m + 1, 0).getDate()
+  const lead = new Date(y, m, 1).getDay()
+  const out = Array(lead).fill(null)
+  for (let d = 1; d <= count; d++) {
+    const key = `${y}-${pad(m + 1)}-${pad(d)}`
+    out.push({
+      key, d,
+      title: new Date(y, m, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+      future: key > CUR_DATE,
+      today: key === CUR_DATE,
+      selected: periodMode.value === 'date' && key === selectedDate.value,
+    })
+  }
+  return out
+})
+const pkMonthCells = computed(() =>
+  MONTH_SHORT.map((label, m) => {
+    const key = `${browseYear.value}-${pad(m + 1)}`
+    const selected = periodMode.value === 'month'
+      ? key === selectedMonth.value
+      : (selectedDate.value || '').startsWith(key)
+    return {
+      key, m, label,
+      title: `${MONTH_NAMES[m]} ${browseYear.value}`,
+      future: key > CUR_MONTH,
+      today: key === CUR_MONTH,
+      selected,
+    }
+  })
+)
+const pkYearCells = computed(() =>
+  [...yearOptions].reverse().map((y) => ({
+    y,
+    today: y === CUR_YEAR,
+    selected: y === browseYear.value,
+  }))
+)
+
+async function pkPickDay(key) {
+  selectedDate.value = key
+  selectedMonth.value = key.slice(0, 7)
+  closePicker(true)
+  await applyDateFilter()
+}
+async function pkPickMonth(m) {
+  if (periodMode.value === 'date') {
+    // Specific-date mode: choosing a month just opens its days.
+    browseMonth.value = m
+    pickerView.value = 'days'
+    return
+  }
+  selectedMonth.value = `${browseYear.value}-${pad(m + 1)}`
+  closePicker(true)
+  await applyDateFilter()
+}
+function pkPickYear(y) {
+  browseYear.value = y
+  if (y === CUR_YEAR && browseMonth.value > todayDate.getMonth()) browseMonth.value = todayDate.getMonth()
+  pickerView.value = 'months'
+}
+async function pkGoCurrent() {
+  closePicker(true)
+  await goCurrent()
+}
+
+async function shiftPeriod(delta) {
+  if (isFiltering.value) return
+  if (delta > 0 && !canGoNext.value) return
+  if (delta < 0 && !canGoPrev.value) return
+
+  if (periodMode.value === 'month') {
+    const [yy, mm] = selectedMonth.value.split('-').map(Number)
+    selectedMonth.value = toMonthStr(new Date(yy, mm - 1 + delta, 1))
+  } else {
+    const d = new Date(`${selectedDate.value}T00:00:00`)
+    d.setDate(d.getDate() + delta)
+    selectedDate.value = toDayStr(d)
+    selectedMonth.value = selectedDate.value.slice(0, 7)
+  }
+  await applyDateFilter()
+}
+
+async function goCurrent() {
+  selectedMonth.value = CUR_MONTH
+  selectedDate.value = CUR_DATE
+  await applyDateFilter()
+}
+
+/* ════════════════════════════════════════════════════════════
+   FORMATTING HELPERS
+════════════════════════════════════════════════════════════ */
 function num(v) {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
@@ -581,8 +828,9 @@ function cutText(item) {
 }
 
 /* ── LEFTOVER LOG ROWS ──
-   History rows written when a leftover is marked used / scrapped / put back.
-   The length + unit are stored on the row; older rows are parsed from the note. */
+   History rows written when a leftover is marked used / scrapped / put back
+   (done on the Inventory page). The length + unit are stored on the row;
+   older rows are parsed from the note. */
 function isRemnantLog(item) {
   return String(item?.type ?? '').startsWith('remnant_')
 }
@@ -669,71 +917,6 @@ function typePill(item) {
 
 const withQty = (row) => ({ ...row, qty_info: qtyInfo(row), type_pill: typePill(row) })
 
-/* ── LEFTOVER PIECES (remnants) ── */
-const REMNANT_FILTERS = [
-  { key: 'available', label: 'Available' },
-  { key: 'used',      label: 'Used' },
-  { key: 'scrapped',  label: 'Scrapped' },
-  { key: 'all',       label: 'All' },
-]
-const remnantFilter  = ref('available')
-const remnantBusyId  = ref(null)
-const remnantError   = ref('')
-
-const availableRemnants = computed(() => remnants.value.filter(r => r.status === 'available'))
-const availableCount = computed(() => availableRemnants.value.reduce((s, r) => s + r.qty, 0))
-const visibleRemnants = computed(() =>
-  remnantFilter.value === 'all'
-    ? remnants.value
-    : remnants.value.filter(r => r.status === remnantFilter.value)
-)
-function remnantCount(key) {
-  return key === 'all' ? remnants.value.length : remnants.value.filter(r => r.status === key).length
-}
-const remnantEmptyText = computed(() =>
-  remnantFilter.value === 'available'
-    ? 'No leftover pieces on hand.'
-    : 'No leftover pieces with this status in this period.'
-)
-
-// Total leftover length on hand, per unit of length (ft / m / in).
-const remnantTotalsByUnit = computed(() => {
-  const map = new Map()
-  availableRemnants.value.forEach(r => {
-    const unit = r.unit || ''
-    map.set(unit, (map.get(unit) || 0) + r.qty * r.length)
-  })
-  return [...map.entries()].map(([unit, total]) => ({ unit, total }))
-})
-
-async function setRemnantStatus(r, status) {
-  if (remnantBusyId.value) return
-  remnantBusyId.value = r.id
-  remnantError.value = ''
-  let warning = ''
-  try {
-    const { data } = await api.patch(`/api/inventory/remnants/${r.id}`, { status })
-    r.status = status
-    if (data && data.logged === false) {
-      warning = 'The leftover was updated, but its history entry could not be saved. Ask the developer to check the inventory_logs "type" column.'
-      if (data.log_error) console.warn('Leftover history row failed:', data.log_error)
-    }
-    // Reload so the new history row shows in Recent Activity and Full History.
-    // (Goes through applyDateFilter so DataTables is rebuilt safely.)
-    await applyDateFilter()
-  } catch (err) {
-    console.error('Update leftover piece failed:', err)
-    warning = err?.response?.data?.message || 'Could not update this leftover piece. Please try again.'
-  } finally {
-    remnantError.value = warning
-    remnantBusyId.value = null
-  }
-}
-
-function scrollToRemnants() {
-  document.getElementById('remnants-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
 /* ── EXTRA SERVICES totals ── */
 const serviceTotals = computed(() => ({
   fee:    services.value.reduce((s, r) => s + num(r.Fee), 0),
@@ -804,12 +987,17 @@ function totalsText(list, fallbackTotal, sign) {
   return `${sign}${fallbackTotal}`
 }
 
-/* ── KPI BREAKDOWN (click Stock In / Stock Out) ── */
+/* ── KPI BREAKDOWN (click Stock In / Stock Out) ──
+   Each product shows its total, then one line per size (VariantLabel). */
 const breakdown = ref({ open: false, type: 'stock_in' })
 
 function openBreakdown(type) { breakdown.value = { open: true, type } }
 function closeBreakdown() { breakdown.value.open = false }
-function onEscKey(e) { if (e.key === 'Escape' && breakdown.value.open) closeBreakdown() }
+function onEscKey(e) {
+  if (e.key !== 'Escape') return
+  if (pickerOpen.value) closePicker(true)
+  else if (breakdown.value.open) closeBreakdown()
+}
 
 const breakdownTitle = computed(() =>
   breakdown.value.type === 'stock_in' ? 'Stock In breakdown' : 'Stock Out breakdown'
@@ -817,19 +1005,42 @@ const breakdownTitle = computed(() =>
 
 const breakdownRows = computed(() => {
   const map = new Map()
+
   inventoryLogs.value
     .filter((l) => l.type === breakdown.value.type)
     .forEach((l) => {
       const unit = unitLabel(l.Unit, 2)
-      const key = `${l.ProductID ?? l.ProductName}|${l.SKU}|${unit}`
+      const key  = `${l.ProductID ?? l.ProductName}|${l.SKU}|${unit}`
+      const qty  = Math.abs(num(l.quantity))
+
       if (!map.has(key)) {
-        map.set(key, { key, name: l.ProductName, sku: l.SKU, unit, count: 0, total: 0 })
+        map.set(key, { key, name: l.ProductName, sku: l.SKU, unit, count: 0, total: 0, variants: new Map() })
       }
       const row = map.get(key)
       row.count += 1
-      row.total += Math.abs(num(l.quantity))
+      row.total += qty
+
+      // Group by size. Logs without a size are not listed separately.
+      const label = String(l.VariantLabel ?? '').trim()
+      if (!label) return
+
+      const vKey = `${l.VariantID ?? ''}|${label}`
+      if (!row.variants.has(vKey)) {
+        row.variants.set(vKey, { key: vKey, label, price: null, count: 0, total: 0, cutCount: 0 })
+      }
+      const v = row.variants.get(vKey)
+      v.count += 1
+      v.total += qty
+      if (l.is_cut) v.cutCount += 1
+      if (l.VariantPrice != null && v.price == null) v.price = l.VariantPrice
     })
-  return [...map.values()].sort((a, b) => b.total - a.total)
+
+  return [...map.values()]
+    .map((r) => ({
+      ...r,
+      variants: [...r.variants.values()].sort((a, b) => b.total - a.total),
+    }))
+    .sort((a, b) => b.total - a.total)
 })
 
 const breakdownByUnit = computed(() => {
@@ -866,7 +1077,7 @@ function computeRange() {
     const [year, month] = selectedMonth.value.split('-').map(Number)
     const from = `${selectedMonth.value}-01`
     const lastDay = new Date(year, month, 0).getDate()
-    const to = `${selectedMonth.value}-${String(lastDay).padStart(2, '0')}`
+    const to = `${selectedMonth.value}-${pad(lastDay)}`
     return { from, to }
   }
   return { from: selectedDate.value, to: selectedDate.value }
@@ -879,7 +1090,33 @@ const filterLabel = computed(() => {
     return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
   }
   if (!selectedDate.value) return 'All Time'
-  return selectedDate.value
+  return new Date(`${selectedDate.value}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+})
+
+/* ── PRINT: document reference + opening paragraph ── */
+const reportRef = computed(() => {
+  const key = periodMode.value === 'month'
+    ? String(selectedMonth.value || '').replace('-', '')
+    : String(selectedDate.value || '').replace(/-/g, '')
+  return `IL-${periodMode.value === 'month' ? 'M' : 'D'}-${key}`
+})
+
+const execSummary = computed(() => {
+  const s = summary.value
+  const n = num(s.total_adjustments)
+  if (!n && !services.value.length) {
+    return `No inventory movements were recorded for ${filterLabel.value}.${isCurrentPeriod.value ? ' This period is still in progress.' : ''}`
+  }
+  const parts = [
+    `For ${filterLabel.value}, ${formatNumber(n)} inventory ${n === 1 ? 'adjustment was' : 'adjustments were'} logged. Stock in totalled ${totalsText(s.stock_in_by_unit, formatNumber(s.total_stock_in), '+')} and stock out totalled ${totalsText(s.stock_out_by_unit, formatNumber(s.total_stock_out), '-')}.`,
+  ]
+  if (num(s.manual_adjustments)) parts.push(`${formatNumber(s.manual_adjustments)} ${num(s.manual_adjustments) === 1 ? 'was a manual adjustment' : 'were manual adjustments'}.`)
+  if (num(s.cut_count)) parts.push(`${formatNumber(s.cut_count)} cut ${num(s.cut_count) === 1 ? 'piece was' : 'pieces were'} sold.`)
+  if (num(s.service_revenue) > 0) parts.push(`Extra services brought in ${peso(s.service_revenue)} (owner share ${peso(s.owner_share)}, worker payout ${peso(s.worker_payout)}).`)
+  const top = topAdjustedProducts.value[0]
+  if (top) parts.push(`Most active product: ${top.ProductName} (${top.adjustment_count} ${num(top.adjustment_count) === 1 ? 'adjustment' : 'adjustments'}).`)
+  if (isCurrentPeriod.value) parts.push('Figures are partial because the period is still in progress.')
+  return parts.join(' ')
 })
 
 // ── DataTables instances ──
@@ -942,15 +1179,6 @@ async function loadInventoryLogs({ topLimit = 10, dateFromVal = null, dateToVal 
     topAdjustedProducts.value = res.data.top_adjusted_products
     inventoryLogs.value       = (res.data.inventory_logs ?? []).map(withQty)
     services.value            = res.data.services ?? []
-    remnants.value            = (res.data.remnants ?? []).map(r => ({
-      ...r,
-      id:     r.RemnantID,
-      status: r.Status,
-      qty:    Math.max(num(r.Quantity), 1),
-      length: num(r.Length),
-      unit:   r.Unit || '',
-      sale_id: r.SaleID,
-    }))
 
     animateSummaryTo(summary.value)
   } catch (err) {
@@ -959,10 +1187,6 @@ async function loadInventoryLogs({ topLimit = 10, dateFromVal = null, dateToVal 
 }
 
 /* ── report actions: Copy / CSV / Print ── */
-function remnantLine(r) {
-  return `  ${r.ProductName} (${r.SKU})${r.VariantLabel ? ' – ' + r.VariantLabel : ''} — ${r.qty} × ${lenText(r.length)} ${r.unit} leftover [${r.status}]${r.sale_id ? ', ' + receiptNo(r.sale_id) : ''}, ${formatLocalDate(r.created_at)}`
-}
-
 function buildReportText() {
   const lines = []
   lines.push(`Inventory Logs — ${filterLabel.value}`)
@@ -974,7 +1198,6 @@ function buildReportText() {
   lines.push(`  Total Stock Out: ${totalsText(summary.value.stock_out_by_unit, summary.value.total_stock_out, '-')}`)
   lines.push(`  Manual Adjustments: ${summary.value.manual_adjustments}`)
   lines.push(`  Cut Pieces Sold: ${summary.value.cut_count}`)
-  lines.push(`  Leftover Pieces On Hand: ${availableCount.value}${remnantTotalsByUnit.value.length ? ' (' + remnantTotalsByUnit.value.map(u => `${lenText(u.total)} ${u.unit}`).join(', ') + ')' : ''}`)
   lines.push(`  Service Fees: ${peso(summary.value.service_revenue)} (worker ${peso(summary.value.worker_payout)}, owner ${peso(summary.value.owner_share)})`)
   lines.push('')
 
@@ -987,14 +1210,6 @@ function buildReportText() {
     })
   } else {
     lines.push('  No recent activity recorded.')
-  }
-  lines.push('')
-
-  lines.push('Leftover Pieces')
-  if (remnants.value.length) {
-    remnants.value.forEach((r) => lines.push(remnantLine(r)))
-  } else {
-    lines.push('  No leftover pieces recorded.')
   }
   lines.push('')
 
@@ -1060,8 +1275,6 @@ function buildReportCSV() {
   }
   rows.push(['Manual Adjustments', summary.value.manual_adjustments])
   rows.push(['Cut Pieces Sold', summary.value.cut_count])
-  rows.push(['Leftover Pieces On Hand', availableCount.value])
-  remnantTotalsByUnit.value.forEach((u) => rows.push(['Leftover Length On Hand', u.total, u.unit]))
   rows.push(['Service Fees', summary.value.service_revenue])
   rows.push(['Worker Payout', summary.value.worker_payout])
   rows.push(['Owner Share', summary.value.owner_share])
@@ -1071,13 +1284,6 @@ function buildReportCSV() {
   rows.push(['Product', 'SKU', 'Size', 'Type', 'New', 'Quantity', 'Unit', 'Cut', 'Leftover', 'Date', 'Notes'])
   recentActivity.value.forEach((item) => {
     rows.push([item.ProductName, item.SKU, item.VariantLabel || '', item.type, isNewProduct(item) ? 'Yes' : '', item.quantity, unitLabel(item.Unit, item.quantity), cutText(item), remnantText(item), formatLocalDate(item.created_at), item.notes || ''])
-  })
-  rows.push([])
-
-  rows.push(['Leftover Pieces'])
-  rows.push(['Product', 'SKU', 'Size', 'Pieces', 'Length Each', 'Length Unit', 'Status', 'Sale', 'Date'])
-  remnants.value.forEach((r) => {
-    rows.push([r.ProductName, r.SKU, r.VariantLabel || '', r.qty, r.length, r.unit, r.status, r.sale_id ? receiptNo(r.sale_id) : '', formatLocalDate(r.created_at)])
   })
   rows.push([])
 
@@ -1138,7 +1344,7 @@ async function copyReport() {
 function exportCSV() {
   try {
     const csv = buildReportCSV()
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -1152,20 +1358,36 @@ function exportCSV() {
   }
 }
 
-function printReport() {
-  printGeneratedAt.value = new Date().toLocaleString('en-PH', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
-  nextTick(() => window.print())
+/* ── PRINT ──
+   The Full History table is paginated on screen (25 rows). For paper it is
+   switched to "show all" first so nothing is cut off, then put back after
+   the print dialog closes. */
+let printRestoreLen = null
+
+async function printReport() {
+  closePicker()
+  closeBreakdown()
+  printGeneratedAt.value = new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+
+  if (dtLogs) {
+    printRestoreLen = dtLogs.page.len()
+    dtLogs.page.len(-1).draw(false)
+  }
+  await nextTick()
+  // One extra frame so the expanded rows are painted before the dialog opens.
+  await new Promise((r) => requestAnimationFrame(r))
+  window.print()
+}
+
+function restoreAfterPrint() {
+  if (dtLogs && printRestoreLen) dtLogs.page.len(printRestoreLen).draw(false)
+  printRestoreLen = null
 }
 
 /* ────────────────────────────────────────────────────────────
    DataTables + Vue: never patch a live DataTable against
    Vue-rendered rows. Destroy BEFORE data changes, let Vue
    re-render, then create fresh instances.
-   (The leftover-pieces table is a plain table on purpose, so
-   changing a status never needs a DataTables rebuild.)
 
    autoWidth is off so the column widths set in the template
    are respected and the tables fit without sideways scrolling.
@@ -1222,30 +1444,42 @@ function destroyAllTables() {
 }
 
 async function applyDateFilter() {
+  if (isFiltering.value) return
   isFiltering.value = true
-  destroyAllTables()
+  try {
+    destroyAllTables()
 
-  const { from, to } = computeRange()
-  await loadInventoryLogs({
-    topLimit:    currentTopLimit.value,
-    dateFromVal: from,
-    dateToVal:   to,
-  })
+    const { from, to } = computeRange()
+    await loadInventoryLogs({
+      topLimit:    currentTopLimit.value,
+      dateFromVal: from,
+      dateToVal:   to,
+    })
 
-  await nextTick()
-  initAllTables()
-
-  isFiltering.value = false
+    await nextTick()
+    initAllTables()
+  } finally {
+    isFiltering.value = false
+  }
 }
 
+// Keeps both pickers on the same moment when switching By Month / Specific Date.
 function setPeriodMode(mode) {
   if (periodMode.value === mode) return
+  closePicker()
+  if (mode === 'month') {
+    selectedMonth.value = (selectedDate.value || CUR_DATE).slice(0, 7)
+  } else {
+    selectedDate.value = selectedMonth.value === CUR_MONTH ? CUR_DATE : `${selectedMonth.value}-01`
+  }
   periodMode.value = mode
   applyDateFilter()
 }
 
 onMounted(async () => {
   window.addEventListener('keydown', onEscKey)
+  window.addEventListener('afterprint', restoreAfterPrint)
+  document.addEventListener('pointerdown', onDocPointer)
   const { from, to } = computeRange()
   await loadInventoryLogs({ dateFromVal: from, dateToVal: to })
   await nextTick()
@@ -1257,6 +1491,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onEscKey)
+  window.removeEventListener('afterprint', restoreAfterPrint)
+  document.removeEventListener('pointerdown', onDocPointer)
   destroyAllTables()
 })
 </script>
@@ -1294,6 +1530,7 @@ onBeforeUnmount(() => {
   --il-red-icon:       #FFE4E6;
 
   --radius: 16px;
+  --il-ease: cubic-bezier(.16, 1, .3, 1);
 
   min-height: 100%;
   background: var(--il-bg);
@@ -1313,8 +1550,11 @@ html[data-theme="dark"] .inv-logs {
   --il-red-icon:     rgba(244,63,94,0.18);
 }
 
+.inv-logs button:focus-visible,
+.inv-logs a:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
+
 /* ── PAGE HEADER ── */
-.page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.page-header { position: relative; z-index: 5; display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
 .page-eyebrow {
   font-size: 11px; font-weight: 700; letter-spacing: .12em;
   color: var(--il-accent); text-transform: uppercase; margin: 0 0 5px;
@@ -1350,7 +1590,6 @@ html[data-theme="dark"] .inv-logs {
   color: var(--il-text-primary);
   transform: translateY(-1px);
 }
-.rt-btn:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
 .rt-btn:disabled { opacity: .65; cursor: default; }
 .rt-btn--primary {
   background: var(--il-accent); border-color: var(--il-accent); color: #fff;
@@ -1378,29 +1617,128 @@ html[data-theme="dark"] .inv-logs {
   white-space: nowrap;
 }
 .period-mode-seg:hover { color: var(--il-text-secondary); }
-.period-mode-seg:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
 .period-mode-seg--active { background: var(--il-accent); color: #fff; }
 .period-mode-seg--active:hover { color: #fff; }
 
-.period-picker-wrap { display: flex; align-items: center; }
-.period-picker-input {
+.period-nav { display: flex; align-items: center; gap: 6px; }
+.icon-btn {
+  width: 36px; height: 36px; border-radius: 10px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--il-border-strong);
+  background: var(--il-surface-sunken);
+  color: var(--il-text-secondary);
+  font-size: 12px;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
+}
+.icon-btn:hover:not(:disabled) { border-color: var(--il-accent-border); color: var(--il-text-primary); background: var(--il-surface-raised); }
+.icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.link-btn {
+  border: none; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 700;
+  color: var(--il-accent); padding: 6px 8px; border-radius: 8px;
+}
+.link-btn:hover:not(:disabled) { background: var(--il-accent-soft); }
+.link-btn:disabled { opacity: .5; cursor: default; }
+
+.date-filter-loading { font-size: 12px; color: var(--il-accent); display: flex; align-items: center; gap: 6px; }
+
+/* ── CALENDAR PICKER ── */
+.picker { position: relative; }
+.picker-trigger {
+  display: inline-flex; align-items: center; gap: 10px;
+  height: 36px; min-width: 200px; padding: 0 12px 0 13px;
   border: 1.5px solid var(--il-border-strong);
   background: var(--il-surface);
   border-radius: 11px;
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 13.5px; font-weight: 600;
+  font-family: inherit; font-size: 13.5px; font-weight: 700;
   color: var(--il-text-primary);
-  outline: none; cursor: pointer;
-  padding: 8px 12px;
-  box-shadow: var(--il-shadow);
-  transition: border-color .15s ease;
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
 }
-.period-picker-input:hover,
-.period-picker-input:focus { border-color: var(--il-accent-border); }
-.period-picker-input::-webkit-calendar-picker-indicator { cursor: pointer; border-radius: 4px; padding: 2px; }
-html[data-theme="dark"] .period-picker-input::-webkit-calendar-picker-indicator { filter: invert(1) brightness(1.6); }
+.picker-trigger > span { flex: 1; text-align: left; white-space: nowrap; }
+.picker-ico { font-size: 13px; color: var(--il-accent); }
+.picker-caret { font-size: 10px; color: var(--il-text-muted); transition: transform .22s var(--il-ease); }
+.picker-trigger:hover { border-color: var(--il-accent-border); background: var(--il-surface-raised); }
+.picker-trigger--open { border-color: var(--il-accent); box-shadow: 0 0 0 3px var(--il-accent-soft); }
+.picker-trigger--open .picker-caret { transform: rotate(180deg); }
 
-.date-filter-loading { font-size: 12px; color: var(--il-accent); display: flex; align-items: center; gap: 6px; }
+.picker-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
+  width: 300px; max-width: calc(100vw - 32px);
+  padding: 14px;
+  background: var(--il-surface);
+  border: 1px solid var(--il-border-strong);
+  border-radius: 18px;
+  box-shadow: 0 28px 56px -18px rgba(0,0,0,.5), 0 4px 14px rgba(0,0,0,.14);
+  transform-origin: top right;
+}
+.pop-enter-active, .pop-leave-active { transition: opacity .16s ease, transform .2s var(--il-ease); }
+.pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(-6px) scale(.97); }
+
+.pk-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 12px; }
+.pk-nav {
+  width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; background: var(--il-surface-sunken);
+  color: var(--il-text-secondary); font-size: 11px;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+.pk-nav:hover:not(:disabled) { background: var(--il-accent-soft); color: var(--il-accent); border-color: var(--il-accent-border); }
+.pk-nav:disabled { opacity: .35; cursor: not-allowed; }
+.pk-nav--hide { visibility: hidden; }
+.pk-title {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 32px; border: none; border-radius: 10px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 14px; font-weight: 800; letter-spacing: -.01em;
+  color: var(--il-text-primary);
+  transition: background-color .15s ease;
+}
+.pk-title i { font-size: 9px; color: var(--il-text-muted); }
+.pk-title:hover:not(:disabled) { background: var(--il-surface-raised); }
+.pk-title:disabled { cursor: default; }
+
+.pk-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.pk-dow { text-align: center; padding: 4px 0 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--il-text-faint); }
+.pk-blank { display: block; }
+.pk-day {
+  position: relative; aspect-ratio: 1; min-width: 0; padding: 0;
+  border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: var(--il-text-primary);
+  transition: background-color .14s ease, color .14s ease, border-color .14s ease, transform .14s var(--il-ease);
+}
+.pk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.pk-cell {
+  position: relative; height: 46px; padding: 0;
+  border: 1px solid transparent; border-radius: 12px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--il-text-primary);
+  transition: background-color .14s ease, color .14s ease, border-color .14s ease, transform .14s var(--il-ease);
+}
+.pk-day:hover:not(:disabled):not(.pk-on),
+.pk-cell:hover:not(:disabled):not(.pk-on) { background: var(--il-accent-soft); color: var(--il-accent); transform: scale(1.05); }
+.pk-day:disabled, .pk-cell:disabled { opacity: .28; cursor: not-allowed; }
+.pk-today { border-color: var(--il-accent-border); color: var(--il-accent); }
+.pk-today::after {
+  content: ''; position: absolute; bottom: 5px; left: 50%; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: var(--il-accent);
+}
+.pk-on { background: var(--il-accent); border-color: var(--il-accent); color: #fff; box-shadow: 0 6px 14px -6px var(--il-accent); }
+.pk-on::after { background: #fff; }
+
+.pk-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--il-border); }
+.pk-link {
+  display: inline-flex; align-items: center; gap: 7px; border: none; background: transparent; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 700; color: var(--il-accent);
+  padding: 6px 9px; border-radius: 8px;
+  transition: background-color .15s ease;
+}
+.pk-link i { font-size: 11px; }
+.pk-link:hover:not(:disabled) { background: var(--il-accent-soft); }
+.pk-link:disabled { opacity: .4; cursor: default; }
+.pk-link--muted { color: var(--il-text-muted); }
+.pk-link--muted:hover:not(:disabled) { background: var(--il-surface-raised); color: var(--il-text-primary); }
 
 /* ── SECTION ── */
 .section        { display: flex; flex-direction: column; gap: 14px; }
@@ -1427,7 +1765,6 @@ html[data-theme="dark"] .period-picker-input::-webkit-calendar-picker-indicator 
   transition: transform .2s ease, box-shadow .2s ease, background-color 0.22s ease, border-color 0.22s ease;
 }
 .kpi-card:hover { transform: translateY(-2px); box-shadow: var(--il-shadow-lg); }
-.kpi-card--wide { grid-column: 1 / -1; }
 
 .kpi-card--featured { background: var(--il-accent-soft); border-color: var(--il-accent-border); }
 .kpi-card--alert { background: rgba(244,63,94,0.08); border-color: rgba(244,63,94,0.25); }
@@ -1473,7 +1810,6 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
 .kpi-accent-bar--red    { background: var(--il-red); }
 
 .kpi-card--clickable { cursor: pointer; }
-.kpi-card--clickable:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
 .kpi-hint {
   margin: 2px 0 0; font-size: 11px; font-weight: 600;
   color: var(--il-text-faint); transition: color .16s ease;
@@ -1505,14 +1841,11 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
   width: 32px; height: 32px; border-radius: 9px; cursor: pointer;
 }
 .il-modal-close:hover { color: var(--il-text-primary); border-color: var(--il-accent-border); }
-.il-modal-close:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
 
 .il-unit-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.il-unit-chips--tight { margin-top: 4px; }
 .il-unit-chip { font-size: 12.5px; font-weight: 700; border-radius: 20px; padding: 4px 12px; }
 .il-unit-chip--in  { background: var(--il-green-icon); color: var(--il-green); }
 .il-unit-chip--out { background: var(--il-red-icon);   color: var(--il-red); }
-.il-unit-chip--rem { background: var(--il-blue-icon);  color: var(--il-blue); }
 
 .il-modal-body { overflow-y: auto; min-height: 0; }
 .il-break-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
@@ -1526,6 +1859,33 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
 .il-break-table td { padding: 10px 12px; border-bottom: 1px solid var(--il-border); }
 .il-break-table tbody tr:last-child td { border-bottom: none; }
 .il-empty { color: var(--il-text-muted); font-size: 13.5px; margin: 8px 0; text-align: center; }
+
+/* ── BREAKDOWN: per-size lines ── */
+.il-break-table .il-prod-row--has-sizes td { border-bottom: none; padding-bottom: 4px; }
+
+.il-var-row td {
+  padding: 6px 12px 6px 28px;
+  font-size: 13px;
+  background: var(--il-surface-sunken);
+  border-bottom: 1px solid var(--il-border);
+}
+.il-var-name {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; color: var(--il-text-secondary);
+}
+.il-var-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--il-accent); flex-shrink: 0;
+}
+.il-var-price {
+  font-size: 11px; font-weight: 700;
+  padding: 1px 8px; border-radius: 20px;
+  background: var(--il-accent-soft); color: var(--il-accent);
+}
+.il-var-note {
+  margin: 2px 0 0 14px; font-size: 11px; color: var(--il-text-faint);
+}
+.il-var-note i { font-size: 9.5px; margin-right: 3px; }
 
 /* ── CARDS ── */
 .card {
@@ -1548,39 +1908,6 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
   margin: 6px 0 0; max-width: 620px;
   font-size: 12.5px; line-height: 1.5; color: var(--il-text-muted);
 }
-
-/* ── LEFTOVER PIECES ── */
-.rem-filters { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--il-border); border-radius: 12px; background: var(--il-surface-sunken); }
-.rem-filter {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: none; background: transparent; cursor: pointer;
-  font-family: 'Inter', system-ui, sans-serif; font-size: 12.5px; font-weight: 600;
-  color: var(--il-text-muted); padding: 7px 12px; border-radius: 9px;
-  transition: background-color .16s ease, color .16s ease;
-}
-.rem-filter:hover { color: var(--il-text-secondary); }
-.rem-filter--on { background: var(--il-accent); color: #fff; }
-.rem-filter--on:hover { color: #fff; }
-.rem-filter:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
-.rem-filter-count {
-  min-width: 18px; padding: 0 5px; text-align: center;
-  font-size: 10.5px; font-weight: 700; line-height: 18px; border-radius: 9px;
-  background: rgba(127,127,127,.18);
-}
-
-.rem-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.rem-btn {
-  border: 1px solid var(--il-border-strong); background: var(--il-surface-sunken);
-  color: var(--il-text-secondary); cursor: pointer;
-  font-family: 'Inter', system-ui, sans-serif; font-size: 12px; font-weight: 600;
-  padding: 5px 11px; border-radius: 8px;
-  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
-}
-.rem-btn:hover:not(:disabled) { border-color: var(--il-accent-border); color: var(--il-accent); background: var(--il-accent-soft); }
-.rem-btn--danger:hover:not(:disabled) { border-color: rgba(244,63,94,.4); color: var(--il-red); background: rgba(244,63,94,.10); }
-.rem-btn:disabled { opacity: .5; cursor: default; }
-.rem-btn:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
-.rem-error { margin: 12px 0 0; font-size: 12.5px; font-weight: 600; color: var(--il-red); }
 
 /* ── TABLE ──
    Tables use a fixed layout with percentage column widths and wrapping
@@ -1688,14 +2015,14 @@ html[data-theme="dark"] .status-pill--rem     { background: rgba(59,130,246,0.18
 }
 html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); color: #A5B4FC; }
 
+/* Print-only blocks are hidden on screen */
 .print-only { display: none; }
-.print-header,
-.print-footer { display: none; }
 
-@media (max-width: 1100px) { .kpi-strip { grid-template-columns: repeat(2,1fr); } }
+/* Screen-only breakpoints (kept off the print media so the report never collapses into mobile cards) */
+@media screen and (max-width: 1100px) { .kpi-strip { grid-template-columns: repeat(2,1fr); } }
 
 /* ── NARROW SCREENS: each table row becomes a labelled card ── */
-@media (max-width: 900px) {
+@media screen and (max-width: 900px) {
   .data-table--stack,
   .data-table--stack tbody,
   .data-table--stack tfoot,
@@ -1721,7 +2048,7 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .data-table--stack tfoot td { width: auto; padding: 0; }
 }
 
-@media (max-width: 700px)  {
+@media screen and (max-width: 700px)  {
   .inv-logs  { padding: 16px 16px 40px; }
   .card { padding: 18px 16px 16px; }
   .kpi-strip { grid-template-columns: 1fr; }
@@ -1729,130 +2056,189 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .period-control { flex-direction: column; align-items: stretch; }
   .period-mode-toggle { justify-content: stretch; }
   .period-mode-seg { flex: 1; text-align: center; justify-content: center; }
-  .period-picker-wrap { justify-content: stretch; }
-  .period-picker-input { width: 100%; }
+  .period-nav { width: 100%; }
+  .picker { flex: 1; min-width: 0; }
+  .picker-trigger { width: 100%; min-width: 0; }
+  .picker-pop { left: 0; right: 0; width: auto; transform-origin: top center; }
   .report-toolbar { justify-content: stretch; }
   .rt-btn { flex: 1; justify-content: center; }
-  .rem-filters { width: 100%; overflow-x: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .kpi-card, .rt-btn, .rem-btn, .rem-filter { transition: none; }
+  .kpi-card, .rt-btn, .picker-caret, .pk-day, .pk-cell { transition: none; }
   .kpi-card:hover, .rt-btn:hover:not(:disabled) { transform: none; }
+  .pop-enter-active, .pop-leave-active { transition: none; }
 }
 
-/* ════════════════ PRINT MODE ════════════════ */
+/* ════════════════ PRINT MODE (scoped) ════════════════
+   The report is always printed on white, whatever theme the app is in:
+   the colour tokens are reset to light values first, so every component
+   that uses them (text, borders, pills) prints correctly.            */
 @media print {
 
-  .inv-logs {
+  .inv-logs,
+  html[data-theme="dark"] .inv-logs {
+    --il-bg: #ffffff;
+    --il-surface: #ffffff;
+    --il-surface-raised: #f8fafc;
+    --il-surface-sunken: #f8fafc;
+    --il-border: #e2e8f0;
+    --il-border-strong: #cbd5e1;
+    --il-text-primary: #0f172a;
+    --il-text-secondary: #334155;
+    --il-text-muted: #64748b;
+    --il-text-faint: #94a3b8;
+    --il-accent: #EA580C;
+    --il-accent-soft: #FFF1E8;
+    --il-accent-border: #FDBA74;
+    --il-amber: #B45309;
+    --il-green-icon: #D1FAE5;
+    --il-blue-icon: #DBEAFE;
+    --il-violet-icon: #E0E7FF;
+    --il-red-icon: #FFE4E6;
+
     background: #ffffff !important;
     padding: 0 !important;
-    gap: 18px !important;
+    gap: 16px !important;
+    counter-reset: ps;
     font-family: 'Inter', Arial, sans-serif !important;
+    font-size: 10.5px;
+    color: #0f172a;
   }
 
+  .inv-logs,
+  .inv-logs * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide everything interactive. The letterhead replaces the screen header. */
+  .page-header,
   .period-control,
   .report-toolbar,
-  .no-print,
-  .page-sub,
+  .section--screen,
+  .kpi-hint,
+  .card-eyebrow,
   .il-modal-backdrop { display: none !important; }
 
+  /* ── Letterhead ── */
   .print-header { display: block !important; margin-bottom: 4px; }
-  .print-header-top {
-    display: flex; justify-content: space-between;
-    font-size: 10px; color: #A8A29E; margin-bottom: 14px;
+  .print-header p, .print-header h1, .print-header dl, .print-header dd { margin: 0; }
+  .ph-band { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #0f172a 0%, #0f172a 55%, #EA580C 55%, #F59E0B 100%); }
+  .ph-row { display: flex !important; justify-content: space-between; align-items: center; gap: 24px; padding: 14px 0; }
+  .ph-brand { display: flex; align-items: center; gap: 12px; }
+  .ph-logo {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; border-radius: 9px;
+    font-size: 15px; font-weight: 800; letter-spacing: .02em;
+    color: #fff; background: #EA580C;
   }
-  .print-header-brand { font-size: 21px; font-weight: 800; color: #1C1917; margin: 0 0 2px; letter-spacing: -.02em; }
-  .print-header-sub { font-size: 13px; font-weight: 600; color: #57534E; margin: 0 0 4px; }
-  .print-header-meta { font-size: 11px; color: #A8A29E; margin: 0 0 4px; }
-  .print-header-meta:last-of-type { margin: 0 0 14px; }
-  .print-header-rule { border: none; border-top: 2px solid #EA580C; margin: 0 0 18px; }
+  .ph-name { font-size: 16px; font-weight: 800; letter-spacing: -.02em; color: #0f172a; line-height: 1.15; }
+  .ph-tag  { margin-top: 3px !important; font-size: 9.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #64748b; }
+  .ph-meta { display: grid; grid-template-columns: auto auto; column-gap: 20px; row-gap: 3px; padding: 8px 14px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+  .ph-meta > div { display: contents; }
+  .ph-meta dt { font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; align-self: center; }
+  .ph-meta dd { font-size: 10px; font-weight: 600; color: #0f172a; text-align: right; white-space: nowrap; }
 
-  .page-header { margin-bottom: 4px; }
-  .page-eyebrow { color: #EA580C !important; font-size: 10px !important; }
-  .page-title { color: #1C1917 !important; font-size: 20px !important; }
-  .card-eyebrow { color: #EA580C !important; font-size: 9.5px !important; }
-  .section-title { color: #1C1917 !important; font-size: 14.5px !important; }
-  .card-title { color: #1C1917 !important; font-size: 13.5px !important; }
-  .card-sub { color: #78716C !important; font-size: 9.5px !important; }
+  .ph-title-row {
+    display: flex !important; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 18px; border-radius: 8px; border-left: 5px solid #EA580C;
+    background: #0f172a; color: #fff;
+  }
+  .ph-kicker { font-size: 8.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #fdba74; }
+  .ph-title  { margin-top: 3px !important; font-size: 21px; font-weight: 800; letter-spacing: -.02em; color: #fff; line-height: 1.15; }
+  .ph-title-right { text-align: right; }
+  .ph-period { font-size: 14px; font-weight: 700; color: #fff; }
+  .ph-chip {
+    display: inline-block; margin-top: 5px; padding: 2px 9px; border-radius: 10px;
+    font-size: 8.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  }
+  .ph-chip--live   { color: #064e3b; background: #6ee7b7; }
+  .ph-chip--closed { color: #334155; background: #e2e8f0; }
+  .ph-lead {
+    margin-top: 14px !important; padding: 10px 14px;
+    border-left: 3px solid #EA580C; border-radius: 0 6px 6px 0; background: #f8fafc;
+    font-size: 10.5px; line-height: 1.6; color: #334155;
+  }
 
-  .kpi-strip { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; }
+  /* ── Numbered section headings (01, 02, …) ── */
+  .section { gap: 10px !important; margin-bottom: 2px !important; }
+  .section-header { margin: 0 !important; }
+  .section-title,
+  .card-title {
+    display: flex !important; align-items: center; gap: 9px;
+    counter-increment: ps;
+    margin: 0 0 10px !important; padding-bottom: 7px;
+    font-size: 13px !important; font-weight: 800; letter-spacing: -.01em;
+    color: #0f172a !important; border-bottom: 1.5px solid #0f172a;
+    break-after: avoid; page-break-after: avoid;
+  }
+  .section-title::before,
+  .card-title::before {
+    content: counter(ps, decimal-leading-zero);
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; height: 20px; padding: 0 5px; border-radius: 5px;
+    font-size: 9px; font-weight: 800; letter-spacing: .04em; color: #fff; background: #EA580C;
+  }
+  .card-sub { margin: -4px 0 10px !important; max-width: none !important; color: #64748b !important; font-size: 9.5px !important; }
+
+  /* ── KPI tiles ── */
+  .kpi-strip { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 9px !important; }
   .kpi-card {
-    background: #FAFAF9 !important; border: 1px solid #E7E0D8 !important;
-    box-shadow: none !important; border-radius: 12px !important;
-    padding: 12px 14px 10px !important; break-inside: avoid;
+    background: #ffffff !important; border: 1px solid #e2e8f0 !important; border-left: 3px solid #EA580C !important;
+    box-shadow: none !important; border-radius: 6px !important;
+    padding: 10px 12px 9px !important; break-inside: avoid; page-break-inside: avoid;
   }
-  .kpi-card--featured { background: #FFF7ED !important; border-color: #FED7AA !important; }
-  .kpi-card--alert { background: #FFF1F2 !important; border-color: #FECDD3 !important; }
-  .kpi-hint { display: none !important; }
-  .kpi-icon-wrap { width: 30px !important; height: 30px !important; border-radius: 9px !important; font-size: 12px !important; }
+  .kpi-card--featured { background: #FFF1E8 !important; border-color: #FED7AA !important; border-left-color: #EA580C !important; }
+  .kpi-card--alert { background: #FFF1F2 !important; border-color: #FECDD3 !important; border-left-color: #e11d48 !important; }
+  .kpi-card-inner { gap: 9px !important; }
+  .kpi-icon-wrap { width: 26px !important; height: 26px !important; border-radius: 7px !important; font-size: 11px !important; }
   .kpi-icon-wrap--orange { background: #FFEDD5 !important; color: #EA580C !important; }
-  .kpi-icon-wrap--green  { background: #D1FAE5 !important; color: #10B981 !important; }
-  .kpi-icon-wrap--blue   { background: #DBEAFE !important; color: #3B82F6 !important; }
+  .kpi-icon-wrap--green  { background: #D1FAE5 !important; color: #059669 !important; }
+  .kpi-icon-wrap--blue   { background: #DBEAFE !important; color: #2563EB !important; }
   .kpi-icon-wrap--violet { background: #E0E7FF !important; color: #6366F1 !important; }
-  .kpi-icon-wrap--red    { background: #FFE4E6 !important; color: #F43F5E !important; }
-  .kpi-label { color: #A8A29E !important; font-size: 9px !important; }
-  .kpi-value { color: #1C1917 !important; font-size: 17px !important; }
-  .kpi-value--green  { color: #10B981 !important; }
-  .kpi-value--blue   { color: #3B82F6 !important; }
+  .kpi-icon-wrap--red    { background: #FFE4E6 !important; color: #e11d48 !important; }
+  .kpi-label { color: #64748b !important; font-size: 8px !important; font-weight: 800 !important; letter-spacing: .07em !important; }
+  .kpi-value { color: #0f172a !important; font-size: 17px !important; }
+  .kpi-value--green  { color: #047857 !important; }
+  .kpi-value--blue   { color: #2563EB !important; }
   .kpi-value--violet { color: #6366F1 !important; }
-  .kpi-value--red    { color: #F43F5E !important; }
-  .il-unit-chip--rem { background: #DBEAFE !important; color: #3B82F6 !important; font-size: 9.5px !important; padding: 2px 8px !important; }
-  .kpi-accent-bar { height: 2px !important; }
-  .kpi-accent-bar--orange { background: #EA580C !important; }
-  .kpi-accent-bar--green  { background: #10B981 !important; }
-  .kpi-accent-bar--blue   { background: #3B82F6 !important; }
-  .kpi-accent-bar--violet { background: #6366F1 !important; }
-  .kpi-accent-bar--red    { background: #F43F5E !important; }
+  .kpi-value--red    { color: #be123c !important; }
+  .kpi-accent-bar { display: none !important; }
 
+  /* ── Cards become flat sections ── */
   .card {
-    background: #ffffff !important; border: 1px solid #EDE8E2 !important;
-    box-shadow: none !important; border-radius: 12px !important;
-    padding: 14px 16px 12px !important; break-inside: avoid-page;
+    background: #ffffff !important; border: none !important;
+    box-shadow: none !important; border-radius: 0 !important;
+    padding: 0 !important;
   }
-  .card-header { margin-bottom: 10px !important; }
+  .card-header { display: block !important; margin-bottom: 0 !important; }
+  .table-wrap { overflow: visible !important; }
 
-  .data-table { font-size: 10.5px !important; }
-  .data-table thead th,
-  .data-table--plain thead th {
-    background: #FAFAF9 !important; color: #78716C !important;
-    font-size: 9px !important; padding: 7px 10px !important;
-    border-bottom: 1px solid #EDE8E2 !important;
-  }
-  .data-table tbody td {
-    padding: 6px 10px !important; border-bottom: 1px solid #F2EEE9 !important;
-    color: #44403C !important; white-space: normal !important;
-  }
-  .data-table tbody tr:nth-child(even) td { background: #FCFBFA !important; }
-  .svc-total td { color: #1C1917 !important; border-top: 1px solid #EDE8E2 !important; }
-
-  .cell-product  { color: #1C1917 !important; font-size: 10.5px !important; }
-  .cell-sku      { color: #A8A29E !important; font-size: 8.5px !important; }
-  .cell-faint    { color: #A8A29E !important; font-size: 9.5px !important; }
-  .cell-muted    { color: #57534E !important; }
-  .cell-positive { color: #10B981 !important; }
-  .cell-negative { color: #F43F5E !important; }
-  .cell-date-day  { color: #57534E !important; font-size: 9.5px !important; }
-  .cell-date-time { color: #A8A29E !important; font-size: 8.5px !important; }
+  /* ── Table cell content ── */
+  .data-table { font-size: 10px !important; }
+  .cell-product  { color: #0f172a !important; font-size: 10.5px !important; }
+  .cell-sku      { color: #94a3b8 !important; font-size: 8.5px !important; }
+  .cell-faint    { color: #94a3b8 !important; font-size: 9.5px !important; }
+  .cell-date-day  { color: #334155 !important; font-size: 9.5px !important; }
+  .cell-date-time { color: #94a3b8 !important; font-size: 8.5px !important; }
+  .cell-notes { font-size: 9.5px !important; }
+  .il-empty { color: #94a3b8 !important; padding: 10px 0; }
 
   .qty-main { font-size: 11.5px !important; }
-  .qty-main--in      { color: #10B981 !important; }
-  .qty-main--out     { color: #F43F5E !important; }
+  .qty-main--in      { color: #047857 !important; }
+  .qty-main--out     { color: #be123c !important; }
   .qty-main--neutral { color: #B45309 !important; }
-  .qty-caption { color: #A8A29E !important; font-size: 8.5px !important; }
+  .qty-caption { color: #94a3b8 !important; font-size: 8.5px !important; }
   .qty-details {
-    background: #FAFAF9 !important; border-left: 2px solid #FED7AA !important;
+    background: #f8fafc !important; border-left: 2px solid #FED7AA !important;
     padding: 3px 7px !important; margin-top: 4px !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .qty-row { font-size: 9px !important; }
-  .qty-row dt { color: #78716C !important; }
-  .qty-row dd { color: #1C1917 !important; }
+  .qty-row dt { color: #64748b !important; }
+  .qty-row dd { color: #0f172a !important; }
 
-  .status-pill {
-    font-size: 9px !important; padding: 2px 9px !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }
+  .status-pill { font-size: 8.5px !important; padding: 2px 8px !important; }
   .status-pill--in      { background: #D1FAE5 !important; color: #047857 !important; }
   .status-pill--out     { background: #FFE4E6 !important; color: #BE123C !important; }
   .status-pill--neutral { background: #FEF3C7 !important; color: #92400E !important; }
@@ -1860,26 +2246,28 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .status-pill--cut { background: #FFEDD5 !important; color: #C2410C !important; }
   .status-pill--rem { background: #DBEAFE !important; color: #1D4ED8 !important; }
 
-  .unit-pill {
-    font-size: 8px !important; padding: 1px 6px !important;
-    background: #F5F5F4 !important; color: #57534E !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }
+  .unit-pill { font-size: 8px !important; padding: 1px 6px !important; background: #F1F5F9 !important; color: #475569 !important; }
+  .category-pill { font-size: 8.5px !important; padding: 2px 8px !important; background: #E0E7FF !important; color: #4F46E5 !important; }
 
-  .category-pill {
-    font-size: 9px !important; padding: 2px 8px !important;
-    background: #E0E7FF !important; color: #6366F1 !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  /* ── Notes, sign-off, end of report ── */
+  .print-notes { display: block !important; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
+  .pn-title {
+    margin: 0 0 8px !important; padding-bottom: 6px;
+    font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+    color: #0f172a; border-bottom: 1.5px solid #0f172a;
   }
+  .print-notes ul { margin: 0; padding: 0 0 0 16px; list-style: disc; font-size: 9.5px; line-height: 1.6; color: #475569; }
+  .print-notes li { margin-bottom: 2px; }
+  .print-notes b { color: #0f172a; }
+  .pn-sign { display: grid; grid-template-columns: 1.3fr 1.3fr .8fr; gap: 28px; margin-top: 30px; }
+  .pn-sign span { display: block; height: 22px; border-bottom: 1px solid #0f172a; }
+  .pn-sign p { margin: 4px 0 0 !important; font-size: 8.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #64748b; }
 
-  .print-footer {
-    display: flex !important; justify-content: space-between;
-    font-size: 8.5px; color: #A8A29E;
-    border-top: 1px solid #EDE8E2; padding-top: 8px; margin-top: 6px;
-    position: fixed; bottom: 0; left: 0; right: 0;
+  .print-end {
+    display: flex !important; justify-content: space-between; gap: 12px;
+    margin-top: 6px; padding-top: 8px;
+    font-size: 8.5px; color: #94a3b8; border-top: 2px solid #0f172a;
   }
-
-  .section { break-inside: avoid-page; margin-bottom: 4px !important; }
 }
 </style>
 
@@ -2015,23 +2403,86 @@ html[data-theme="dark"] .inv-logs .dataTables_paginate .paginate_button.current 
 }
 
 /* Narrow screens: DataTables controls stack and the sort header row is hidden */
-@media (max-width: 900px) {
+@media screen and (max-width: 900px) {
   .inv-logs .inv-dt-toolbar--right { justify-content: space-between; }
   .inv-logs .dataTables_paginate { justify-content: center; }
 }
 
+/* ══════════════════════════════════════════════════════
+   GLOBAL PRINT — page setup + table styling.
+   Selectors start with `html #inventory-print-area` so they always
+   beat the DataTables / dark-theme rules above (id specificity).
+══════════════════════════════════════════════════════ */
 @media print {
+  @page {
+    size: auto;
+    margin: 17mm 14mm 18mm;
+    @top-left     { content: "Sheem Steel Construction Company"; font: 600 8px 'Inter', Arial, sans-serif; color: #94a3b8; }
+    @top-right    { content: "Inventory Logs"; font: 600 8px 'Inter', Arial, sans-serif; color: #94a3b8; }
+    @bottom-left  { content: "Confidential · For internal use only"; font: 600 8px 'Inter', Arial, sans-serif; color: #94a3b8; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 700 8.5px 'Inter', Arial, sans-serif; color: #475569; }
+  }
+  /* The letterhead already carries the branding on page 1 */
+  @page :first {
+    @top-left  { content: none; }
+    @top-right { content: none; }
+  }
+
+  /* The app shell often fixes html/body height with overflow hidden so the
+     sidebar layout can scroll internally; print would then only capture the
+     visible viewport. Force natural height so the whole report prints. */
+  html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+  body * { overflow: visible !important; }
+
   body * { visibility: hidden !important; }
   #inventory-print-area,
   #inventory-print-area * { visibility: visible !important; }
   #inventory-print-area {
-    position: absolute; left: 0; top: 0;
-    width: 100%; padding: 14px 18px 50px; background: #fff;
+    position: absolute !important;
+    top: 0 !important; left: 0 !important;
+    width: 100% !important; max-width: 100% !important;
+    margin: 0 !important; padding: 0 !important;
+    background: #fff !important;
+    display: flex !important;
   }
-  .print-only { display: block !important; }
+
+  /* DataTables chrome is never printed */
   .dataTables_filter, .dataTables_length,
   .dataTables_paginate, .dataTables_info { display: none !important; }
-  thead { display: table-header-group !important; }
-  tr, td, th { page-break-inside: avoid !important; }
+
+  /* Tables */
+  html #inventory-print-area table { width: 100% !important; border-collapse: collapse !important; }
+  html #inventory-print-area thead { display: table-header-group !important; }
+  html #inventory-print-area tfoot { display: table-footer-group !important; }
+  html #inventory-print-area tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+
+  html #inventory-print-area .data-table thead th,
+  html #inventory-print-area table.dataTable thead th {
+    background: #0f172a !important; color: #ffffff !important;
+    font-size: 8px !important; font-weight: 800 !important; letter-spacing: .07em !important;
+    text-transform: uppercase !important; text-align: left !important;
+    padding: 7px 8px !important; border: none !important; border-radius: 0 !important;
+    white-space: normal !important;
+  }
+  html #inventory-print-area table.dataTable thead th::after,
+  html #inventory-print-area table.dataTable thead th::before { display: none !important; content: none !important; }
+
+  html #inventory-print-area .data-table tbody td {
+    padding: 6px 8px !important; border-bottom: 1px solid #e2e8f0 !important;
+    background: transparent !important; color: #334155 !important;
+    vertical-align: top !important;
+  }
+  html #inventory-print-area .data-table tbody tr:nth-child(even) td { background: #f8fafc !important; }
+  html #inventory-print-area .data-table tbody td.cell-muted    { color: #475569 !important; }
+  html #inventory-print-area .data-table tbody td.cell-faint    { color: #94a3b8 !important; }
+  html #inventory-print-area .data-table tbody td.cell-positive { color: #047857 !important; font-weight: 700 !important; }
+  html #inventory-print-area .data-table tbody td.cell-negative { color: #be123c !important; font-weight: 700 !important; }
+  html #inventory-print-area .data-table tbody td.cell-product  { color: #0f172a !important; }
+
+  html #inventory-print-area .data-table .svc-total td {
+    background: #f1f5f9 !important; color: #0f172a !important;
+    font-weight: 800 !important; padding: 8px 8px !important;
+    border-top: 2px solid #0f172a !important; border-bottom: none !important;
+  }
 }
 </style>
