@@ -1077,6 +1077,7 @@ const confirmLogout = async () => {
   width: 56px; height: 56px;
   object-fit: contain; border-radius: 14px;
   animation: logo-pulse 1.8s ease-in-out infinite;
+  border: solid rgb(255, 255, 255) 1px; border-radius: 50px;
 }
 @keyframes logo-pulse {
   0%, 100% { opacity: 1;    transform: scale(1); }
@@ -1218,7 +1219,7 @@ const confirmLogout = async () => {
   text-decoration: none; overflow: hidden; white-space: nowrap; flex: 1;
   border-radius: 8px;
 }
-.brand-logo { width: 32px; height: 32px; object-fit: contain; border-radius: 8px; flex-shrink: 0; }
+.brand-logo { width: 32px; height: 32px; object-fit: fill; border: solid rgb(255, 255, 255) 1px; border-radius: 50px; flex-shrink: 0; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-name { font-size: 14px; font-weight: 700; color: var(--c-text-primary); letter-spacing: -.005em; }
 .brand-sub  { font-size: 11.5px; color: var(--c-text-faint); margin-top: 1px; font-weight: 500; }
@@ -1330,8 +1331,8 @@ const confirmLogout = async () => {
 .greeting-logo {
   width: 34px; height: 34px;
   object-fit: contain;
-  border-radius: 9px;
   display: block;
+  border: solid rgb(255, 255, 255) 1px; border-radius: 50px;
 }
 
 .greeting-text { min-width: 0; }

@@ -1294,7 +1294,7 @@ html[data-theme="dark"] .lw {
   justify-content: space-between;
 }
 .lw-brand { display: flex; align-items: center; gap: 10px; }
-.lw-logo-img { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+.lw-logo-img { width: 34px; height: 34px; object-fit: fill; flex-shrink: 0; border: solid rgb(255, 255, 255) 1px; border-radius: 50px;}
 .lw-brand-text { display: flex; flex-direction: column; gap: 1px; }
 .lw-brand-name { font-size: 15px; font-weight: 700; color: var(--lw-text-primary); letter-spacing: -0.01em; line-height: 1.2; }
 .lw-brand-sub { font-size: 9px; color: var(--lw-accent); font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; line-height: 1.3; }

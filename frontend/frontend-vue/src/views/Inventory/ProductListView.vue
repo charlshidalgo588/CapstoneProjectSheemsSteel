@@ -9,7 +9,7 @@
           <h1 class="page-title">{{ view === 'cuts' ? 'Cut Tracking' : 'Product List' }}</h1>
           <p class="page-sub">
             {{ view === 'cuts'
-              ? 'Leftover pieces from cut sales. Mark them used, scrap them or put them back.'
+              ? 'Leftover pieces from cut sales. They turn to Used when sold on the POS. Scrap the ones you throw away.'
               : 'Stock by size, restocking and product management.' }}
           </p>
         </div>
@@ -56,9 +56,9 @@
       ═════════════════════════════════════════════════════════ -->
       <template v-if="view === 'products'">
 
-        <!-- Summary strip -->
+        <!-- Summary strip: every card applies its filter AND scrolls down to the table -->
         <section v-if="!loading" class="kpi-strip" aria-label="Inventory summary">
-          <button type="button" class="kpi-card" @click="resetFilters">
+          <button type="button" class="kpi-card" @click="showAllProducts">
             <span class="kpi-icon kpi-icon--accent"><i class="fa-solid fa-boxes-stacked"></i></span>
             <span class="kpi-body">
               <span class="kpi-label">Products</span>
@@ -68,7 +68,7 @@
           </button>
 
           <!-- LOW STOCK: above 0 but at/below the reorder level -->
-          <button type="button" class="kpi-card" :class="{ 'kpi-card--warn': lowStockCount > 0 }" @click="stockFilter = 'low'">
+          <button type="button" class="kpi-card" :class="{ 'kpi-card--warn': lowStockCount > 0 }" @click="pickStockFilter('low')">
             <span class="kpi-icon" :class="lowStockCount > 0 ? 'kpi-icon--amber' : 'kpi-icon--green'">
               <i class="fa-solid" :class="lowStockCount > 0 ? 'fa-triangle-exclamation' : 'fa-circle-check'"></i>
             </span>
@@ -82,7 +82,7 @@
           </button>
 
           <!-- OUT OF STOCK: exactly 0 -->
-          <button type="button" class="kpi-card" :class="{ 'kpi-card--alert': outOfStockCount > 0 }" @click="stockFilter = 'out'">
+          <button type="button" class="kpi-card" :class="{ 'kpi-card--alert': outOfStockCount > 0 }" @click="pickStockFilter('out')">
             <span class="kpi-icon" :class="outOfStockCount > 0 ? 'kpi-icon--red' : 'kpi-icon--green'">
               <i class="fa-solid" :class="outOfStockCount > 0 ? 'fa-circle-xmark' : 'fa-circle-check'"></i>
             </span>
@@ -228,8 +228,8 @@
           </div>
         </transition>
 
-        <!-- Product table -->
-        <section class="table-card">
+        <!-- Product table (the KPI cards scroll here) -->
+        <section class="table-card" ref="productsTableRef">
           <table class="data-table prod-table">
             <colgroup>
               <col style="width:52px" />
@@ -459,9 +459,9 @@
       ═════════════════════════════════════════════════════════ -->
       <template v-else>
 
-        <!-- Stat cards double as filters -->
+        <!-- Stat cards double as filters and scroll down to the table -->
         <section class="cut-stats" aria-label="Leftover summary">
-          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'available' }" @click="remnantFilter = 'available'">
+          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'available' }" @click="pickRemnantFilter('available')">
             <span class="kpi-icon kpi-icon--blue"><i class="fa-solid fa-ruler-horizontal"></i></span>
             <span class="kpi-body">
               <span class="kpi-label">Available</span>
@@ -472,15 +472,15 @@
               </span>
             </span>
           </button>
-          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'used' }" @click="remnantFilter = 'used'">
+          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'used' }" @click="pickRemnantFilter('used')">
             <span class="kpi-icon kpi-icon--green"><i class="fa-solid fa-check"></i></span>
             <span class="kpi-body">
               <span class="kpi-label">Used</span>
               <span class="kpi-value">{{ remnantCount('used') }}</span>
-              <span class="kpi-hint">Sold or put to use</span>
+              <span class="kpi-hint">Sold on the POS</span>
             </span>
           </button>
-          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'scrapped' }" @click="remnantFilter = 'scrapped'">
+          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'scrapped' }" @click="pickRemnantFilter('scrapped')">
             <span class="kpi-icon kpi-icon--red"><i class="fa-solid fa-trash-can"></i></span>
             <span class="kpi-body">
               <span class="kpi-label">Scrapped</span>
@@ -516,7 +516,8 @@
           </div>
         </section>
 
-        <section class="table-card">
+        <!-- Leftover table (the stat cards scroll here) -->
+        <section class="table-card" ref="cutsTableRef">
           <table class="data-table rem-table">
             <colgroup>
               <col style="width:27%" />
@@ -560,11 +561,14 @@
                 </td>
                 <td data-label="Action" class="td-rem-action">
                   <div class="rem-actions">
-                    <template v-if="r.status === 'available'">
-                      <button type="button" class="rem-btn" :disabled="remnantBusyId === r.id" @click="setRemnantStatus(r, 'used')">Mark used</button>
-                      <button type="button" class="rem-btn rem-btn--danger" :disabled="remnantBusyId === r.id" @click="setRemnantStatus(r, 'scrapped')">Scrap</button>
-                    </template>
-                    <button v-else type="button" class="rem-btn" :disabled="remnantBusyId === r.id" @click="setRemnantStatus(r, 'available')">Put back</button>
+                    <!-- Available: the only manual action is Scrap. "Used" happens automatically when the piece is sold on the POS. -->
+                    <button v-if="r.status === 'available'" type="button" class="rem-btn rem-btn--danger"
+                      :disabled="remnantBusyId === r.id" @click="setRemnantStatus(r, 'scrapped')">Scrap</button>
+                    <!-- Scrapped by mistake: it can be put back -->
+                    <button v-else-if="r.status === 'scrapped'" type="button" class="rem-btn"
+                      :disabled="remnantBusyId === r.id" @click="setRemnantStatus(r, 'available')">Put back</button>
+                    <!-- Used = sold on the POS, nothing to do here -->
+                    <span v-else class="rem-note">Sold on POS</span>
                   </div>
                 </td>
               </tr>
@@ -578,7 +582,7 @@
           </table>
           <p v-if="remnantError" class="rem-error" role="alert">{{ remnantError }}</p>
           <div class="table-footer">
-            What is left of a piece after a cut, e.g. 18 in piece − 10 in sold = 8 in leftover. Leftovers are not counted as whole pieces in stock.
+            What is left of a piece after a cut, e.g. 18 in piece − 10 in sold = 8 in leftover. A leftover turns to Used when it is sold on the POS. Leftovers are not counted as whole pieces in stock.
           </div>
         </section>
       </template>
@@ -780,7 +784,7 @@
    PRODUCT LIST — sections
      1. Imports & constants
      2. State
-     3. Small helpers (formatting, toasts, preferences)
+     3. Small helpers (formatting, toasts, preferences, scrolling)
      4. Sizes, prices & stock rules
      5. Size sorting & the per-size panel
      6. Cut tracking (leftover pieces)
@@ -819,6 +823,10 @@ const loadFailed     = ref(false)
 const successMessage = ref('')
 const errorMessage   = ref('')
 let messageTimer     = null
+
+// sections the summary cards scroll down to
+const productsTableRef = ref(null)
+const cutsTableRef     = ref(null)
 
 // search & filters. `searchInput` is what the box shows; `searchQuery` is the
 // lowercase term used for filtering. The header search (?search=) feeds the same box.
@@ -911,15 +919,43 @@ function timeOnly(raw) {
   return d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : ''
 }
 
+/* Smooth-scrolls down to a section (a template ref) once Vue has re-rendered it.
+   Skips the animation for people who prefer reduced motion. */
+async function scrollToSection(targetRef) {
+  await nextTick()
+  await nextTick()   // a second tick: the section may only exist after a view switch
+  const el = targetRef.value
+  if (!el) return
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+
 /* ── VIEW SWITCH (Products / Cut tracking) ── */
 function setView(next) {
   view.value = next
   closeMenu()
   router.replace({ query: { ...route.query, view: next === 'cuts' ? 'cuts' : undefined } })
 }
+// "Leftover pieces" card on the Products view → open Cut tracking and scroll to its table
 function openCuts() {
   remnantFilter.value = 'available'
   setView('cuts')
+  scrollToSection(cutsTableRef)
+}
+// Cut tracking stat cards → apply the filter and scroll to the table
+function pickRemnantFilter(key) {
+  remnantFilter.value = key
+  scrollToSection(cutsTableRef)
+}
+// Low stock / Out of stock cards → apply the filter and scroll to the product table
+function pickStockFilter(key) {
+  stockFilter.value = key
+  scrollToSection(productsTableRef)
+}
+// Products card → clear every filter and scroll to the full list
+function showAllProducts() {
+  resetFilters()
+  scrollToSection(productsTableRef)
 }
 
 /* ── 4. SIZES, PRICES & STOCK ─────────────────────────────────────
@@ -1098,7 +1134,13 @@ function toggleAllSizes() {
 /* ── 6. CUT TRACKING (leftover pieces) ────────────────────────────
    GET   /api/inventory/remnants        → every leftover (available / used / scrapped)
    PATCH /api/inventory/remnants/{id}   → change status (also writes the history
-                                           row shown on the Inventory Logs page) */
+                                           row shown on the Inventory Logs page)
+
+   STATUS RULES (from this screen):
+     available → scrapped   manual "Scrap" button
+     scrapped  → available  manual "Put back" button
+     available → used       NEVER manual. SaleController::sellRemnant() sets it
+                            when the last pieces of a leftover are sold on the POS. */
 const REMNANT_FILTERS = [
   { key: 'available', label: 'Available' },
   { key: 'used',      label: 'Used' },
@@ -1163,6 +1205,8 @@ async function loadRemnants() {
 }
 
 async function setRemnantStatus(r, status) {
+  // "used" is set by the POS only — never from this screen.
+  if (status === 'used') return
   if (remnantBusyId.value) return
   remnantBusyId.value = r.id
   remnantError.value = ''
@@ -1770,7 +1814,13 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 
 /* ── F. PRODUCT TABLE ──
    Fixed layout + wrapping text: every column always fits, no horizontal scroll. */
-.table-card { background: var(--pl-surface); border: 1px solid var(--pl-border); border-radius: var(--radius); box-shadow: var(--c-shadow-sm); overflow: hidden; transition: background-color .22s, border-color .22s; }
+.table-card {
+  background: var(--pl-surface); border: 1px solid var(--pl-border); border-radius: var(--radius);
+  box-shadow: var(--c-shadow-sm); overflow: hidden;
+  transition: background-color .22s, border-color .22s;
+  /* when a summary card scrolls here, stop below the sticky top bar instead of under it */
+  scroll-margin-top: 120px;
+}
 .table-footer {
   padding: 11px 18px; border-top: 1px solid var(--pl-border);
   font-size: 12px; color: var(--pl-text-muted); background: var(--pl-surface-raised);
@@ -2029,7 +2079,7 @@ html[data-theme="dark"] .rem-status--available { background: rgba(16,185,129,.16
 html[data-theme="dark"] .rem-status--scrapped  { background: rgba(244,63,94,.16); color: #F87171; }
 
 .td-rem-action { text-align: right; }
-.rem-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.rem-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .rem-btn {
   border: 1px solid var(--pl-border-strong); background: var(--pl-surface-raised);
   color: var(--pl-text-secondary); cursor: pointer;
@@ -2041,6 +2091,8 @@ html[data-theme="dark"] .rem-status--scrapped  { background: rgba(244,63,94,.16)
 .rem-btn--danger:hover:not(:disabled) { border-color: rgba(244,63,94,.4); color: var(--pl-red); background: rgba(244,63,94,.10); }
 .rem-btn:disabled { opacity: .5; cursor: default; }
 .rem-btn:focus-visible { outline: 2px solid var(--pl-accent); outline-offset: 2px; }
+/* plain text shown instead of a button when a leftover was sold on the POS */
+.rem-note { font-size: 11.5px; font-weight: 600; color: var(--pl-text-faint); white-space: nowrap; }
 
 .rem-empty { padding: 40px 16px !important; text-align: center; color: var(--pl-text-muted); font-size: 13.5px; }
 .rem-empty i { display: block; margin: 0 auto 8px; font-size: 22px; color: var(--pl-text-faint); }
