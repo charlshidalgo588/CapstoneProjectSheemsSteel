@@ -166,17 +166,30 @@
             "{{ search }}"
             <button @click="search = ''" aria-label="Clear search"><i class="fa-solid fa-xmark"></i></button>
           </span>
-          <button
-            v-if="view === 'products'"
-            type="button"
-            class="meta-chip"
-            :class="{ 'meta-chip--active': availableOnly }"
-            :aria-pressed="availableOnly"
-            @click="availableOnly = !availableOnly"
-          >
-            <i class="fa-solid" :class="availableOnly ? 'fa-circle-check' : 'fa-circle'"></i>
-            Available only
-          </button>
+          <div class="meta-actions">
+            <!-- Extra service (labour): visible on both tabs, with a count when services are in the sale -->
+            <button
+              type="button"
+              class="meta-chip service-chip"
+              @click="openServiceModal()"
+              title="Add an extra service fee (installation, cutting, delivery…)"
+            >
+              <i class="fa-solid fa-screwdriver-wrench"></i>
+              Add service
+              <span v-if="services.length" class="service-chip-count">{{ services.length }}</span>
+            </button>
+            <button
+              v-if="view === 'products'"
+              type="button"
+              class="meta-chip"
+              :class="{ 'meta-chip--active': availableOnly }"
+              :aria-pressed="availableOnly"
+              @click="availableOnly = !availableOnly"
+            >
+              <i class="fa-solid" :class="availableOnly ? 'fa-circle-check' : 'fa-circle'"></i>
+              Available only
+            </button>
+          </div>
         </div>
 
         <!-- Load error -->
@@ -297,6 +310,9 @@
               <span class="cart-badge">{{ cart.length }} item{{ cart.length !== 1 ? 's' : '' }}</span>
             </div>
             <div class="cart-header-top-right">
+              <button v-if="isMobile" type="button" class="cart-svc-btn" @click="openServiceModal()" title="Add an extra service fee (labour)">
+                <i class="fa-solid fa-screwdriver-wrench"></i> Service
+              </button>
               <button v-if="cart.length > 0 || services.length > 0" type="button" class="cart-clear-link" @click="clearCart">
                 <i class="fa-solid fa-trash-can"></i> Clear
               </button>
@@ -409,21 +425,30 @@
             <div class="cart-item-body">
               <p class="cart-item-name" :title="lineName(item)">{{ lineName(item) }}</p>
               <div class="cart-item-sub">
-                <span class="cart-item-sub-price">₱{{ item.price.toFixed(2) }} each</span>
+                <span class="cart-item-sub-price">
+                  ₱{{ item.price.toFixed(2) }} ea
+                  <s v-if="item.origPrice != null" class="cart-item-was">₱{{ item.origPrice.toFixed(2) }}</s>
+                </span>
+                <button
+                  v-if="canAdjustLine(item)"
+                  type="button"
+                  class="cart-item-adjust"
+                  :class="{ 'cart-item-adjust--on': item.origPrice != null }"
+                  @click="openAdjustModal(item)"
+                  :title="item.remnantId ? 'Change the price of this leftover' : 'Sell a cut piece or change the price'"
+                  :aria-label="`Adjust line: ${item.name}`"
+                >
+                  <i class="fa-solid" :class="item.origPrice != null ? 'fa-circle-check' : 'fa-sliders'"></i>
+                  {{ item.origPrice != null ? (item.cut ? 'Cut piece' : 'Custom price') : 'Adjust line' }}
+                </button>
                 <!-- Leftover lines have no sizes to re-pick, so no edit pencil -->
                 <button v-if="item.origPrice == null && !item.remnantId" @click="editCartItem(item)" class="cart-item-edit" title="Edit sizes & quantity" aria-label="Edit line">
                   <i class="fa-solid fa-pen"></i>
-                </button>
-                <button @click="openAdjustModal(item)" class="cart-item-edit" :title="item.remnantId ? 'Change price' : 'Cut piece / change price'" aria-label="Cut piece or change price">
-                  <i class="fa-solid fa-tag"></i>
                 </button>
                 <button @click="removeFromCart(item.key)" class="cart-item-del" title="Remove line" aria-label="Remove line">
                   <i class="fa-solid fa-trash-can"></i>
                 </button>
               </div>
-              <p v-if="item.origPrice != null" class="cart-item-adj">
-                {{ item.cut ? 'Cut piece' : 'Custom price' }} · list ₱{{ item.origPrice.toFixed(2) }}
-              </p>
             </div>
 
             <div class="cart-item-right">
@@ -450,13 +475,6 @@
               <span class="cart-item-total">₱{{ svc.fee.toFixed(2) }}</span>
             </div>
           </div>
-        </div>
-
-        <!-- Add extra service -->
-        <div class="cart-service-bar">
-          <button type="button" class="cart-service-btn" @click="openServiceModal()">
-            <i class="fa-solid fa-screwdriver-wrench"></i> Add extra service
-          </button>
         </div>
 
         <!-- Compact summary — Total and the pay button stay prominent -->
@@ -733,106 +751,234 @@
     </transition>
     </Teleport>
 
-    <!-- ══ CUT PIECE / CUSTOM PRICE MODAL ══ -->
+    <!-- ══ ADJUST LINE MODAL ══
+         Wide two-column layout that fits without scrolling:
+           left  = what is being cut / why the price changes
+           right = price + summary
+         Cut mode: the full piece length and its unit are read from the size the
+         cashier already picked ("8 ft", "2.5 m", "1/2 in" …). The cashier only
+         types the length being sold. If the size name has no readable length,
+         the full length can still be typed once by hand. -->
     <Teleport to="body">
     <transition name="modal-fade">
       <div v-if="showAdjModal && adjItem" class="modal-backdrop" @click.self="closeAdjModal" @keydown.esc="closeAdjModal">
-        <div class="modal modal--adjust" role="dialog" aria-modal="true">
-          <div class="modal-header">
-            <div>
+        <div class="modal modal--adjust" role="dialog" aria-modal="true" aria-labelledby="adj-title">
+
+          <!-- Header: what is being adjusted -->
+          <div class="adj-head">
+            <div class="adj-head-icon"><i class="fa-solid fa-sliders"></i></div>
+            <div class="adj-head-text">
               <p class="modal-eyebrow">Adjust line</p>
-              <h3 class="modal-title">{{ adjItem.name }}</h3>
+              <h3 id="adj-title" class="modal-title">{{ adjItem.name }}</h3>
+            </div>
+            <div class="adj-meta">
+              <span v-if="adjSizeLabel" class="adj-chip"><i class="fa-solid fa-ruler"></i> {{ adjSizeLabel }}</span>
+              <span class="adj-chip"><i class="fa-solid fa-layer-group"></i> Qty {{ adjItem.qty }}</span>
+              <span class="adj-chip"><i class="fa-solid fa-tag"></i> {{ adjItem.remnantId ? 'Baseline' : 'List' }} ₱{{ adjListPrice.toFixed(2) }}</span>
             </div>
             <button class="modal-close" @click="closeAdjModal" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
-          <div class="modal-body">
-            <!-- Leftover pieces are already cut, so they only get a custom price -->
-            <div v-if="!adjIsSqm && !adjItem.remnantId" class="adj-tabs" role="tablist">
-              <button type="button" role="tab" :aria-selected="adjMode === 'cut'" :class="{ 'is-active': adjMode === 'cut' }" @click="setAdjMode('cut')">Sell a cut piece</button>
-              <button type="button" role="tab" :aria-selected="adjMode === 'price'" :class="{ 'is-active': adjMode === 'price' }" @click="setAdjMode('price')">Custom price</button>
-            </div>
+          <div class="modal-body adj-body">
 
-            <!-- CUT PIECE -->
-            <template v-if="adjMode === 'cut'">
-              <div class="cut-grid">
-                <div class="cut-field">
-                  <label for="adj-full">Full piece length</label>
-                  <input id="adj-full" ref="adjFullInput" v-model.number="adjFull" type="number" min="0" step="0.01" placeholder="e.g. 8" />
-                </div>
-                <div class="cut-field">
-                  <label for="adj-sold">Length sold</label>
-                  <input id="adj-sold" v-model.number="adjSold" type="number" min="0" step="0.01" placeholder="e.g. 3" />
-                </div>
-              </div>
-              <div class="svc-chips" role="group" aria-label="Length unit">
-                <button v-for="u in CUT_UNITS" :key="u" type="button" class="svc-chip" :class="{ 'svc-chip--on': adjUnit === u }" @click="adjUnit = u">{{ u }}</button>
-              </div>
-              <div v-if="adjRemainder != null" class="adj-remainder">
+            <!-- What do you want to do? (leftovers and sqm lines only get a custom price) -->
+            <div v-if="!adjIsSqm && !adjItem.remnantId" class="adj-modes" role="tablist" aria-label="Adjustment type">
+              <button type="button" role="tab" class="adj-mode" :class="{ 'is-active': adjMode === 'cut' }" :aria-selected="adjMode === 'cut'" @click="setAdjMode('cut')">
                 <i class="fa-solid fa-scissors"></i>
-                <span>
-                  <strong>{{ fmtLen(adjRemainder) }} {{ adjUnit }}</strong> will be left over and saved as a remnant for later sale.
-                </span>
-              </div>
-            </template>
-
-            <!-- CUSTOM PRICE REASON -->
-            <div v-else class="modal-section">
-              <div class="cut-field">
-                <label for="adj-reason">Reason for the price change{{ adjItem.remnantId ? ' (optional)' : '' }}</label>
-                <input id="adj-reason" v-model="adjReason" type="text" maxlength="80" placeholder="e.g. Negotiated" autocomplete="off" />
-              </div>
-              <div class="svc-chips">
-                <button v-for="r in PRICE_REASONS" :key="r" type="button" class="svc-chip" :class="{ 'svc-chip--on': adjReason === r }" @click="adjReason = r">{{ r }}</button>
-              </div>
+                <span class="adj-mode-text"><strong>Sell a cut piece</strong><span>Charge by the length sold</span></span>
+              </button>
+              <button type="button" role="tab" class="adj-mode" :class="{ 'is-active': adjMode === 'price' }" :aria-selected="adjMode === 'price'" @click="setAdjMode('price')">
+                <i class="fa-solid fa-tag"></i>
+                <span class="adj-mode-text"><strong>Custom price</strong><span>Change the price per piece</span></span>
+              </button>
             </div>
 
-            <div class="modal-section">
-              <div class="size-toolbar">
-                <label class="modal-section-label" for="adj-price">{{ adjMode === 'cut' ? 'Price for this cut (₱ each)' : 'New price (₱ each)' }}</label>
-                <button v-if="adjMode === 'cut' && adjSuggested != null && Number(adjPrice) !== adjSuggested" type="button" class="link-btn" @click="adjPrice = adjSuggested; adjTouched = false">
-                  Use suggested ₱{{ adjSuggested.toFixed(2) }}
-                </button>
-                <button
-                  v-if="adjItem.remnantId && adjItem.baseline != null && Number(adjPrice) !== adjItem.baseline"
-                  type="button" class="link-btn"
-                  @click="adjPrice = adjItem.baseline"
-                >
-                  Use baseline ₱{{ adjItem.baseline.toFixed(2) }}
-                </button>
-              </div>
-              <div class="amount-input-wrap">
-                <span class="amount-prefix">₱</span>
-                <input id="adj-price" v-model.number="adjPrice" type="number" min="0" step="0.01" class="amount-input adj-price-input" placeholder="0.00" @input="adjTouched = true" @keydown.enter.prevent="applyAdjustment" />
-              </div>
-              <p v-if="adjMode === 'cut' && adjSuggested != null" class="svc-note">
-                Suggested price is the same share of the list price ({{ Math.round((Number(adjSold) / Number(adjFull)) * 100) }}% of ₱{{ adjListPrice.toFixed(2) }}). Change it if you charge extra for cutting.
-              </p>
-              <p v-if="adjItem.remnantId && adjItem.baseline != null" class="svc-note">
-                Baseline = list price of the uncut piece minus what the cut was sold for. You can change it.
-              </p>
-            </div>
+            <div class="adj-grid">
 
-            <div class="pay-summary">
-              <div class="pay-summary-row"><span>{{ adjItem.remnantId ? 'Baseline price' : 'List price' }}</span><span>₱{{ adjListPrice.toFixed(2) }}</span></div>
-              <div class="pay-summary-row"><span>Price now</span><span>₱{{ (Number(adjPrice) || 0).toFixed(2) }}</span></div>
-              <div class="pay-summary-total"><span>Line total · {{ adjItem.qty }} {{ adjMode === 'cut' ? 'cut' : 'pc' }}{{ adjItem.qty === 1 ? '' : 's' }}</span><span>₱{{ ((Number(adjPrice) || 0) * adjItem.qty).toFixed(2) }}</span></div>
+              <!-- LEFT COLUMN -->
+              <div class="adj-col">
+
+                <!-- CUT PIECE -->
+                <template v-if="adjMode === 'cut'">
+                  <section class="adj-card">
+                    <header class="adj-card-head">
+                      <h4 class="adj-card-title">Cut details</h4>
+                    </header>
+                    <div class="adj-card-body">
+                      <div class="adj-split">
+
+                        <!-- Full piece: automatic, fixed by the chosen size -->
+                        <div class="adj-tile">
+                          <div class="adj-tile-top">
+                            <span class="adj-label">Full piece</span>
+                            <span v-if="adjFullLocked" class="piece-badge" :title="`Read from size: ${adjSpec.source}`"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto</span>
+                            <button v-else-if="adjSpec" type="button" class="link-btn" @click="relockFull">Use {{ fmtLen(adjSpec.length) }} {{ adjSpec.unit }}</button>
+                          </div>
+
+                          <template v-if="adjFullLocked">
+                            <div class="adj-tile-value">{{ fmtLen(adjFull) }}<span>{{ adjUnit }}</span></div>
+                            <p class="adj-tile-sub">
+                              From size {{ adjSpec.source }}<template v-if="adjUnitPrice != null"> · ₱{{ adjUnitPrice.toFixed(2) }}/{{ adjUnit }}</template>
+                              <button type="button" class="link-btn link-btn--inline" @click="unlockFull">Change</button>
+                            </p>
+                          </template>
+                          <template v-else>
+                            <div class="adj-input-wrap">
+                              <input id="adj-full" ref="adjFullInput" v-model.number="adjFull" class="adj-input adj-input--sm" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 8" aria-label="Full piece length" />
+                              <span class="adj-suffix">{{ adjUnit }}</span>
+                            </div>
+                            <div class="svc-chips" role="group" aria-label="Length unit">
+                              <button v-for="u in CUT_UNITS" :key="u" type="button" class="svc-chip" :class="{ 'svc-chip--on': adjUnit === u }" @click="adjUnit = u">{{ u }}</button>
+                            </div>
+                            <p class="adj-tile-sub">{{ adjSpec ? 'Entered by hand.' : "No length found in this size. Enter it once." }}</p>
+                          </template>
+                        </div>
+
+                        <!-- Length sold: the only thing the cashier types -->
+                        <div class="adj-tile adj-tile--input" :class="{ 'is-invalid': adjSoldError }">
+                          <div class="adj-tile-top">
+                            <label class="adj-label" for="adj-sold">Length to sell</label>
+                          </div>
+                          <div class="adj-input-wrap">
+                            <input
+                              id="adj-sold" ref="adjSoldInput" v-model.number="adjSold" class="adj-input"
+                              type="number" min="0" step="any" inputmode="decimal"
+                              :placeholder="adjFull > 0 ? `up to ${fmtLen(adjFull)}` : 'e.g. 3'"
+                              @keydown.enter.prevent="applyAdjustment"
+                            />
+                            <span class="adj-suffix">{{ adjUnit }}</span>
+                          </div>
+                          <p class="adj-tile-sub">Type only what the customer needs.</p>
+                        </div>
+                      </div>
+
+                      <div v-if="adjQuick.length" class="adj-quick">
+                        <span class="adj-quick-label">Quick</span>
+                        <div class="svc-chips" role="group" aria-label="Quick lengths">
+                          <button v-for="q in adjQuick" :key="q.label" type="button" class="svc-chip" :class="{ 'svc-chip--on': Number(adjSold) === q.value }" @click="pickSold(q.value)">{{ q.label }}</button>
+                        </div>
+                      </div>
+
+                      <p v-if="adjSoldError" class="modal-error"><i class="fa-solid fa-circle-exclamation"></i> {{ adjSoldError }}</p>
+
+                      <!-- Visual split of the piece -->
+                      <template v-if="adjBar">
+                        <div class="piece-bar" role="img" :aria-label="`${fmtLen(adjSold)} ${adjUnit} sold, ${fmtLen(adjRemainder)} ${adjUnit} left over`">
+                          <div class="piece-bar-sold" :style="{ width: adjBar.soldPct + '%' }">Sold {{ fmtLen(adjSold) }} {{ adjUnit }}</div>
+                          <div class="piece-bar-left">Left {{ fmtLen(adjRemainder) }} {{ adjUnit }}</div>
+                        </div>
+                        <div class="adj-remainder">
+                          <i class="fa-solid fa-circle-info"></i>
+                          <span>
+                            <strong>{{ fmtLen(adjRemainder) }} {{ adjUnit }}</strong> left over{{ adjItem.qty > 1 ? ' from each piece' : '' }}, saved under Leftovers for later sale.
+                          </span>
+                        </div>
+                      </template>
+                    </div>
+                  </section>
+                </template>
+
+                <!-- CUSTOM PRICE REASON -->
+                <section v-else class="adj-card">
+                  <header class="adj-card-head">
+                    <h4 class="adj-card-title">Reason{{ adjItem.remnantId ? ' (optional)' : '' }}</h4>
+                  </header>
+                  <div class="adj-card-body">
+                    <div class="cut-field">
+                      <label for="adj-reason" class="sr-only">Reason for the price change</label>
+                      <input id="adj-reason" v-model="adjReason" type="text" maxlength="80" placeholder="Why is the price changing? e.g. Negotiated" autocomplete="off" />
+                    </div>
+                    <div class="svc-chips">
+                      <button v-for="r in PRICE_REASONS" :key="r" type="button" class="svc-chip" :class="{ 'svc-chip--on': adjReason === r }" @click="adjReason = r">{{ r }}</button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <!-- RIGHT COLUMN -->
+              <div class="adj-col">
+
+                <!-- Pricing -->
+                <section class="adj-card">
+                  <header class="adj-card-head">
+                    <h4 class="adj-card-title"><label for="adj-price">{{ adjMode === 'cut' ? 'Price for this cut' : 'New price' }} <span class="adj-card-unit">(₱ each)</span></label></h4>
+                    <div class="adj-card-actions">
+                      <button v-if="adjMode === 'cut' && adjSuggested != null && Number(adjPrice) !== adjSuggested" type="button" class="link-btn" @click="adjPrice = adjSuggested; adjTouched = false">
+                        Use suggested ₱{{ adjSuggested.toFixed(2) }}
+                      </button>
+                      <button
+                        v-if="adjItem.remnantId && adjItem.baseline != null && Number(adjPrice) !== adjItem.baseline"
+                        type="button" class="link-btn"
+                        @click="adjPrice = adjItem.baseline"
+                      >
+                        Use baseline ₱{{ adjItem.baseline.toFixed(2) }}
+                      </button>
+                    </div>
+                  </header>
+                  <div class="adj-card-body">
+                    <div class="amount-input-wrap">
+                      <span class="amount-prefix">₱</span>
+                      <input id="adj-price" v-model.number="adjPrice" type="number" min="0" step="0.01" class="amount-input adj-price-input" placeholder="0.00" @input="adjTouched = true" @keydown.enter.prevent="applyAdjustment" />
+                    </div>
+                    <p v-if="adjMode === 'cut' && adjSuggested != null" class="adj-note">
+                      Suggested = the same share of the list price ({{ Math.round((Number(adjSold) / Number(adjFull)) * 100) }}% of ₱{{ adjListPrice.toFixed(2) }}). Change it if you charge extra for cutting.
+                    </p>
+                    <p v-else-if="adjMode === 'cut'" class="adj-note">The price fills in automatically once you enter the length to sell.</p>
+                    <p v-if="adjItem.remnantId && adjItem.baseline != null" class="adj-note">
+                      Baseline = list price of the uncut piece minus what the cut was sold for. You can change it.
+                    </p>
+                  </div>
+                </section>
+
+                <!-- Summary -->
+                <section class="adj-card">
+                  <header class="adj-card-head">
+                    <h4 class="adj-card-title">Summary</h4>
+                    <div class="adj-card-actions">
+                      <button v-if="adjItem.origPrice != null" type="button" class="link-btn" @click="resetAdjustment"><i class="fa-solid fa-rotate-left"></i> Reset to list price</button>
+                    </div>
+                  </header>
+                  <div class="adj-card-body adj-rows">
+                    <template v-if="adjMode === 'cut'">
+                      <div class="adj-row"><span>Full piece list price</span><span>₱{{ adjListPrice.toFixed(2) }}</span></div>
+                      <div class="adj-row"><span>Length sold</span><span>{{ adjSuggested != null ? `${fmtLen(adjSold)} of ${fmtLen(adjFull)} ${adjUnit}` : '—' }}</span></div>
+                      <div class="adj-row"><span>Price for this cut</span><span>₱{{ adjPriceNum.toFixed(2) }}</span></div>
+                    </template>
+                    <template v-else>
+                      <div class="adj-row"><span>{{ adjItem.remnantId ? 'Baseline price' : 'List price' }}</span><span>₱{{ adjListPrice.toFixed(2) }}</span></div>
+                      <div class="adj-row"><span>New price</span><span>₱{{ adjPriceNum.toFixed(2) }}</span></div>
+                      <div class="adj-row" :class="adjDiff < 0 ? 'is-down' : adjDiff > 0 ? 'is-up' : ''">
+                        <span>Change</span>
+                        <span>{{ adjDiff === 0 ? 'No change' : `${adjDiff > 0 ? '+' : '−'}₱${Math.abs(adjDiff).toFixed(2)} (${adjDiff > 0 ? '+' : '−'}${Math.abs(adjDiffPct)}%)` }}</span>
+                      </div>
+                    </template>
+                    <div class="adj-row"><span>Quantity</span><span>{{ adjItem.qty }} {{ adjMode === 'cut' ? 'cut' : 'pc' }}{{ adjItem.qty === 1 ? '' : 's' }}</span></div>
+                  </div>
+                </section>
+              </div>
             </div>
 
             <p v-if="adjError" class="modal-error"><i class="fa-solid fa-circle-exclamation"></i> {{ adjError }}</p>
           </div>
 
-          <div class="modal-footer">
-            <button v-if="adjItem.origPrice != null" type="button" class="link-btn adj-reset" @click="resetAdjustment">Reset to list price</button>
-            <button class="modal-cancel" @click="closeAdjModal">Cancel</button>
-            <button class="modal-confirm" @click="applyAdjustment"><i class="fa-solid fa-check"></i> Apply</button>
+          <div class="modal-footer modal-footer--summary">
+            <div class="modal-summary">
+              <span class="modal-summary-meta">Line total</span>
+              <strong class="modal-summary-total">₱{{ (adjPriceNum * adjItem.qty).toFixed(2) }}</strong>
+            </div>
+            <button class="modal-cancel modal-cancel--fit" @click="closeAdjModal">Cancel</button>
+            <button class="modal-confirm modal-confirm--fit" @click="applyAdjustment" :disabled="adjMode === 'cut' && !adjCutReady"><i class="fa-solid fa-check"></i> Apply changes</button>
           </div>
         </div>
       </div>
     </transition>
     </Teleport>
 
-    <!-- ══ EXTRA SERVICE MODAL ══ -->
+    <!-- ══ EXTRA SERVICE MODAL ══
+         Wide two-column layout that fits without scrolling:
+           left  = the service and its fee
+           right = the worker and their share
+           bottom = who gets what -->
     <Teleport to="body">
     <transition name="modal-fade">
       <div v-if="showServiceModal" class="modal-backdrop" @click.self="closeServiceModal" @keydown.esc="closeServiceModal">
@@ -845,52 +991,79 @@
             <button class="modal-close" @click="closeServiceModal" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
-          <div class="modal-body">
-            <div class="modal-section">
-              <div class="cut-field">
-                <label for="svc-name">Service</label>
-                <input id="svc-name" ref="svcNameInput" v-model="svcName" type="text" maxlength="80" placeholder="e.g. Roof installation" autocomplete="off" />
-              </div>
-              <div class="svc-chips">
-                <button v-for="p in SERVICE_PRESETS" :key="p" type="button" class="svc-chip" @click="svcName = p">{{ p }}</button>
-              </div>
-            </div>
+          <div class="modal-body svc-body">
+            <div class="svc-grid">
 
-            <div class="cut-grid">
-              <div class="cut-field">
-                <label for="svc-fee">Service fee charged (₱)</label>
-                <input id="svc-fee" v-model.number="svcFee" type="number" min="0" step="0.01" placeholder="0.00" @keydown.enter.prevent="saveService" />
-              </div>
-              <div class="cut-field">
-                <label for="svc-worker">Worker</label>
-                <input id="svc-worker" v-model="svcWorker" type="text" maxlength="60" placeholder="Who did the work?" autocomplete="off" @keydown.enter.prevent="saveService" />
-              </div>
-            </div>
+              <!-- LEFT: service + fee -->
+              <div class="svc-col">
+                <h4 class="svc-sec-title">Service</h4>
 
-            <div class="modal-section">
-              <div class="size-toolbar">
-                <p class="modal-section-label">Worker's share</p>
-                <div class="svc-seg" role="group" aria-label="Share type">
-                  <button type="button" :class="{ 'is-active': svcShareType === '%' }" @click="setShareType('%')">%</button>
-                  <button type="button" :class="{ 'is-active': svcShareType === 'PHP' }" @click="setShareType('PHP')">₱</button>
+                <div class="cut-field" :class="{ 'has-error': svcFieldErr.name }">
+                  <label for="svc-name">Service <span class="req">*</span></label>
+                  <input id="svc-name" ref="svcNameInput" v-model="svcName" type="text" maxlength="80" placeholder="e.g. Roof installation" autocomplete="off" :aria-invalid="!!svcFieldErr.name" @keydown.enter.prevent="saveService" />
+                  <p v-if="svcFieldErr.name" class="svc-field-error"><i class="fa-solid fa-circle-exclamation"></i> {{ svcFieldErr.name }}</p>
+                </div>
+                <div class="svc-chips">
+                  <button v-for="p in SERVICE_PRESETS" :key="p" type="button" class="svc-chip" :class="{ 'svc-chip--on': svcName === p }" @click="svcName = p">{{ p }}</button>
+                </div>
+
+                <div class="cut-field" :class="{ 'has-error': svcFieldErr.fee }">
+                  <label for="svc-fee">Service fee charged (₱) <span class="req">*</span></label>
+                  <input id="svc-fee" v-model.number="svcFee" type="number" min="0" step="0.01" placeholder="0.00" :aria-invalid="!!svcFieldErr.fee" @keydown.enter.prevent="saveService" />
+                  <p v-if="svcFieldErr.fee" class="svc-field-error"><i class="fa-solid fa-circle-exclamation"></i> {{ svcFieldErr.fee }}</p>
                 </div>
               </div>
-              <div class="svc-share-row">
-                <input v-model.number="svcShareValue" type="number" min="0" :max="svcShareType === '%' ? 100 : undefined" class="svc-share-input" aria-label="Worker share" @keydown.enter.prevent="saveService" />
-                <div v-if="svcShareType === '%'" class="svc-chips">
-                  <button v-for="n in [50, 60, 70, 80]" :key="n" type="button" class="svc-chip" :class="{ 'svc-chip--on': Number(svcShareValue) === n }" @click="svcShareValue = n">{{ n }}%</button>
+
+              <!-- RIGHT: worker + share -->
+              <div class="svc-col">
+                <h4 class="svc-sec-title">Worker</h4>
+
+                <div class="cut-field" :class="{ 'has-error': svcFieldErr.worker }">
+                  <label for="svc-worker">Worker</label>
+                  <input id="svc-worker" v-model="svcWorker" type="text" maxlength="60" placeholder="Who did the work?" autocomplete="off" :aria-invalid="!!svcFieldErr.worker" @keydown.enter.prevent="saveService" />
+                  <p v-if="svcFieldErr.worker" class="svc-field-error"><i class="fa-solid fa-circle-exclamation"></i> {{ svcFieldErr.worker }}</p>
+                </div>
+
+                <div class="svc-share">
+                  <div class="size-toolbar">
+                    <p class="modal-section-label">Worker's share</p>
+                    <div class="svc-seg" role="group" aria-label="Share type">
+                      <button type="button" :class="{ 'is-active': svcShareType === '%' }" @click="setShareType('%')">%</button>
+                      <button type="button" :class="{ 'is-active': svcShareType === 'PHP' }" @click="setShareType('PHP')">₱</button>
+                    </div>
+                  </div>
+                  <div class="svc-share-row">
+                    <input id="svc-share" v-model.number="svcShareValue" type="number" min="0" :max="svcShareType === '%' ? 100 : undefined" class="svc-share-input" :class="{ 'has-error': svcFieldErr.share }" aria-label="Worker share" :aria-invalid="!!svcFieldErr.share" @keydown.enter.prevent="saveService" />
+                    <div v-if="svcShareType === '%'" class="svc-chips">
+                      <button v-for="n in [50, 60, 70, 80]" :key="n" type="button" class="svc-chip" :class="{ 'svc-chip--on': Number(svcShareValue) === n }" @click="svcShareValue = n">{{ n }}%</button>
+                    </div>
+                  </div>
+                  <p v-if="svcFieldErr.share" class="svc-field-error"><i class="fa-solid fa-circle-exclamation"></i> {{ svcFieldErr.share }}</p>
                 </div>
               </div>
             </div>
 
-            <div class="pay-summary">
-              <div class="pay-summary-row"><span>Customer pays</span><span>₱{{ svcSplit.fee.toFixed(2) }}</span></div>
-              <div class="pay-summary-row"><span>Worker{{ svcWorker.trim() ? ` (${svcWorker.trim()})` : '' }}</span><span>− ₱{{ svcSplit.worker.toFixed(2) }}</span></div>
-              <div class="pay-summary-total"><span>Shop keeps</span><span class="svc-owner-val">₱{{ svcSplit.owner.toFixed(2) }}</span></div>
+            <!-- Who gets what -->
+            <div class="svc-stats">
+              <div class="svc-stat">
+                <span class="svc-stat-label">Customer pays</span>
+                <strong class="svc-stat-value">₱{{ svcSplit.fee.toFixed(2) }}</strong>
+              </div>
+              <div class="svc-stat">
+                <span class="svc-stat-label">Worker{{ svcWorker.trim() ? ` (${svcWorker.trim()})` : '' }}</span>
+                <strong class="svc-stat-value">− ₱{{ svcSplit.worker.toFixed(2) }}</strong>
+              </div>
+              <div class="svc-stat svc-stat--shop">
+                <span class="svc-stat-label">Shop keeps</span>
+                <strong class="svc-stat-value">₱{{ svcSplit.owner.toFixed(2) }}</strong>
+              </div>
             </div>
             <p class="svc-note">The customer's receipt shows the full fee. Only the shop's share counts toward sales and profit.</p>
+          </div>
 
-            <p v-if="svcError" class="modal-error"><i class="fa-solid fa-circle-exclamation"></i> {{ svcError }}</p>
+          <div v-if="svcError" class="svc-alert" role="alert">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span>{{ svcError }}</span>
           </div>
 
           <div class="modal-footer">
@@ -1036,13 +1209,15 @@ const CAMERA_FORMATS = [
 // Out of Stock last.
 const STOCK_SORT_PRIORITY = { ok: 0, low: 1, oos: 2 }
 
-// ── LOW-STOCK RULES (same as the server: StockService) ──
+// ── LOW-STOCK RULES (same thresholds as the server: StockService) ──
 // A size is "low" at or below its own ReorderLevel, or at or below 5 when
-// no reorder level was set.
+// no reorder level was set. LOW is only a WARNING — it is NOT the same as
+// out of stock.
 const LOW_STOCK_DEFAULT = 5
+// false = low-stock sizes show a warning badge but CAN STILL BE SOLD.
+//         Only sizes that are completely out of stock (0 left) are blocked.
 // true  = a LOW size cannot be selected or sold (must be restocked first).
-// false = low sizes show a warning badge but can still be sold.
-const BLOCK_LOW_STOCK_SALES = true
+const BLOCK_LOW_STOCK_SALES = false
 
 // ── EXTRA SERVICES (labour) ──
 // The customer pays the FULL service fee. The worker's share is a pass-through
@@ -1052,7 +1227,10 @@ const BLOCK_LOW_STOCK_SALES = true
 // ── CUT PIECES & CUSTOM PRICES ──
 // A cut sells part of ONE whole piece. The whole piece leaves normal stock and the
 // leftover length is recorded as a remnant by the server (not counted as a full piece).
-const CUT_UNITS = ['ft', 'm', 'in']
+// The units are what the cashier can pick by hand when a size name has no readable
+// length. Detected units (ft / in / m / cm / mm) come from the size label itself.
+// NOTE: if your server validates `cut.unit`, make sure it accepts every unit listed here.
+const CUT_UNITS = ['ft', 'm', 'in', 'cm', 'mm']
 const PRICE_REASONS = ['Negotiated', 'Bulk deal', 'Damaged', 'Remnant']
 const REQUIRE_PRICE_REASON = true       // a custom price must say why (not required for leftover pieces)
 const SERVICE_PRESETS = ['Installation', 'Cutting', 'Welding', 'Delivery']
@@ -1138,6 +1316,40 @@ function compareSize(a, b) {
   return String(a.label ?? '').localeCompare(String(b.label ?? ''), undefined, { numeric: true, sensitivity: 'base' })
 }
 
+/* ── Length + unit detection from a size label ──
+   "8 ft" → 8 ft · "2.5m" → 2.5 m · "1/2 in" → 0.5 in · "2 1/2 in" → 2.5 in
+   "10'" → 10 ft · "0.4mm x 8ft" → 8 ft (a bare thickness in mm is only used
+   when nothing else is found) · "20 in × 50 mm" → 20 in.
+   Returns { length, unit, text } or null when the label has no length. */
+const UNIT_ALIASES = {
+  ft: 'ft', feet: 'ft', foot: 'ft', "'": 'ft',
+  in: 'in', inch: 'in', inches: 'in', '"': 'in',
+  m: 'm', mtr: 'm', mtrs: 'm', meter: 'm', meters: 'm', metre: 'm', metres: 'm',
+  cm: 'cm', mm: 'mm',
+}
+const LENGTH_PATTERN = /(\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?)\s*(feet|foot|ft|inches|inch|in|meters|meter|metres|metre|mtrs|mtr|cm|mm|m|'|")(?![a-z])/gi
+function parseQuantity(s) {
+  const t = String(s).trim().replace(',', '.')
+  let m = t.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/)
+  if (m) return Number(m[1]) + Number(m[2]) / Number(m[3])
+  m = t.match(/^(\d+)\s*\/\s*(\d+)$/)
+  if (m) return Number(m[1]) / Number(m[2])
+  return Number(t)
+}
+function parseLengthSpec(text) {
+  const re = new RegExp(LENGTH_PATTERN.source, 'gi')
+  const src = String(text ?? '')
+  const found = []
+  let m
+  while ((m = re.exec(src))) {
+    const length = parseQuantity(m[1])
+    const unit = UNIT_ALIASES[m[2].toLowerCase()]
+    if (length > 0 && unit) found.push({ length: round2(length), unit, text: m[0].trim() })
+  }
+  if (!found.length) return null
+  return found.find(f => f.unit !== 'mm') || found[0]
+}
+
 /* ────────────────────────────────────────────────────────────
    STATE
 ──────────────────────────────────────────────────────────── */
@@ -1186,6 +1398,7 @@ const svcWorker         = ref('')
 const svcShareType      = ref('%')    // '%' | 'PHP'
 const svcShareValue     = ref(SERVICE_DEFAULT_WORKER_PCT)
 const svcError          = ref('')
+const svcFieldErr       = ref({})     // { name, fee, share, worker } — message per invalid field
 const svcNameInput      = ref(null)
 
 // Cut piece / custom price (edits one cart line)
@@ -1200,6 +1413,9 @@ const adjReason    = ref('')
 const adjTouched   = ref(false)        // true once the cashier typed their own price
 const adjError     = ref('')
 const adjFullInput = ref(null)
+const adjSoldInput = ref(null)
+const adjSpec       = ref(null)        // { length, unit, source } read from the size label, or null
+const adjFullLocked = ref(false)       // true = full length + unit come from the size (not typed)
 const isProcessing  = ref(false)
 const checkoutError = ref('')
 const modalError    = ref('')
@@ -1360,8 +1576,11 @@ function resetFilters() {
      oos : nothing left (stock minus what is already in the cart is 0)
      low : stock is at/below its reorder level (or 5 if none was set)
      ok  : healthy
-   A size is SELLABLE when it is ok, or low while BLOCK_LOW_STOCK_SALES
-   is false. Unsellable sizes are disabled in the size picker.
+   LOW and OUT OF STOCK are different things:
+     - low  = warning only. The size can still be sold while any units remain
+              (unless BLOCK_LOW_STOCK_SALES is turned on).
+     - oos  = nothing left. The size is disabled in the size picker and the
+              product card is greyed out.
 
    Leftover (remnant) lines are NOT part of this: they come out of
    product_remnants on the server, never out of whole-piece stock.
@@ -1391,9 +1610,13 @@ function variantStatus(product, v, excludeKey = null) {
   if (variantAvailable(product, v, excludeKey) <= 0) return 'oos'
   return v.stock <= variantThreshold(v) ? 'low' : 'ok'
 }
+/** A size can be sold when it is in stock ('ok'), or 'low' (as long as
+ *  low-stock sales are not blocked). Only 'oos' is never sellable. */
 function isVariantSellable(product, v, excludeKey = null) {
   const s = variantStatus(product, v, excludeKey)
-  return s === 'ok' || (s === 'low' && !BLOCK_LOW_STOCK_SALES)
+  if (s === 'oos') return false
+  if (s === 'low') return !BLOCK_LOW_STOCK_SALES
+  return true
 }
 function variantStockText(product, v, excludeKey = null) {
   const s = variantStatus(product, v, excludeKey)
@@ -1417,10 +1640,11 @@ function canAddProduct(p) {
   return hasVariants(p) ? sellableVariants(p).length > 0 : availableFor(p) > 0
 }
 /** Status key ('ok' | 'low' | 'oos') shared by the badge AND the grid sort.
- *  - no sellable size and nothing in stock  → oos
- *  - no sellable size but some sizes are low → low  (card is disabled)
- *  - some sizes sellable but others low      → ok
- *  - every sellable size is low (low allowed) → low */
+ *  - nothing left to sell                      → oos
+ *  - some sizes healthy (others may be low)    → ok
+ *  - every sellable size is low                → low (still sellable)
+ *  When low-stock sales are blocked, a product whose only remaining
+ *  stock is in low sizes shows 'low' but its card is disabled. */
 function stockStatus(p) {
   if (hasVariants(p)) {
     const sellable = sellableVariants(p)
@@ -1696,7 +1920,10 @@ async function lookupAndHandle(code) {
 }
 function handleFoundProduct(product) {
   if (!canAddProduct(product)) {
-    const lowOnly = hasVariants(product) && product.variants.some(v => variantAvailable(product, v) > 0)
+    // Only reachable when the product is out of stock — or, when
+    // BLOCK_LOW_STOCK_SALES is on, when only low sizes remain.
+    const lowOnly = BLOCK_LOW_STOCK_SALES && hasVariants(product) &&
+      product.variants.some(v => variantAvailable(product, v) > 0)
     showScannerMessage(
       lowOnly
         ? `${product.name} is low on stock and cannot be sold. Restock it first.`
@@ -2052,6 +2279,7 @@ const cartCount          = computed(() => cart.value.length + services.value.len
 
 function openServiceModal(service = null) {
   svcError.value = ''
+  svcFieldErr.value = {}
   if (service) {
     editingServiceId.value = service.id
     svcName.value = service.name
@@ -2073,6 +2301,7 @@ function openServiceModal(service = null) {
 function closeServiceModal() {
   showServiceModal.value = false
   svcError.value = ''
+  svcFieldErr.value = {}
   editingServiceId.value = null
 }
 function setShareType(type) {
@@ -2080,16 +2309,35 @@ function setShareType(type) {
   svcShareType.value = type
   svcShareValue.value = type === '%' ? SERVICE_DEFAULT_WORKER_PCT : 0
 }
+const SVC_FIELD_LABELS = { name: 'service name', fee: 'service fee', share: "worker's share", worker: 'worker' }
+const SVC_FIELD_IDS    = { name: 'svc-name', fee: 'svc-fee', share: 'svc-share', worker: 'svc-worker' }
+/** Checks every field, shows a message under each bad one plus a banner above the buttons.
+ *  Returns the keys of the invalid fields (empty = all good). */
+function validateService() {
+  const errs = {}
+  const { fee, worker } = svcSplit.value
+  if (!svcName.value.trim()) errs.name = 'Enter the service name.'
+  if (!(fee > 0)) errs.fee = 'Enter a service fee greater than zero.'
+  else if (svcShareType.value === 'PHP' && Number(svcShareValue.value) > fee) errs.share = "Worker's share can't be more than the service fee."
+  if (worker > 0 && !svcWorker.value.trim()) errs.worker = 'Enter the worker who earns this share.'
+  svcFieldErr.value = errs
+  const keys = Object.keys(errs)
+  svcError.value = !keys.length ? ''
+    : keys.length === 1 ? errs[keys[0]]
+    : `Please fix ${keys.length} things before adding: ${keys.map(k => SVC_FIELD_LABELS[k]).join(', ')}.`
+  return keys
+}
+// Once a message is showing, keep it in step with what the cashier types (it disappears as they fix it).
+watch([svcName, svcFee, svcWorker, svcShareValue, svcShareType], () => { if (svcError.value) validateService() })
+
 function saveService() {
-  svcError.value = ''
+  const bad = validateService()
+  if (bad.length) {
+    nextTick(() => document.getElementById(SVC_FIELD_IDS[bad[0]])?.focus())
+    return
+  }
   const name = svcName.value.trim()
   const { fee, worker, owner } = svcSplit.value
-  if (!name) { svcError.value = 'Enter the service name.'; return }
-  if (fee <= 0) { svcError.value = 'Service fee must be greater than zero.'; return }
-  if (svcShareType.value === 'PHP' && Number(svcShareValue.value) > fee) {
-    svcError.value = "Worker's share cannot be more than the service fee."; return
-  }
-  if (worker > 0 && !svcWorker.value.trim()) { svcError.value = 'Enter the worker who earns this share.'; return }
 
   const entry = {
     id: editingServiceId.value ?? `svc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -2114,11 +2362,45 @@ function removeService(id) { services.value = services.value.filter(x => x.id !=
    item.priceReason, item.cut = { fullLength, soldLength, unit } | null
    A cut line always consumes WHOLE pieces from stock (qty = pieces cut).
    Leftover lines (item.remnantId) can only get a custom price.
+
+   AUTOMATIC FULL LENGTH + UNIT
+   The size the cashier already chose ("8 ft", "2.5 m" …) tells us the full
+   piece length and its unit, so the cashier only types the length to sell.
+   When the size name has no readable length, the full length is typed once
+   by hand (with a unit picker).
 ──────────────────────────────────────────────────────────── */
 function fmtLen(n) { return String(round2(n)) }
 function lineName(i) {
   return i.cut ? `${i.name} (cut ${fmtLen(i.cut.soldLength)} ${i.cut.unit} of ${fmtLen(i.cut.fullLength)} ${i.cut.unit})` : i.name
 }
+/** Size labels that mean "no specification" (the default size every plain product gets). */
+const NO_SPEC_LABELS = new Set(['', 'standard', 'default', 'regular', 'std', 'none', 'n/a', 'na', '-', '—', 'selected size'])
+const hasSpecLabel = label => !NO_SPEC_LABELS.has(String(label ?? '').trim().toLowerCase())
+/** "Adjust line" (cut piece / custom price) is only offered for lines that carry a real
+ *  specification, e.g. "16 in × 40 mm" or "8 ft". Plain products and products whose only
+ *  size is "Standard" never show it. Exceptions that keep the button:
+ *   - leftover lines (they may need a price set)
+ *   - lines that were already adjusted (so the change can still be edited or reset) */
+function canAdjustLine(item) {
+  if (!item) return false
+  if (item.remnantId || item.origPrice != null) return true
+  if (item.variantId == null) return false
+  const product = products.value.find(p => p.id === item.id)
+  const variant = product?.variants?.find(v => v.id === item.variantId)
+  return hasSpecLabel(variant?.label)
+}
+
+/** Reads { length, unit, source } from the size (variant) label of a cart line. */
+function specForItem(item) {
+  if (!item || item.remnantId) return null
+  const product = products.value.find(p => p.id === item.id)
+  const variant = product?.variants?.find(v => v.id === item.variantId)
+  const label = variant?.label
+  if (!label) return null
+  const spec = parseLengthSpec(label)
+  return spec ? { length: spec.length, unit: spec.unit, source: label } : null
+}
+
 const adjItem      = computed(() => cart.value.find(i => i.key === adjKey.value) || null)
 const adjIsSqm     = computed(() => adjItem.value?.pricingType === 'sqm')
 const adjListPrice = computed(() => adjItem.value ? (adjItem.value.origPrice ?? adjItem.value.price) : 0)
@@ -2128,17 +2410,94 @@ const adjSuggested = computed(() => {
   return round2(adjListPrice.value * sd / f)
 })
 const adjRemainder = computed(() => adjSuggested.value == null ? null : round2(Number(adjFull.value) - Number(adjSold.value)))
+/** True once a valid full length + length sold are set (enables Apply in cut mode). */
+const adjCutReady  = computed(() => adjSuggested.value != null)
+/** List price per unit of length, e.g. "₱62.50 per ft". */
+const adjUnitPrice = computed(() => {
+  const f = Number(adjFull.value)
+  return f > 0 && adjListPrice.value > 0 ? round2(adjListPrice.value / f) : null
+})
+/** The size (variant) label of the line being adjusted, shown as a chip in the header. */
+const adjSizeLabel = computed(() => {
+  const item = adjItem.value
+  if (!item || item.remnantId) return ''
+  const product = products.value.find(p => p.id === item.id)
+  return product?.variants?.find(v => v.id === item.variantId)?.label || ''
+})
+const adjPriceNum  = computed(() => round2(Number(adjPrice.value) || 0))
+const adjDiff      = computed(() => round2(adjPriceNum.value - adjListPrice.value))
+const adjDiffPct   = computed(() => adjListPrice.value > 0 ? Math.round((adjDiff.value / adjListPrice.value) * 100) : 0)
+/** Live message under the "Length to sell" field. */
+const adjSoldError = computed(() => {
+  const f = Number(adjFull.value), sd = Number(adjSold.value)
+  if (!(sd > 0)) return ''
+  if (f > 0 && sd >= f) return `Must be shorter than the full ${fmtLen(f)} ${adjUnit.value} piece. Sell a whole piece as a normal item.`
+  return ''
+})
+/** One-tap lengths: quarter, half and three-quarters of the full piece. */
+const adjQuick = computed(() => {
+  const f = Number(adjFull.value)
+  if (!(f > 0)) return []
+  const seen = new Set()
+  return [0.25, 0.5, 0.75]
+    .map(r => round2(f * r))
+    .filter(v => v > 0 && v < f && !seen.has(v) && seen.add(v))
+    .map(v => ({ value: v, label: `${fmtLen(v)} ${adjUnit.value}` }))
+})
+/** Proportions for the sold / leftover bar (kept readable at the extremes). */
+const adjBar = computed(() => {
+  if (adjSuggested.value == null) return null
+  const pct = (Number(adjSold.value) / Number(adjFull.value)) * 100
+  return { soldPct: Math.min(Math.max(pct, 22), 78) }
+})
 
 // Keep the price following the lengths until the cashier types their own price.
 watch([adjFull, adjSold], () => {
   if (adjMode.value === 'cut' && !adjTouched.value && adjSuggested.value != null) adjPrice.value = adjSuggested.value
 })
 
+function pickSold(v) {
+  adjSold.value = v
+  nextTick(() => adjSoldInput.value?.focus())
+}
+function unlockFull() {
+  adjFullLocked.value = false
+  nextTick(() => adjFullInput.value?.focus())
+}
+function relockFull() {
+  if (!adjSpec.value) return
+  adjFull.value = adjSpec.value.length
+  adjUnit.value = adjSpec.value.unit
+  adjFullLocked.value = true
+  nextTick(() => adjSoldInput.value?.focus())
+}
+function focusAdjField() {
+  if (!showAdjModal.value || adjMode.value !== 'cut') return
+  const el = adjFullLocked.value ? adjSoldInput.value : adjFullInput.value
+  el?.focus()
+}
+
 function openAdjustModal(item) {
+  if (!canAdjustLine(item)) return
   adjKey.value = item.key
   adjError.value = ''
   adjTouched.value = false
   adjReason.value = item.cut ? '' : (item.priceReason || '')
+
+  // Full length + unit straight from the chosen size.
+  const spec = specForItem(item)
+  adjSpec.value = spec
+  adjSold.value = null
+  if (spec) {
+    adjFull.value = spec.length
+    adjUnit.value = spec.unit
+    adjFullLocked.value = true
+  } else {
+    adjFull.value = null
+    adjUnit.value = 'ft'
+    adjFullLocked.value = false
+  }
+
   if (item.cut) {
     adjMode.value = 'cut'
     adjFull.value = item.cut.fullLength
@@ -2146,17 +2505,18 @@ function openAdjustModal(item) {
     adjUnit.value = item.cut.unit
     adjPrice.value = item.price
     adjTouched.value = true
+    // Stay on "auto" only when the saved cut still matches the size.
+    adjFullLocked.value = !!spec && spec.unit === item.cut.unit && spec.length === item.cut.fullLength
   } else if (item.origPrice != null || item.pricingType === 'sqm' || item.remnantId) {
     adjMode.value = 'price'
     adjPrice.value = item.price > 0 ? item.price : null
   } else {
     adjMode.value = 'cut'
-    adjFull.value = null
-    adjSold.value = null
     adjPrice.value = null
   }
   showAdjModal.value = true
-  nextTick(() => adjFullInput.value?.focus())
+  nextTick(focusAdjField)
+  setTimeout(focusAdjField, 80)
 }
 function closeAdjModal() { showAdjModal.value = false; adjError.value = ''; adjKey.value = null }
 function setAdjMode(mode) {
@@ -2166,7 +2526,10 @@ function setAdjMode(mode) {
   adjTouched.value = false
   const item = adjItem.value
   if (mode === 'price') adjPrice.value = item ? item.price : null
-  else adjPrice.value = adjSuggested.value
+  else {
+    adjPrice.value = adjSuggested.value
+    nextTick(focusAdjField)
+  }
 }
 /** Removes the adjustment and merges back into the normal line when one exists. */
 function clearLineAdjustment(item) {
@@ -2190,20 +2553,23 @@ function applyAdjustment() {
   if (!item) return
   adjError.value = ''
   const price = round2(Number(adjPrice.value) || 0)
-  if (price <= 0) { adjError.value = 'Enter a price greater than zero.'; return }
 
   let cut = null
   let reason = adjReason.value.trim()
   if (adjMode.value === 'cut') {
     const f = Number(adjFull.value), sd = Number(adjSold.value)
     if (!(f > 0)) { adjError.value = 'Enter the full piece length.'; return }
-    if (!(sd > 0)) { adjError.value = 'Enter the length sold.'; return }
+    if (!(sd > 0)) { adjError.value = 'Enter the length to sell.'; return }
     if (sd >= f) { adjError.value = 'Length sold must be shorter than the full piece. Sell a whole piece as a normal item.'; return }
+    if (price <= 0) { adjError.value = 'Enter a price greater than zero.'; return }
     cut = { fullLength: round2(f), soldLength: round2(sd), unit: adjUnit.value }
     reason = reason || 'Cut piece'
-  } else if (REQUIRE_PRICE_REASON && !reason && !item.remnantId) {
-    adjError.value = 'Add a reason for the price change.'
-    return
+  } else {
+    if (price <= 0) { adjError.value = 'Enter a price greater than zero.'; return }
+    if (REQUIRE_PRICE_REASON && !reason && !item.remnantId) {
+      adjError.value = 'Add a reason for the price change.'
+      return
+    }
   }
 
   const orig = adjListPrice.value
@@ -2399,8 +2765,10 @@ watch(customerName, (v) => {
    CHECKOUT
 ──────────────────────────────────────────────────────────── */
 /** Per-size stock check: totals the cart PER SIZE and compares each
- *  against that size's own stock. Leftover lines are checked separately
- *  against the leftover piece they come from. */
+ *  against that size's own stock. Only a real shortage (asking for more
+ *  than is on hand) blocks checkout — a LOW size is still sellable.
+ *  Leftover lines are checked separately against the leftover piece
+ *  they come from. */
 function verifyStockBeforeCheckout() {
   // 1) Normal (whole-piece) lines
   const totals = new Map()
@@ -2415,8 +2783,11 @@ function verifyStockBeforeCheckout() {
     const stock = variant ? variant.stock : product.stock
     if (t.qty > stock) {
       const name = variant ? `${product.name} – ${variant.label}` : product.name
-      return `Not enough stock for ${name}. Only ${stock} available.`
+      return stock <= 0
+        ? `${name} is out of stock. Remove it from the cart.`
+        : `Not enough stock for ${name}. Only ${stock} available.`
     }
+    // Low-stock sizes are only blocked when BLOCK_LOW_STOCK_SALES is on.
     if (BLOCK_LOW_STOCK_SALES && variant && variantThreshold(variant) >= variant.stock && variant.stock > 0) {
       return `${product.name} – ${variant.label} is low on stock and cannot be sold. Remove it from the cart.`
     }
@@ -2787,7 +3158,7 @@ async function completePayment() {
 .product-filter-tag button { background: none; border: none; cursor: pointer; color: inherit; font-size: 10px; padding: 0; }
 .meta-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 26px; padding: 0 11px; margin-left: auto;
+  height: 26px; padding: 0 11px;
   border: 1.5px solid var(--p-border-strong); border-radius: 20px;
   background: var(--p-surface); color: var(--p-text-muted);
   font-size: 11.5px; font-weight: 600; font-family: inherit; cursor: pointer;
@@ -2797,6 +3168,15 @@ async function completePayment() {
 .meta-chip:hover { border-color: var(--p-accent-border); color: var(--p-text-primary); }
 .meta-chip--active { background: var(--p-accent-soft); border-color: var(--p-accent-border); color: var(--p-accent); }
 .meta-chip:focus-visible, .scan-btn:focus-visible, .smode-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
+.meta-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+/* Add service: neutral (grey) on purpose, not orange */
+.service-chip:hover { border-color: var(--p-text-muted); color: var(--p-text-primary); background: var(--p-surface-raised); }
+.service-chip-count {
+  min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--p-text-secondary); color: var(--p-surface);
+  font-size: 10px; font-weight: 800;
+}
 
 /* Products / Leftovers tab switch */
 .view-tabs {
@@ -2930,7 +3310,7 @@ async function completePayment() {
    Header (title + customer) and summary stay pinned;
    only .cart-items scrolls. */
 .pos-right {
-  width: 340px; min-width: 340px;
+  width: 352px; min-width: 352px;
   background: var(--p-surface);
   border-left: 1px solid var(--p-border);
   display: flex; flex-direction: column;
@@ -2948,11 +3328,11 @@ async function completePayment() {
 /* Cart header — one compact title row */
 .cart-header {
   position: relative; z-index: 5;  /* customer dropdown floats above the list */
-  padding: 14px 16px 12px; border-bottom: 1px solid var(--p-border);
+  padding: 10px 14px 8px; border-bottom: 1px solid var(--p-border);
   flex-shrink: 0; background: var(--p-surface);
   transition: border-color .22s, background-color .22s;
 }
-.cart-header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.cart-header-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; row-gap: 6px; margin-bottom: 8px; }
 .cart-title-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .cart-header-top-right { display: flex; align-items: center; gap: 6px; }
 .cart-title   { font-size: 16px; font-weight: 800; color: var(--p-text-primary); margin: 0; letter-spacing: -.02em; transition: color .22s; }
@@ -2969,6 +3349,15 @@ async function completePayment() {
   transition: background .15s, color .15s;
 }
 .cart-clear-link:hover { background: rgba(244,63,94,.10); color: var(--p-red); }
+.cart-svc-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  border: 1.5px dashed var(--p-border-strong); border-radius: 8px; background: none; cursor: pointer;
+  color: var(--p-text-muted); font: 600 12px 'Inter', system-ui, sans-serif; white-space: nowrap;
+  transition: border-color .15s, color .15s, background-color .15s;
+}
+.cart-svc-btn i { font-size: 11px; }
+.cart-svc-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); background: var(--p-accent-soft); }
+.cart-svc-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
 .cart-drawer-close {
   width: 30px; height: 30px; border: none; border-radius: 8px;
   background: var(--p-surface-raised); color: var(--p-text-muted);
@@ -2982,7 +3371,7 @@ async function completePayment() {
 .customer-field { flex: 1; position: relative; display: flex; align-items: center; }
 .customer-icon  { position: absolute; left: 11px; color: var(--p-text-faint); font-size: 12px; pointer-events: none; }
 .customer-input {
-  width: 100%; height: 36px;
+  width: 100%; height: 34px;
   border: 1.5px solid var(--p-border-strong); border-radius: 9px;
   padding: 0 12px 0 32px; font-size: 13px; font-family: inherit;
   color: var(--p-text-primary); background: var(--p-surface-sunken);
@@ -2992,7 +3381,7 @@ async function completePayment() {
 .customer-input::placeholder { color: var(--p-text-faint); }
 .customer-input--error { border-color: var(--p-red); box-shadow: 0 0 0 3px rgba(244,63,94,.18); }
 .customer-gen-btn {
-  width: 36px; height: 36px;
+  width: 34px; height: 34px;
   border: 1.5px solid var(--p-border-strong); border-radius: 9px;
   background: var(--p-surface-sunken); color: var(--p-text-muted);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -3002,7 +3391,7 @@ async function completePayment() {
 .customer-gen-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); background: var(--p-accent-soft); }
 
 /* Customer suggestions + repeat badge */
-.customer-row--status { margin-top: 8px; }
+.customer-row--status { margin-top: 6px; }
 .customer-suggest {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
   margin: 0; padding: 4px; list-style: none;
@@ -3075,8 +3464,8 @@ async function completePayment() {
   border-color: var(--p-border-strong);
 }
 .customer-repeat-badge {
-  font-size: 11px; font-weight: 700; white-space: nowrap;
-  padding: 4px 10px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 700; white-space: nowrap;
+  padding: 2px 9px; border-radius: 20px;
   background: var(--p-accent-soft); color: var(--p-accent);
   border: 1px solid var(--p-accent-border);
 }
@@ -3087,8 +3476,8 @@ async function completePayment() {
 
 /* Cart items — the only scrolling area of the right panel */
 .cart-items {
-  flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 10px 12px;
-  display: flex; flex-direction: column; gap: 6px;
+  flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 4px;
   scrollbar-width: thin; scrollbar-color: var(--p-border) transparent;
 }
 .cart-items::-webkit-scrollbar { width: 4px; }
@@ -3103,21 +3492,22 @@ async function completePayment() {
 .cart-empty span { font-size: 12px; }
 
 .cart-item {
-  display: flex; align-items: flex-start; gap: 10px;
+  display: flex; align-items: flex-start; gap: 8px;
   background: var(--p-surface-raised); border: 1px solid var(--p-border);
-  border-radius: 10px; padding: 8px 10px; flex-shrink: 0;
+  border-radius: 10px; padding: 6px 10px; flex-shrink: 0;
   transition: border-color .15s, background-color .22s;
 }
 .cart-item:hover { border-color: var(--p-border-strong); }
 .cart-item-body  { flex: 1; min-width: 0; }
 .cart-item-name {
   font-size: 12.5px; font-weight: 600; color: var(--p-text-primary);
-  margin: 0 0 2px; line-height: 1.3; white-space: normal; overflow: hidden; word-break: break-word;
+  margin: 0 0 3px; line-height: 1.25; white-space: normal; overflow: hidden; word-break: break-word;
   display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
 }
-.cart-item-sub { display: flex; align-items: center; gap: 2px; font-size: 11.5px; color: var(--p-text-faint); height: 22px; }
-.cart-item-sub-price { margin-right: 6px; font-variant-numeric: tabular-nums; }
-.cart-item-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.cart-item-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11.5px; color: var(--p-text-faint); min-height: 22px; }
+.cart-item-sub-price { margin-right: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cart-item-was { margin-left: 4px; font-size: 10.5px; color: var(--p-text-faint); opacity: .8; }
+.cart-item-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
 .cart-item-total { font-size: 13px; font-weight: 700; color: var(--p-text-primary); font-variant-numeric: tabular-nums; }
 .cart-item-qty-mini { display: flex; align-items: center; gap: 4px; }
 .cart-item-qty-btn {
@@ -3140,13 +3530,13 @@ async function completePayment() {
 /* Summary — compact, pinned to the bottom */
 .cart-summary {
   flex-shrink: 0;
-  border-top: 1px solid var(--p-border); padding: 10px 16px 14px;
+  border-top: 1px solid var(--p-border); padding: 6px 14px 12px;
   background: var(--p-surface-raised);
   transition: background-color .22s, border-color .22s;
 }
 .summary-line {
   display: flex; align-items: center; justify-content: space-between;
-  min-height: 26px; font-size: 12.5px; color: var(--p-text-muted);
+  min-height: 24px; font-size: 12px; color: var(--p-text-muted);
 }
 .summary-line > span:first-child { font-weight: 500; }
 .summary-line > span:last-child { font-weight: 600; color: var(--p-text-secondary); font-variant-numeric: tabular-nums; }
@@ -3172,7 +3562,7 @@ async function completePayment() {
 
 .summary-toggle {
   display: flex; align-items: center; justify-content: space-between; width: 100%;
-  padding: 4px 0; border: none; background: none; cursor: pointer;
+  padding: 2px 0; border: none; background: none; cursor: pointer;
   font: inherit; font-size: 12px; font-weight: 500; color: var(--p-text-faint);
   transition: color .15s;
 }
@@ -3184,16 +3574,16 @@ async function completePayment() {
 
 .summary-total {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 0; margin-top: 4px; border-top: 1px solid var(--p-border-strong);
+  padding: 6px 0 8px; margin-top: 2px; border-top: 1px solid var(--p-border-strong);
   transition: border-color .22s;
 }
 .summary-total > span:first-child { font-size: 13px; font-weight: 600; color: var(--p-text-secondary); }
-.summary-total-val { font-size: 20px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.summary-total-val { font-size: 19px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 
 .checkout-error { font-size: 12px; font-weight: 600; color: var(--p-red); margin: 0 0 10px; text-align: center; }
 
 .pay-btn {
-  width: 100%; height: 42px; border: none; border-radius: 11px;
+  width: 100%; height: 40px; border: none; border-radius: 11px;
   background: linear-gradient(135deg, var(--p-accent) 0%, var(--c-accent-deep, #c2410c) 100%);
   color: #fff; font-size: 13.5px; font-weight: 700; font-family: inherit;
   cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
@@ -3263,32 +3653,202 @@ async function completePayment() {
 /* Wide modal for the multi-size table */
 .modal--wide { max-width: 720px; }
 .modal--confirm { max-width: 400px; }
-.modal--service { max-width: 500px; }
+.modal--service { max-width: 780px; }
 .modal--adjust  { max-width: 480px; }
 
-/* Cut piece / custom price — modal */
-.adj-tabs {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
-  border: 1px solid var(--c-border, #334155); border-radius: 10px; background: var(--c-surface-sunken, #0b1524);
+/* ── Adjust line modal ──
+   Wide, compact, two columns, no inner scrolling on normal screens.
+   NOTE: rules that must beat the generic .modal-body / .amount-input
+   (declared further down) use doubled selectors. */
+.modal--adjust { max-width: 880px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+.adj-head {
+  display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+  padding: 14px 20px; border-bottom: 1px solid var(--c-border, #334155);
+  background: linear-gradient(180deg, var(--c-surface-raised, #26364b) 0%, transparent 100%);
 }
-.adj-tabs button {
-  height: 32px; border: none; border-radius: 7px; background: none; cursor: pointer;
-  font: 700 12.5px 'Inter', system-ui, sans-serif; color: var(--c-text-muted, #94a3b8);
-  transition: background-color .15s, color .15s;
+.adj-head-icon {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+  color: var(--c-accent, #f97316); background: var(--c-accent-soft, rgba(249,115,22,.15));
+  border: 1px solid var(--c-accent-border, rgba(249,115,22,.35));
 }
-.adj-tabs button.is-active { background: var(--c-accent-soft, rgba(249,115,22,.15)); color: var(--c-accent, #f97316); }
+.adj-head-text { flex: 1; min-width: 0; }
+.adj-head .modal-eyebrow { font-size: 10px; margin-bottom: 1px; }
+.adj-head .modal-title { font-size: 15.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adj-meta { display: flex; flex-wrap: nowrap; gap: 6px; flex-shrink: 0; }
+.adj-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; color: var(--c-text-secondary, #cbd5e1); white-space: nowrap;
+  background: var(--c-surface-sunken, #0b1524); border: 1px solid var(--c-border, #334155);
+  font-variant-numeric: tabular-nums;
+}
+.adj-chip i { font-size: 10px; color: var(--c-text-faint, #64748b); }
+
+.modal-body.adj-body {
+  flex: 0 0 auto; overflow: visible; min-height: auto;
+  padding: 14px 20px 16px; gap: 12px;
+}
+
+/* Mode switch */
+.adj-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.adj-mode {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 8px 12px; border-radius: 10px; cursor: pointer; font-family: inherit;
+  border: 1.5px solid var(--c-border-strong, #47566b); background: var(--c-surface, #1e293b);
+  color: var(--c-text-muted, #94a3b8);
+  transition: border-color .15s, background-color .15s, color .15s;
+}
+.adj-mode > i { font-size: 13px; }
+.adj-mode-text { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.adj-mode-text strong { font-size: 12.5px; font-weight: 700; color: var(--c-text-primary, #f1f5f9); }
+.adj-mode-text span { font-size: 11px; line-height: 1.35; }
+.adj-mode:hover { border-color: var(--c-accent-border, rgba(249,115,22,.35)); }
+.adj-mode.is-active { border-color: var(--c-accent, #f97316); background: var(--c-accent-soft, rgba(249,115,22,.15)); color: var(--c-accent, #f97316); }
+.adj-mode.is-active .adj-mode-text strong { color: var(--c-accent, #f97316); }
+.adj-mode:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--c-accent-ring, rgba(249,115,22,.25)); }
+
+/* Two columns */
+.adj-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.adj-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* Section cards (never shrink: that is what squashed them before) */
+.adj-card {
+  flex-shrink: 0; border: 1px solid var(--c-border, #334155); border-radius: 12px; overflow: hidden;
+  background: var(--c-surface-sunken, #0b1524);
+}
+.adj-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px;
+  padding: 4px 8px 4px 12px; background: var(--c-surface-raised, #26364b);
+  border-bottom: 1px solid var(--c-border, #334155);
+}
+.adj-card-title { margin: 0; font-size: 12px; font-weight: 700; color: var(--c-text-secondary, #cbd5e1); }
+.adj-card-title label { cursor: pointer; }
+.adj-card-unit { font-weight: 500; color: var(--c-text-faint, #64748b); }
+.adj-card-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
+.adj-card-head .link-btn { padding: 3px 7px; font-size: 11.5px; }
+.adj-card-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+/* Full piece / length to sell tiles */
+.adj-split { display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; }
+.adj-tile {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 9px 11px; border-radius: 10px;
+  background: var(--c-surface, #1e293b); border: 1.5px solid var(--c-border, #334155);
+  transition: border-color .15s, box-shadow .15s;
+}
+.adj-tile--input { border-color: var(--c-border-strong, #47566b); }
+.adj-tile--input:focus-within { border-color: var(--c-accent, #f97316); box-shadow: 0 0 0 3px var(--c-accent-ring, rgba(249,115,22,.25)); }
+.adj-tile--input.is-invalid { border-color: var(--c-danger, #f43f5e); box-shadow: 0 0 0 3px rgba(244,63,94,.18); }
+.adj-tile-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.adj-label { font-size: 11.5px; font-weight: 600; color: var(--c-text-muted, #94a3b8); white-space: nowrap; }
+.adj-tile-value {
+  display: flex; align-items: baseline; gap: 5px;
+  font-size: 26px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1;
+  color: var(--c-text-primary, #f1f5f9); font-variant-numeric: tabular-nums;
+}
+.adj-tile-value span { font-size: 13px; font-weight: 700; letter-spacing: 0; color: var(--c-text-faint, #64748b); }
+.adj-tile-sub { margin: 0; font-size: 10.5px; line-height: 1.5; color: var(--c-text-faint, #64748b); }
+.link-btn--inline { padding: 0 4px; margin-left: 2px; font-size: 10.5px; text-decoration: underline; }
+
+.piece-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 20px; font-size: 10.5px; font-weight: 700; color: #10b981;
+  background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.3); white-space: nowrap;
+}
+.piece-badge i { font-size: 9px; }
+
+/* Length inputs */
+.adj-input-wrap { position: relative; display: flex; align-items: center; }
+.adj-input {
+  width: 100%; height: 38px; padding: 0 38px 0 2px; border: none; background: transparent; outline: none;
+  font: 800 24px 'Inter', system-ui, sans-serif; letter-spacing: -.02em; color: var(--c-text-primary, #f1f5f9);
+  font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield;
+}
+.adj-input::-webkit-outer-spin-button, .adj-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.adj-input::placeholder { color: var(--c-text-faint, #64748b); font-weight: 600; font-size: 14px; letter-spacing: 0; }
+.adj-input.adj-input--sm {
+  height: 34px; padding: 0 34px 0 10px; font-size: 15px;
+  border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 8px; background: var(--c-surface-sunken, #0b1524);
+  transition: border-color .15s;
+}
+.adj-input.adj-input--sm:focus { border-color: var(--c-accent, #f97316); }
+.adj-suffix { position: absolute; right: 4px; pointer-events: none; font-size: 13px; font-weight: 700; color: var(--c-text-faint, #64748b); }
+.adj-input--sm + .adj-suffix { right: 11px; font-size: 12px; }
+
+.adj-quick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.adj-quick-label { font-size: 11.5px; font-weight: 600; color: var(--c-text-muted, #94a3b8); }
+.adj-card .svc-chip { height: 26px; padding: 0 10px; font-size: 11.5px; }
+
+/* Sold / leftover bar */
+.piece-bar {
+  display: flex; height: 30px; border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--c-border-strong, #47566b); font-size: 11px; font-weight: 700;
+}
+.piece-bar-sold, .piece-bar-left {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 8px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.piece-bar-sold {
+  flex: none; transition: width .2s ease;
+  background: var(--c-accent-soft, rgba(249,115,22,.15)); color: var(--c-accent, #f97316);
+  box-shadow: inset -2px 0 0 var(--c-accent, #f97316);
+}
+.piece-bar-left { flex: 1; background: rgba(16,185,129,.12); color: #10b981; }
 .adj-remainder {
-  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
-  background: rgba(16,185,129,.10); border: 1px solid rgba(16,185,129,.30);
-  font-size: 12.5px; color: var(--c-text-secondary, #cbd5e1);
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.25);
+  font-size: 11.5px; line-height: 1.45; color: var(--c-text-secondary, #cbd5e1);
 }
-.adj-remainder i { color: #10b981; }
+.adj-remainder i { margin-top: 2px; color: #10b981; }
 .adj-remainder strong { color: #10b981; }
-.adj-price-input { height: 46px; font-size: 18px; }
-.adj-reset { margin-right: auto; align-self: center; }
+
+/* Pricing + summary */
+.amount-input.adj-price-input { height: 42px; font-size: 18px; border-radius: 10px; padding-left: 32px; }
+.adj-note { margin: 0; font-size: 11px; line-height: 1.5; color: var(--c-text-faint, #64748b); }
+.adj-card-body.adj-rows { gap: 0; padding: 2px 12px; }
+.adj-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0;
+  font-size: 12px; color: var(--c-text-muted, #94a3b8); border-bottom: 1px dashed var(--c-border, #334155);
+}
+.adj-row:last-child { border-bottom: none; }
+.adj-row > span:last-child { font-weight: 700; color: var(--c-text-primary, #f1f5f9); font-variant-numeric: tabular-nums; text-align: right; }
+.adj-row.is-down > span:last-child { color: #10b981; }
+.adj-row.is-up > span:last-child { color: #f59e0b; }
+
+/* Compact footer inside this modal */
+.modal--adjust .modal-footer { padding: 12px 20px 16px; }
+.modal--adjust .modal-summary-total { font-size: 19px; }
+
+/* Narrower screens: stack the columns; only here may the body scroll */
+@media (max-width: 820px) {
+  .modal-body.adj-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .adj-grid { grid-template-columns: 1fr; }
+  .adj-meta { display: none; }
+}
+@media (max-width: 520px) {
+  .adj-split, .adj-modes { grid-template-columns: 1fr; }
+  .adj-head { padding: 12px 16px; }
+}
+/* Very short screens: allow the body to scroll rather than clip */
+@media (max-height: 640px) {
+  .modal-body.adj-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+}
 
 /* Cut piece / custom price — cart line */
-.cart-item-adj { margin: 2px 0 0; font-size: 11px; font-weight: 700; color: var(--p-accent); }
+.cart-item-adjust {
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px;
+  border: 1.5px solid var(--p-accent-border); border-radius: 20px; cursor: pointer;
+  background: var(--p-accent-soft); color: var(--p-accent);
+  font: 700 11px 'Inter', system-ui, sans-serif; white-space: nowrap;
+  transition: background-color .15s, color .15s, border-color .15s, box-shadow .15s;
+}
+.cart-item-adjust i { font-size: 10px; }
+.cart-item-adjust:hover { background: var(--p-accent); border-color: var(--p-accent); color: #fff; }
+.cart-item-adjust:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
+.cart-item-adjust--on { background: var(--p-accent); border-color: var(--p-accent); color: #fff; }
+.cart-item-adjust--on:hover { opacity: .92; }
 
 /* Extra service — modal */
 .svc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -3299,6 +3859,7 @@ async function completePayment() {
   transition: border-color .15s, color .15s, background-color .15s;
 }
 .svc-chip:hover, .svc-chip--on { border-color: var(--c-accent-border, rgba(249,115,22,.35)); color: var(--c-accent, #f97316); background: var(--c-accent-soft, rgba(249,115,22,.15)); }
+.svc-chip:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--c-accent-ring, rgba(249,115,22,.25)); }
 .svc-seg { display: inline-flex; border: 1.5px solid var(--c-border-strong, #47566b); border-radius: 8px; overflow: hidden; }
 .svc-seg button {
   width: 36px; height: 28px; border: none; background: none; cursor: pointer;
@@ -3315,7 +3876,44 @@ async function completePayment() {
   transition: border-color .15s;
 }
 .svc-share-input:focus { border-color: var(--c-accent, #f97316); }
+.svc-share-input.has-error { border-color: var(--c-danger, #f43f5e); box-shadow: 0 0 0 3px rgba(244,63,94,.15); }
+.req { color: var(--c-danger, #f43f5e); font-weight: 700; }
+.cut-field.has-error input { border-color: var(--c-danger, #f43f5e); box-shadow: 0 0 0 3px rgba(244,63,94,.15); }
+.svc-field-error { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--c-danger, #f43f5e); }
+.svc-alert {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  margin: 0 22px 2px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(244,63,94,.10); border: 1px solid rgba(244,63,94,.40);
+  color: var(--c-danger, #f43f5e); font-size: 12.5px; font-weight: 600; line-height: 1.4;
+  animation: svc-alert-in .25s ease;
+}
+.svc-alert i { font-size: 14px; flex-shrink: 0; }
+@keyframes svc-alert-in { 0% { opacity: 0; transform: translateY(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } 100% { opacity: 1; transform: none; } }
 .svc-owner-val { color: #10b981; font-weight: 800; }
+
+/* Extra service modal: fixed layout (no inner scrolling on normal screens).
+   Doubled selector so it beats the generic .modal-body declared further down. */
+.modal-body.svc-body { flex: 0 0 auto; overflow: visible; min-height: auto; padding: 16px 22px 14px; gap: 14px; }
+.svc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.svc-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.svc-sec-title { margin: 0; padding-bottom: 6px; font-size: 12px; font-weight: 700; color: var(--c-text-secondary, #cbd5e1); border-bottom: 1px solid var(--c-border, #334155); }
+.svc-share { display: flex; flex-direction: column; gap: 8px; }
+.svc-body .svc-note { margin: 0; }
+.svc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.svc-stat {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 9px 12px; border-radius: 10px;
+  background-color: var(--c-surface-raised, #26364b); border: 1px solid var(--c-border, #334155);
+}
+.svc-stat-label { font-size: 11px; font-weight: 600; color: var(--c-text-muted, #94a3b8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svc-stat-value { font-size: 17px; font-weight: 800; letter-spacing: -.01em; color: var(--c-text-primary, #f1f5f9); font-variant-numeric: tabular-nums; }
+.svc-stat--shop { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.30); }
+.svc-stat--shop .svc-stat-value { color: #10b981; }
+@media (max-width: 760px) {
+  .modal-body.svc-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .svc-grid { grid-template-columns: 1fr; gap: 14px; }
+}
+@media (max-width: 520px) { .svc-stats { grid-template-columns: 1fr; } }
+@media (max-height: 600px) { .modal-body.svc-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; } }
 .svc-note { margin: -8px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--c-text-faint, #64748b); }
 
 /* Extra service — cart panel */
@@ -3384,6 +3982,7 @@ async function completePayment() {
   transition: color .15s, background-color .15s;
 }
 .link-btn:hover { color: var(--c-accent, #f97316); background: var(--c-accent-soft, rgba(249,115,22,.15)); }
+.link-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--c-accent-ring, rgba(249,115,22,.25)); }
 
 /* "Find a size" box for long size lists */
 .variant-search {
@@ -3604,7 +4203,8 @@ async function completePayment() {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .sk, .scanner-line { animation: none; }
+  .sk, .scanner-line, .svc-alert { animation: none; }
+  .piece-bar-sold { transition: none; }
   .modal-fade-enter-active, .modal-fade-leave-active,
   .scanner-slide-enter-active, .scanner-slide-leave-active,
   .fade-enter-active, .fade-leave-active { transition: none; }
@@ -3613,7 +4213,7 @@ async function completePayment() {
 /* ═══ RESPONSIVE — TABLET (≤1024px) ═══ */
 @media (max-width: 1024px) {
   .pos-root { margin: -22px; }
-  .pos-right { width: 300px; min-width: 300px; }
+  .pos-right { width: 320px; min-width: 320px; }
   .product-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
 }
 
@@ -3683,6 +4283,7 @@ async function completePayment() {
   .modal-body   { padding: 16px 18px; }
   .modal-footer { padding: 12px 18px 18px; }
   .cut-grid { grid-template-columns: 1fr; }
+  .piece-card-value { font-size: 21px; }
 }
 </style>
 

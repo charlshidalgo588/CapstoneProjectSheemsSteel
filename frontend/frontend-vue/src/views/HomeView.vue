@@ -13,28 +13,30 @@
           </p>
         </div>
         <div class="page-header-right">
-          <router-link :to="{ name: 'sales-transactions' }" class="btn"><i class="fa-solid fa-receipt"></i>Transactions</router-link>
+          <router-link v-if="canTransactions" :to="{ name: 'sales-transactions' }" class="btn"><i class="fa-solid fa-receipt"></i>Transactions</router-link>
           <button type="button" class="btn btn--primary" :disabled="loading" aria-label="Refresh dashboard" @click="loadDashboard()">
             <i class="fa-solid fa-rotate" :class="{ 'fa-spin': loading }"></i>Refresh
           </button>
         </div>
       </div>
 
-      <!-- NOTICES -->
-      <div v-if="loadError" class="notice notice--error" role="alert">
-        <i class="fa-solid fa-triangle-exclamation"></i>
-        <span>{{ loadError }}</span>
-        <button type="button" class="notice-btn" @click="loadDashboard()">Try again</button>
-      </div>
-      <div v-if="outOfStockCount > 0" class="notice notice--error" role="status">
-        <i class="fa-solid fa-circle-xmark"></i>
-        <span><strong>{{ outOfStockCount }} {{ outOfStockCount === 1 ? 'item is' : 'items are' }} out of stock.</strong> Customers can't buy {{ outOfStockCount === 1 ? 'it' : 'them' }} until restocked.</span>
-        <router-link :to="{ name: 'products', query: { stockFilter: 'out' } }" class="notice-btn">View out of stock</router-link>
-      </div>
-      <div v-if="lowStockCount > 0" class="notice notice--warn" role="status">
-        <i class="fa-solid fa-triangle-exclamation"></i>
-        <span><strong>{{ lowStockCount }} {{ lowStockCount === 1 ? 'item is' : 'items are' }} low on stock.</strong> Reorder soon to avoid running out.</span>
-        <router-link :to="{ name: 'products', query: { stockFilter: 'low' } }" class="notice-btn">View low stock</router-link>
+      <!-- NOTICES (slim one-line bars with a colored edge) -->
+      <div v-if="loadError || outOfStockCount > 0 || lowStockCount > 0" class="notices">
+        <div v-if="loadError" class="notice notice--error" role="alert">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span>{{ loadError }}</span>
+          <button type="button" class="notice-btn" @click="loadDashboard()">Try again</button>
+        </div>
+        <div v-if="outOfStockCount > 0" class="notice notice--error" role="status">
+          <i class="fa-solid fa-circle-xmark"></i>
+          <span><strong>{{ outOfStockCount }} {{ outOfStockCount === 1 ? 'item is' : 'items are' }} out of stock.</strong> Customers can't buy {{ outOfStockCount === 1 ? 'it' : 'them' }} until restocked.</span>
+          <router-link v-if="canProducts" :to="{ name: 'products', query: { stockFilter: 'out' } }" class="notice-btn">View out of stock</router-link>
+        </div>
+        <div v-if="lowStockCount > 0" class="notice notice--warn" role="status">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span><strong>{{ lowStockCount }} {{ lowStockCount === 1 ? 'item is' : 'items are' }} low on stock.</strong> Reorder soon to avoid running out.</span>
+          <router-link v-if="canProducts" :to="{ name: 'products', query: { stockFilter: 'low' } }" class="notice-btn">View low stock</router-link>
+        </div>
       </div>
 
       <!-- SKELETON -->
@@ -275,7 +277,8 @@
                 </ul>
               </div>
 
-              <router-link :to="{ name: 'reports' }" class="link-btn mix-link">See the full ranking in Reports<i class="fa-solid fa-arrow-right"></i></router-link>
+              <!-- Full Reports shortcut: Administrators only -->
+              <router-link v-if="canReports" :to="{ name: 'reports' }" class="link-btn mix-link">See the full ranking in Reports<i class="fa-solid fa-arrow-right"></i></router-link>
             </div>
 
             <div v-else class="empty">
@@ -296,25 +299,27 @@
               </div>
             </header>
 
+            <!-- Tiles are links only for roles that can open the Product List;
+                 for everyone else they render as plain (non-clickable) tiles. -->
             <div class="tile-grid">
-              <router-link :to="{ name: 'products' }" class="tile">
-                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-cubes"></i></span><i class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
+              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps()" class="tile" :class="{ 'tile--static': !canProducts }">
+                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-cubes"></i></span><i v-if="canProducts" class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
                 <p class="tile-label">In hand</p>
                 <p class="tile-value">{{ formatNumber(anim.inHand) }}</p>
                 <p class="tile-sub">{{ formatNumber(inventorySummary.quantity_to_receive) }} incoming</p>
-              </router-link>
-              <router-link :to="{ name: 'products', query: { stockFilter: 'low' } }" class="tile" :class="{ 'tile--warn': lowStockCount > 0 }">
-                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-triangle-exclamation"></i></span><i class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
+              </component>
+              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps({ stockFilter: 'low' })" class="tile" :class="{ 'tile--warn': lowStockCount > 0, 'tile--static': !canProducts }">
+                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-triangle-exclamation"></i></span><i v-if="canProducts" class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
                 <p class="tile-label">Low stock</p>
                 <p class="tile-value">{{ formatNumber(anim.low) }}</p>
                 <p class="tile-sub">{{ lowStockCount > 0 ? 'Reorder soon' : 'Nothing running low' }}</p>
-              </router-link>
-              <router-link :to="{ name: 'products', query: { stockFilter: 'out' } }" class="tile" :class="{ 'tile--alert': outOfStockCount > 0 }">
-                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-circle-xmark"></i></span><i class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
+              </component>
+              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps({ stockFilter: 'out' })" class="tile" :class="{ 'tile--alert': outOfStockCount > 0, 'tile--static': !canProducts }">
+                <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-circle-xmark"></i></span><i v-if="canProducts" class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
                 <p class="tile-label">Out of stock</p>
                 <p class="tile-value">{{ formatNumber(anim.out) }}</p>
                 <p class="tile-sub">{{ outOfStockCount > 0 ? 'Restock now' : 'All available' }}</p>
-              </router-link>
+              </component>
             </div>
 
             <div v-if="stockCoverage" class="coverage">
@@ -325,10 +330,10 @@
               <div class="goal-track"><div class="goal-fill goal-fill--done" :style="{ width: (barsReady ? stockCoverage.pct : 0) + '%' }"></div></div>
             </div>
 
-            <div class="link-list">
-              <router-link :to="{ name: 'products' }"><i class="fa-solid fa-boxes-stacked"></i>Manage products<i class="fa-solid fa-chevron-right"></i></router-link>
-              <router-link :to="{ name: 'inventory-logs' }"><i class="fa-solid fa-clock-rotate-left"></i>Inventory logs<i class="fa-solid fa-chevron-right"></i></router-link>
-              <router-link :to="{ name: 'suppliers' }"><i class="fa-solid fa-truck"></i>Suppliers<i class="fa-solid fa-chevron-right"></i></router-link>
+            <div v-if="canProducts || canInvLogs || canSuppliers" class="link-list">
+              <router-link v-if="canProducts"  :to="{ name: 'products' }"><i class="fa-solid fa-boxes-stacked"></i>Manage products<i class="fa-solid fa-chevron-right"></i></router-link>
+              <router-link v-if="canInvLogs"   :to="{ name: 'inventory-logs' }"><i class="fa-solid fa-clock-rotate-left"></i>Inventory logs<i class="fa-solid fa-chevron-right"></i></router-link>
+              <router-link v-if="canSuppliers" :to="{ name: 'suppliers' }"><i class="fa-solid fa-truck"></i>Suppliers<i class="fa-solid fa-chevron-right"></i></router-link>
             </div>
           </section>
         </div>
@@ -341,6 +346,8 @@
 <script>
 import api from '@/api/axios'
 import Layout from '@/components/Layout.vue'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/utils/permissions'
 
 // Protected route (auth:sanctum). See routes/api.php.
 const DASHBOARD_URL = '/api/dashboard'
@@ -404,6 +411,16 @@ export default {
   },
 
   computed: {
+    /* ── ROLE-BASED LINKS ──────────────────────────────────
+       Every role lands on this page, so each shortcut is checked
+       against the signed-in user's role (see utils/permissions.js). */
+    role() { return useAuthStore().user?.role || '' },
+    canReports()      { return canAccess(this.role, '/reports') },
+    canProducts()     { return canAccess(this.role, '/products') },
+    canTransactions() { return canAccess(this.role, '/sales-transaction') },
+    canSuppliers()    { return canAccess(this.role, '/suppliers') },
+    canInvLogs()      { return canAccess(this.role, '/inventory-logs') },
+
     todayKey() { return new Date().toLocaleDateString('en-CA') },
     todayLabel() { return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) },
     monthName() { return new Date().toLocaleDateString('en-US', { month: 'long' }) },
@@ -599,6 +616,12 @@ export default {
     price(v) { return this.num(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
     compact(v) { return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(this.num(v)) },
 
+    /* Props for a stock tile: a router-link target when the role may open
+       the Product List, nothing (so it stays a plain div) when it may not. */
+    tileProps(query) {
+      return this.canProducts ? { to: { name: 'products', ...(query ? { query } : {}) } } : {}
+    },
+
     makeTrend(current, previous) {
       if (previous === null || previous === undefined) return { direction: 'flat', text: '', available: false }
       const prev = this.num(previous)
@@ -771,9 +794,18 @@ export default {
   --d-shine: rgba(255,255,255,.7);
   --d-ease: cubic-bezier(.16, 1, .3, 1);
 
-  min-height: 100%; background: var(--d-bg); padding: 28px 28px 56px;
+  /* ── SPACE TUNING ──────────────────────────────────────────
+     The app shell (Layout.vue) adds roughly 64px of its own padding around
+     every page. --bleed-* lets this page reclaim part of it on desktop.
+     Raise a value to push the content closer to the edge, lower it (or set
+     it to 0px) if content ever touches the sidebar or top bar. */
+  --bleed-x: 30px;
+  --bleed-y: 26px;
+  --d-gap: 16px;
+
+  min-height: 100%; background: var(--d-bg); padding: 16px 24px 40px;
   font-family: 'Inter', system-ui, sans-serif;
-  display: flex; flex-direction: column; gap: 20px;
+  display: flex; flex-direction: column; gap: var(--d-gap);
   -webkit-font-smoothing: antialiased;
 }
 html[data-theme="dark"] .dash {
@@ -784,16 +816,16 @@ html[data-theme="dark"] .dash {
   --d-shine: rgba(255,255,255,.07);
 }
 .dash button:focus-visible, .dash a:focus-visible, .dash input:focus-visible { outline: 2px solid var(--d-accent); outline-offset: 2px; }
-.dash-body { display: flex; flex-direction: column; gap: 20px; transition: opacity .2s ease; }
+.dash-body { display: flex; flex-direction: column; gap: var(--d-gap); transition: opacity .2s ease; }
 .dash-body.is-loading { opacity: .7; }
 .green { color: var(--d-green); }
 .red { color: var(--d-red); }
 .muted { margin: 12px 0 0; font-size: 12.5px; color: var(--d-muted); }
 
 /* ── header ── */
-.page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
-.page-title { font-size: 28px; font-weight: 800; color: var(--d-text); letter-spacing: -.03em; margin: 0; }
-.page-sub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 5px 0 0; font-size: 13.5px; font-weight: 500; color: var(--d-text-2); }
+.page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.page-title { font-size: 26px; font-weight: 800; color: var(--d-text); letter-spacing: -.03em; margin: 0; line-height: 1.15; }
+.page-sub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 0; font-size: 13.5px; font-weight: 500; color: var(--d-text-2); }
 .status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--d-muted); padding: 2px 10px 2px 8px; background: var(--d-surface); border: 1px solid var(--d-border); border-radius: 999px; }
 .status--busy { color: var(--d-accent); font-weight: 600; padding-left: 10px; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--d-green); box-shadow: 0 0 0 0 rgba(16,185,129,.5); animation: pulse 2.2s ease-out infinite; }
@@ -819,21 +851,26 @@ html[data-theme="dark"] .dash {
 .link-btn i { font-size: 9px; transition: transform .2s var(--d-ease); }
 .link-btn:hover i { transform: translateX(3px); }
 
-/* ── notices ── */
-.notice { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-radius: 12px; font-size: 13px; animation: rise .5s var(--d-ease) backwards; }
-.notice > span { flex: 1; min-width: 200px; color: var(--d-text-2); }
+/* ── notices: slim one-line bars, color-coded with a bold left edge ── */
+.notices { display: flex; flex-direction: column; gap: 6px; }
+.notice {
+  display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 5px 8px 5px 12px;
+  border-radius: 10px; border-left-width: 4px; font-size: 12.5px; line-height: 1.35;
+  animation: rise .5s var(--d-ease) backwards;
+}
+.notice > span { flex: 1; min-width: 0; color: var(--d-text-2); }
 .notice strong { color: var(--d-text); font-weight: 700; }
-.notice > i { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
-.notice--error { background: var(--d-red-soft); border: 1px solid rgba(244,63,94,.28); }
-.notice--error > i { color: var(--d-red); background: rgba(244,63,94,.14); }
-.notice--warn { background: var(--d-amber-soft); border: 1px solid rgba(245,158,11,.32); }
-.notice--warn > i { color: var(--d-amber); background: rgba(245,158,11,.16); }
-.notice-btn { border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--d-accent); padding: 6px 12px; border-radius: 8px; text-decoration: none; white-space: nowrap; transition: background-color .15s ease; }
+.notice > i { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
+.notice--error { background: var(--d-red-soft); border: 1px solid rgba(244,63,94,.28); border-left: 4px solid var(--d-red); }
+.notice--error > i { color: var(--d-red); background: rgba(244,63,94,.16); }
+.notice--warn { background: var(--d-amber-soft); border: 1px solid rgba(245,158,11,.32); border-left: 4px solid var(--d-amber); }
+.notice--warn > i { color: var(--d-amber); background: rgba(245,158,11,.18); }
+.notice-btn { flex-shrink: 0; border: 1px solid var(--d-accent-border); background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; color: var(--d-accent); padding: 4px 12px; border-radius: 8px; text-decoration: none; white-space: nowrap; transition: background-color .15s ease; }
 .notice-btn:hover { background: var(--d-accent-soft); }
 
 /* ── cards ── */
 .card {
-  position: relative; min-width: 0; padding: 22px 24px;
+  position: relative; min-width: 0; padding: 20px 22px;
   background: var(--d-surface);
   border: 1px solid var(--d-border); border-radius: 18px;
   box-shadow: var(--d-shadow);
@@ -857,7 +894,7 @@ html[data-theme="dark"] .dash {
 }
 .card--hero > * { position: relative; z-index: 1; }
 
-.card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .card-head-l { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .card-icon {
   width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
@@ -871,7 +908,7 @@ html[data-theme="dark"] .dash {
 .card-icon--amber  { color: var(--d-amber);  background: var(--d-amber-soft);  box-shadow: inset 0 0 0 1px rgba(245,158,11,.28); }
 .card-title { font-size: 15.5px; font-weight: 700; color: var(--d-text); margin: 0; letter-spacing: -.015em; }
 .card-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--d-muted); }
-.row-two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; align-items: stretch; }
+.row-two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--d-gap); align-items: stretch; }
 .chip { font-size: 10.5px; font-weight: 700; letter-spacing: .02em; color: var(--d-accent); background: var(--d-accent-soft); border: 1px solid var(--d-accent-border); padding: 2px 10px; border-radius: 20px; }
 
 /* ── segmented control ── */
@@ -903,7 +940,7 @@ html[data-theme="dark"] .dash {
 .spark-cap { font-size: 11px; font-weight: 500; color: var(--d-faint); }
 
 /* ── progress ── */
-.goal { margin-top: 22px; }
+.goal { margin-top: 20px; }
 .goal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; font-size: 12.5px; font-weight: 600; color: var(--d-text-2); margin-bottom: 8px; }
 .goal-head strong { font-weight: 700; color: var(--d-text); font-variant-numeric: tabular-nums; }
 .goal-input { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--d-border-strong); border-radius: 9px; background: var(--d-sunken); color: var(--d-muted); font-weight: 700; transition: border-color .15s ease, box-shadow .15s ease; }
@@ -921,7 +958,7 @@ html[data-theme="dark"] .dash {
 .goal-sub { margin: 8px 0 0; font-size: 12px; color: var(--d-muted); }
 
 /* ── mini stats ── */
-.mini-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; margin: 22px 0 0; }
+.mini-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; margin: 20px 0 0; }
 .mini-stats--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .ms { padding: 12px 14px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 12px; min-width: 0; transition: border-color .2s ease, transform .2s var(--d-ease); }
 .ms:hover { border-color: var(--d-accent-border); transform: translateY(-2px); }
@@ -1025,6 +1062,10 @@ html[data-theme="dark"] .dash {
 .tile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .tile { display: block; text-decoration: none; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 14px; padding: 14px 16px 16px; transition: border-color .2s ease, transform .25s var(--d-ease), box-shadow .25s ease; }
 .tile:hover { border-color: var(--d-accent-border); transform: translateY(-3px); box-shadow: 0 12px 24px -14px rgba(16,24,40,.28); }
+/* Non-clickable version (roles without Product List access): no lift, default cursor */
+.tile--static, .tile--static:hover { cursor: default; transform: none; box-shadow: none; border-color: var(--d-border); }
+.tile--warn.tile--static:hover { border-color: rgba(245,158,11,.35); }
+.tile--alert.tile--static:hover { border-color: rgba(244,63,94,.28); }
 .tile-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .tile-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--d-violet); background: var(--d-violet-soft); }
 .tile-go { font-size: 10px; color: var(--d-faint); opacity: 0; transform: translate(-3px, 3px); transition: opacity .2s ease, transform .2s var(--d-ease); }
@@ -1040,10 +1081,10 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
 .tile--alert { background: var(--d-red-soft); border-color: rgba(244,63,94,.28); }
 .tile--alert .tile-ico { color: var(--d-red); background: rgba(244,63,94,.16); }
 .tile--alert .tile-value, .tile--alert .tile-sub { color: var(--d-red); }
-.coverage { margin-top: 18px; padding: 14px 16px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 14px; }
+.coverage { margin-top: 16px; padding: 14px 16px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 14px; }
 .coverage-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--d-muted); margin-bottom: 10px; }
 .coverage-head strong { color: var(--d-text); font-weight: 700; }
-.link-list { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
+.link-list { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
 .link-list a { display: flex; align-items: center; gap: 12px; padding: 11px 10px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--d-text-2); text-decoration: none; transition: background-color .15s ease, color .15s ease; }
 .link-list a:hover { background: var(--d-raised); color: var(--d-accent); }
 .link-list a i:first-child { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--d-sunken); color: var(--d-muted); font-size: 11.5px; transition: background-color .15s ease, color .15s ease; }
@@ -1062,12 +1103,17 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
 .sk-tall { height: 240px; }
 
 /* ── responsive ── */
+/* Desktop only: pull the page outward into the shell's padding (top, left, right) */
+@media (min-width: 1001px) {
+  .dash { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+}
 @media (max-width: 1000px) { .row-two, .cal-layout { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 900px) { .dash { padding: 16px 16px 40px; gap: 16px; } .dash-body { gap: 16px; } .row-two { gap: 16px; } }
+@media (max-width: 900px) { .dash { padding: 12px 14px 32px; --d-gap: 14px; } }
 @media (max-width: 600px) {
   .card { padding: 18px 16px; border-radius: 16px; }
   .page-header { flex-direction: column; align-items: stretch; }
   .page-title { font-size: 24px; }
+  .notice { flex-wrap: wrap; }
   .mini-stats, .mini-stats--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .spark { align-items: flex-start; }
   .day { padding: 16px; }

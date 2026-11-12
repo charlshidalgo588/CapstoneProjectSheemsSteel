@@ -78,55 +78,51 @@
         </router-link>
       </div>
 
+      <!-- Only the links this role is allowed to open are rendered. -->
       <nav class="sidebar-nav">
         <NavLink to="/home" icon="fa-solid fa-house" label="Home" :collapsed="!sidebarOpen" />
 
-        <div class="nav-divider" role="separator" />
+        <div v-if="showInventoryMenu || showSalesMenu" class="nav-divider" role="separator" />
 
-        <SidebarDropdown label="Inventory" icon="fa-solid fa-boxes-stacked" :open="inventoryOpen" :collapsed="!sidebarOpen" @toggle="inventoryOpen = !inventoryOpen">
-          <NavLink to="/products"        menu-item label="Product List" icon="fa-solid fa-list"        :collapsed="false" />
-          <NavLink to="/products/create" menu-item label="Add Item"     icon="fa-solid fa-plus"        :collapsed="false" />
-          <NavLink to="/categories"      menu-item label="Categories"   icon="fa-solid fa-layer-group" :collapsed="false" />
+        <SidebarDropdown v-if="showInventoryMenu" label="Inventory" icon="fa-solid fa-boxes-stacked" :open="inventoryOpen" :collapsed="!sidebarOpen" @toggle="inventoryOpen = !inventoryOpen">
+          <NavLink v-if="can('/products')"   to="/products"        menu-item label="Product List" icon="fa-solid fa-list"        :collapsed="false" />
+          <NavLink v-if="can('/products')"   to="/products/create" menu-item label="Add Item"     icon="fa-solid fa-plus"        :collapsed="false" />
+          <NavLink v-if="can('/categories')" to="/categories"      menu-item label="Categories"   icon="fa-solid fa-layer-group" :collapsed="false" />
         </SidebarDropdown>
-        <SidebarDropdown label="Sales" icon="fa-solid fa-cart-shopping" :open="salesOpen" :collapsed="!sidebarOpen" @toggle="salesOpen = !salesOpen">
-          <NavLink to="/point-of-sale"     menu-item label="POS"         icon="fa-solid fa-cash-register" :collapsed="false" />
-          <NavLink to="/sales-transaction" menu-item label="Transaction" icon="fa-solid fa-receipt"       :collapsed="false" />
-          <NavLink to="/customers"         menu-item label="Customers"   icon="fa-solid fa-users"         :collapsed="false" />
+        <SidebarDropdown v-if="showSalesMenu" label="Sales" icon="fa-solid fa-cart-shopping" :open="salesOpen" :collapsed="!sidebarOpen" @toggle="salesOpen = !salesOpen">
+          <NavLink v-if="can('/point-of-sale')"     to="/point-of-sale"     menu-item label="POS"         icon="fa-solid fa-cash-register" :collapsed="false" />
+          <NavLink v-if="can('/sales-transaction')" to="/sales-transaction" menu-item label="Transaction" icon="fa-solid fa-receipt"       :collapsed="false" />
+          <NavLink v-if="can('/customers')"         to="/customers"         menu-item label="Customers"   icon="fa-solid fa-users"         :collapsed="false" />
         </SidebarDropdown>
 
-        <div class="nav-divider" role="separator" />
+        <div v-if="showManagement" class="nav-divider" role="separator" />
 
-        <NavLink to="/suppliers"      label="Suppliers"      icon="fa-solid fa-truck-field" :collapsed="!sidebarOpen" />
-        <NavLink to="/reports"        label="Reports"        icon="fa-solid fa-chart-line"  :collapsed="!sidebarOpen" />
-        <NavLink to="/inventory-logs" label="Inventory Logs" icon="fa-solid fa-folder-open" :collapsed="!sidebarOpen" />
+        <NavLink v-if="can('/suppliers')"      to="/suppliers"      label="Suppliers"      icon="fa-solid fa-truck-field" :collapsed="!sidebarOpen" />
+        <NavLink v-if="can('/reports')"        to="/reports"        label="Reports"        icon="fa-solid fa-chart-line"  :collapsed="!sidebarOpen" />
+        <NavLink v-if="can('/inventory-logs')" to="/inventory-logs" label="Inventory Logs" icon="fa-solid fa-folder-open" :collapsed="!sidebarOpen" />
       </nav>
 
-      <!-- SIDEBAR FOOTER — user card doubles as the account menu trigger -->
+      <!-- SIDEBAR FOOTER — live clock (the account menu now lives in the
+           topbar, to the right of the notification bell). -->
       <div class="sidebar-footer">
-        <button
-          ref="userMiniRef"
-          class="user-mini"
-          :class="{ 'user-mini--center': !sidebarOpen, 'user-mini--open': userMenuOpen }"
-          aria-haspopup="menu"
-          :aria-expanded="userMenuOpen"
-          :data-tip="user?.name || 'User'"
-          data-tip-desc="Account and sign out"
-          data-tip-icon="fa-solid fa-user"
-          data-tip-collapsed
-          @click="toggleUserMenu"
+        <div
+          class="sidebar-clock"
+          :class="{ 'sidebar-clock--collapsed': !sidebarOpen }"
+          role="timer"
+          aria-label="Current time"
         >
-          <div class="user-avatar-wrap">
-            <div class="user-avatar-sm user-avatar-vector" aria-hidden="true">
-              <i class="fa-solid fa-user"></i>
+          <template v-if="sidebarOpen">
+            <span class="sidebar-clock-icon" aria-hidden="true"><i class="fa-regular fa-clock"></i></span>
+            <div class="sidebar-clock-info">
+              <p class="sidebar-clock-time">{{ clockLabel }}</p>
+              <p class="sidebar-clock-date">{{ shortDateLabel }}</p>
             </div>
-            <span class="user-status-dot" :class="{ 'user-status-dot--offline': !isOnline }"></span>
-          </div>
-          <div v-show="sidebarOpen" class="user-mini-info">
-            <p class="user-mini-name">{{ user?.name || 'User' }}</p>
-            <p class="user-mini-role">Administrator</p>
-          </div>
-          <i v-show="sidebarOpen" class="fa-solid fa-chevron-up user-mini-caret" :class="{ 'user-mini-caret--down': userMenuOpen }" aria-hidden="true"></i>
-        </button>
+          </template>
+          <template v-else>
+            <span class="sidebar-clock-mini-time">{{ clockParts.time }}</span>
+            <span class="sidebar-clock-mini-period">{{ clockParts.period }}</span>
+          </template>
+        </div>
       </div>
     </aside>
 
@@ -152,7 +148,7 @@
       </div>
     </transition>
 
-    <!-- TELEPORTED ACCOUNT POPUP — escapes the sidebar's overflow:hidden -->
+    <!-- TELEPORTED ACCOUNT POPUP — escapes any overflow:hidden ancestor -->
     <Teleport to="body">
       <transition name="dropdown">
         <div v-if="userMenuOpen" class="user-popup-menu" ref="userPopupRef" role="menu" :style="userMenuStyle">
@@ -165,7 +161,8 @@
             </div>
             <div class="user-popup-id">
               <p class="profile-menu-name">{{ user?.name || 'User' }}</p>
-              <p class="profile-menu-email">admin@sheemsteel.com</p>
+              <p class="profile-menu-email">{{ user?.email || '' }}</p>
+              <p class="profile-menu-role">{{ user?.role || 'User' }}</p>
             </div>
           </div>
           <div class="pmenu-divider" />
@@ -174,13 +171,56 @@
             Settings
           </router-link>
           <div class="pmenu-divider" />
-          <button class="pmenu-item pmenu-item--danger" role="menuitem" @click="showLogoutModal = true; userMenuOpen = false">
+          <button class="pmenu-item pmenu-item--danger" role="menuitem" @click="openLogoutModal">
             <span class="pmenu-icon-wrap pmenu-icon-wrap--danger"><i class="fa-solid fa-right-from-bracket"></i></span>
             Sign out
           </button>
         </div>
       </transition>
     </Teleport>
+
+    <!-- ═══════════════════════════════════════════════════
+         LIVE NOTIFICATION TOASTS
+         A new notification drops in at the very top CENTER of the screen,
+         stays briefly, then slides smoothly into the bell icon (which rings).
+         Hover or focus a toast to pause it. Click it to open what it's
+         about; the X sends it to the bell right away.
+    ════════════════════════════════════════════════════ -->
+    <div
+      class="toast-stack"
+      role="region"
+      aria-label="New notifications"
+      aria-live="polite"
+    >
+      <div
+        v-for="t in toasts"
+        :key="t.id"
+        class="toast"
+        :class="[`toast--${t.type}`, { 'toast--flying': t.flying }]"
+        :style="t.style"
+        :data-toast-id="t.id"
+        role="status"
+        tabindex="0"
+        @click.stop="openToast(t)"
+        @keydown.enter.prevent="openToast(t)"
+        @keydown.space.prevent="openToast(t)"
+        @mouseenter="pauseToast(t.id)"
+        @mouseleave="resumeToast(t.id)"
+        @focusin="pauseToast(t.id)"
+        @focusout="resumeToast(t.id)"
+      >
+        <span class="toast-icon" aria-hidden="true">
+          <i :class="notifIcon(t.type)"></i>
+        </span>
+        <div class="toast-body">
+          <p class="toast-title">{{ t.title }}</p>
+          <p class="toast-desc">{{ t.desc }}</p>
+        </div>
+        <button class="toast-close" aria-label="Dismiss notification" @click.stop="flyToast(t.id)">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
 
     <!-- MAIN COLUMN -->
     <div class="main-column">
@@ -209,7 +249,8 @@
           </div>
         </div>
 
-        <div class="search-wrap">
+        <!-- Product search only for roles that can open the product list -->
+        <div v-if="can('/products')" class="search-wrap">
           <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
           <input
             ref="searchInputRef"
@@ -228,6 +269,7 @@
           </button>
           <kbd v-else-if="!searchFocused" class="search-kbd" aria-hidden="true">/</kbd>
         </div>
+        <div v-else class="search-spacer"></div>
 
         <div class="topbar-actions">
           <!-- Only appears when the connection drops — a POS that silently
@@ -239,26 +281,10 @@
             </span>
           </transition>
 
-          <span class="topbar-clock" aria-label="Current time">{{ clockLabel }}</span>
-
-          <span class="topbar-sep" aria-hidden="true"></span>
-
-          <router-link to="/products/create" class="action-link" tabindex="-1">
-            <button
-              class="action-btn action-btn--primary"
-              aria-label="Add item"
-              data-tip="Add item"
-              data-tip-desc="Create a new product"
-              data-tip-icon="fa-solid fa-plus"
-            >
-              <i class="fa-solid fa-plus"></i>
-              <span>Add item</span>
-            </button>
-          </router-link>
-
           <!-- NOTIFICATIONS -->
           <div class="notif-wrap" ref="notifWrapRef">
             <button
+              ref="bellBtnRef"
               class="icon-btn"
               aria-label="Notifications"
               data-tip="Notifications"
@@ -267,10 +293,10 @@
               aria-haspopup="true"
               :aria-expanded="notifOpen"
               :class="{ 'icon-btn--active': notifOpen }"
-              @click="notifOpen = !notifOpen"
+              @click="toggleNotif"
             >
-              <i class="fa-solid fa-bell"></i>
-              <span v-if="unreadCount > 0" class="notif-badge">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
+              <i class="fa-solid fa-bell" :class="{ 'bell-ring': bellRing }"></i>
+              <span v-if="unreadCount > 0" class="notif-badge" :class="{ 'notif-badge--pop': bellRing }">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
             </button>
 
             <transition name="dropdown">
@@ -295,7 +321,7 @@
                     v-for="n in notifications"
                     :key="n.id"
                     class="notif-item"
-                    :class="{ 'notif-item--unread': !n.read_at }"
+                    :class="[`notif-item--${n.type}`, { 'notif-item--unread': !n.read_at }]"
                     tabindex="0"
                     @click="goToNotification(n)"
                     @keydown.enter="goToNotification(n)"
@@ -304,16 +330,38 @@
                       <i :class="notifIcon(n.type)"></i>
                     </span>
                     <div class="notif-item-body">
-                      <p class="notif-item-title">{{ n.title }}</p>
+                      <p class="notif-item-title" :class="`notif-item-title--${n.type}`">{{ n.title }}</p>
                       <p class="notif-item-desc">{{ n.description }}</p>
                       <p class="notif-item-time">{{ timeAgo(n.created_at) }}</p>
                     </div>
-                    <span v-if="!n.read_at" class="notif-item-dot" aria-label="Unread"></span>
+                    <span v-if="!n.read_at" class="notif-item-dot" :class="`notif-item-dot--${n.type}`" aria-label="Unread"></span>
                   </li>
                 </ul>
               </div>
             </transition>
           </div>
+
+          <!-- PROFILE — far right of the topbar; doubles as the account
+               menu trigger (Settings / Sign out). -->
+          <button
+            ref="userMiniRef"
+            class="profile-btn"
+            :class="{ 'profile-btn--open': userMenuOpen }"
+            aria-haspopup="menu"
+            :aria-expanded="userMenuOpen"
+            aria-label="Account menu"
+            :data-tip="user?.name || 'User'"
+            data-tip-desc="Account and sign out"
+            data-tip-icon="fa-solid fa-user"
+            @click="toggleUserMenu"
+          >
+            <span class="user-avatar-wrap">
+              <span class="user-avatar-sm user-avatar-vector" aria-hidden="true">
+                <i class="fa-solid fa-user"></i>
+              </span>
+              <span class="user-status-dot" :class="{ 'user-status-dot--offline': !isOnline }"></span>
+            </span>
+          </button>
         </div>
       </header>
 
@@ -329,9 +377,10 @@
          GLOBAL FLOATING "GO TO POS" BUTTON
          Shows the full pill briefly, then auto-docks to the right edge
          as an icon-only tab. Hover / focus pops it back out.
+         Hidden for roles that can't open the POS.
     ════════════════════════════════════════════════════ -->
     <router-link
-      v-if="!isPosPage"
+      v-if="!isPosPage && can('/point-of-sale')"
       to="/point-of-sale"
       class="pos-fab"
       :class="{ 'pos-fab--docked': posFabDocked }"
@@ -350,14 +399,14 @@
   <!-- LOGOUT MODAL -->
   <transition name="fade">
     <div v-if="showLogoutModal" class="modal-backdrop" @click.self="!loggingOut && (showLogoutModal = false)">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="logout-title">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="logout-title" aria-describedby="logout-desc">
         <div class="modal-icon-wrap">
           <i class="fa-solid fa-right-from-bracket" style="font-size:18px;color:var(--c-accent)"></i>
         </div>
         <h2 id="logout-title" class="modal-title">Sign out of Sheem Steel?</h2>
-        <p class="modal-desc">You'll need to sign in again to use the system.</p>
+        <p id="logout-desc" class="modal-desc">You'll need to sign in again to use the system.</p>
         <div class="modal-actions">
-          <button class="btn-ghost" :disabled="loggingOut" @click="showLogoutModal = false">Cancel</button>
+          <button ref="logoutCancelRef" class="btn-ghost" :disabled="loggingOut" @click="showLogoutModal = false">Cancel</button>
           <button class="btn-danger" :disabled="loggingOut" @click="confirmLogout">
             <i v-if="loggingOut" class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
             <span>{{ loggingOut ? 'Signing out…' : 'Sign out' }}</span>
@@ -367,6 +416,15 @@
     </div>
   </transition>
 </template>
+
+<!-- Plain (non-setup) script: this state lives at MODULE level on purpose.
+     Layout.vue remounts on every navigation, so anything declared inside
+     <script setup> would reset each time and re-toast old notifications.
+     Here it survives for the whole browser session. -->
+<script>
+const seenNotifIds = new Set()   // ids we've already shown / ignored
+let notifPrimed = false          // true once the first fetch has been recorded
+</script>
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useAttrs } from 'vue'
@@ -380,6 +438,7 @@ import logo from '@/assets/sheems_logo.png'
 import { useDarkMode } from '@/composables/useDarkMode'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationsStore } from '@/stores/notifications'
+import { canAccess } from '@/utils/permissions'
 
 defineOptions({ inheritAttrs: false })
 
@@ -405,6 +464,17 @@ const route  = useRoute()
 const authStore = useAuthStore()
 const { user, authenticated } = storeToRefs(authStore)
 
+/* ─────────────────────────────────────────────────────────
+   ROLE-BASED ACCESS — mirrors the router guard and the backend
+   EnsureRole middleware. Hiding a link is only a convenience; the
+   real lock is on the server.
+───────────────────────────────────────────────────────── */
+const role = computed(() => user.value?.role || '')
+const can  = (path) => canAccess(role.value, path)
+const showInventoryMenu = computed(() => can('/products') || can('/categories'))
+const showSalesMenu     = computed(() => can('/point-of-sale') || can('/sales-transaction') || can('/customers'))
+const showManagement    = computed(() => can('/suppliers') || can('/reports') || can('/inventory-logs'))
+
 // Notification state lives in a Pinia store (a singleton for the whole
 // app session) instead of local refs here — Layout.vue remounts on every
 // navigation, so local refs couldn't survive a route change.
@@ -417,10 +487,22 @@ const salesOpen       = ref(false)
 const showLogoutModal = ref(false)
 // Drives the spinner/disabled state on the logout modal's buttons.
 const loggingOut      = ref(false)
+// Safe default focus target for the sign-out dialog (the non-destructive button).
+const logoutCancelRef = ref(null)
+
+function openLogoutModal() {
+  userMenuOpen.value = false
+  showLogoutModal.value = true
+}
+watch(showLogoutModal, async (open) => {
+  if (!open) return
+  await nextTick()
+  logoutCancelRef.value?.focus()
+})
 
 /* ─────────────────────────────────────────────────────────
-   LIVE CLOCK — backs the greeting phrase, date and time.
-   `now` ticks every 30s so the topbar stays accurate even if the page
+   LIVE CLOCK — backs the greeting phrase, date and the sidebar clock.
+   `now` ticks every 30s so the UI stays accurate even if the page
    is left open across a day/hour boundary.
 ───────────────────────────────────────────────────────── */
 const now = ref(new Date())
@@ -431,9 +513,20 @@ const todayLabel = computed(() =>
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
 )
+// Compact date for the sidebar clock, e.g. "Wed, Nov 11".
+const shortDateLabel = computed(() =>
+  now.value.toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  })
+)
 const clockLabel = computed(() =>
   now.value.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 )
+// Split "3:45 PM" into "3:45" + "PM" for the collapsed (icon-width) sidebar.
+const clockParts = computed(() => {
+  const [time = '', period = ''] = clockLabel.value.split(/\s+/)
+  return { time, period }
+})
 
 const dayPeriod = computed(() => {
   const h = now.value.getHours()
@@ -452,7 +545,7 @@ const greetingPhrase = computed(() => ({
 /* ─────────────────────────────────────────────────────────
    CONNECTION STATUS — a POS needs to say so when it's offline.
    Drives the red "Offline" chip in the topbar and the status dot on
-   the sidebar's user card (green → grey).
+   the profile button (green → grey).
 ───────────────────────────────────────────────────────── */
 const isOnline = ref(navigator.onLine)
 function onOnline()  { isOnline.value = true;  notificationsStore.fetchNotifications() }
@@ -579,33 +672,41 @@ function stopLoading() {
 
 let reqI = null, resI = null
 
-/* ─── ACCOUNT POPUP (sidebar footer) ──────────────────── */
+/* ─── ACCOUNT POPUP (topbar profile button) ───────────────
+   The trigger sits at the far right of the topbar, so the popup opens
+   BELOW it and is right-aligned to the button's right edge.
+──────────────────────────────────────────────────────────── */
 const userMenuOpen = ref(false)
 const userMiniRef  = ref(null)
 const userPopupRef = ref(null)
-const userMenuCoords = ref({ left: 0, bottom: 0 })
+const userMenuCoords = ref({ top: 0, right: 0 })
 
 const userMenuStyle = computed(() => ({
-  left:   userMenuCoords.value.left + 'px',
-  bottom: userMenuCoords.value.bottom + 'px',
+  top:   userMenuCoords.value.top + 'px',
+  right: userMenuCoords.value.right + 'px',
 }))
 
 function measureUserMenu() {
   const el = userMiniRef.value
   if (!el) return
   const rect = el.getBoundingClientRect()
-  // Clamp so the 240px popup can't run off the right edge on narrow screens.
-  const popupWidth = 240
-  const maxLeft = window.innerWidth - popupWidth - 10
   userMenuCoords.value = {
-    left:   Math.min(rect.left, Math.max(10, maxLeft)),
-    bottom: window.innerHeight - rect.top + 10, // 10px gap above the trigger
+    top:   rect.bottom + 10,                                  // 10px gap below the trigger
+    right: Math.max(10, window.innerWidth - rect.right),      // right-align, never off-screen
   }
 }
 
-async function toggleUserMenu() {
-  if (!userMenuOpen.value) { await nextTick(); measureUserMenu() }
+function toggleUserMenu() {
+  if (!userMenuOpen.value) {
+    measureUserMenu()
+    notifOpen.value = false // only one popup at a time
+  }
   userMenuOpen.value = !userMenuOpen.value
+}
+
+function toggleNotif() {
+  if (!notifOpen.value) userMenuOpen.value = false // only one popup at a time
+  notifOpen.value = !notifOpen.value
 }
 
 function onScrollOrResizeUserMenu() {
@@ -617,7 +718,7 @@ window.addEventListener('resize', onScrollOrResizeUserMenu)
 /* ─── SEARCH — "/" TO FOCUS ────────────────────────────────
    Pressing "/" anywhere outside a text field jumps focus straight into
    search (GitHub/Slack convention). Escape closes whatever is open:
-   notifications, account menu, or the sign-out dialog.
+   the sign-out dialog, account menu, notifications, or the newest toast.
 ──────────────────────────────────────────────────────────── */
 const searchInputRef = ref(null)
 const searchFocused  = ref(false)
@@ -633,13 +734,17 @@ function onGlobalKeydown(e) {
     if (showLogoutModal.value && !loggingOut.value) { showLogoutModal.value = false; return }
     if (userMenuOpen.value) { userMenuOpen.value = false; userMiniRef.value?.focus(); return }
     if (notifOpen.value)    { notifOpen.value = false; return }
+    // Nothing else open: Escape sends the newest toast to the bell.
+    const last = toasts.value[toasts.value.length - 1]
+    if (last && !last.flying) flyToast(last.id)
     return
   }
   if (e.key !== '/') return
   if (e.metaKey || e.ctrlKey || e.altKey) return
   if (isTypingTarget(document.activeElement)) return
+  if (!searchInputRef.value) return // search box isn't rendered for this role
   e.preventDefault()
-  searchInputRef.value?.focus()
+  searchInputRef.value.focus()
 }
 
 /* ─── THEMED TOOLTIPS ─────────────────────────────────────
@@ -650,7 +755,7 @@ function onGlobalKeydown(e) {
 
    Who gets one:
    - Any element with a `data-tip` attribute (topbar buttons, burger,
-     user card). Optional: data-tip-desc, data-tip-icon.
+     profile button). Optional: data-tip-desc, data-tip-icon.
      `data-tip-collapsed` = only while the sidebar is collapsed.
    - Sidebar nav links, only while the sidebar is collapsed (when it's
      expanded the label is already visible).
@@ -700,13 +805,14 @@ function onTipOver(e) {
   const inSidebar = !!el.closest('.sidebar')
   const hasTip    = el.hasAttribute('data-tip')
 
-  // Sidebar nav links only need a tooltip while collapsed; the user card
-  // (data-tip-collapsed) follows the same rule.
+  // Sidebar nav links only need a tooltip while collapsed.
   if (inSidebar && sidebarOpen.value && (!hasTip || el.hasAttribute('data-tip-collapsed'))) {
     hideTip(); return
   }
   // The notification panel is open — don't float a tooltip over it.
   if (notifOpen.value && el.closest('.notif-wrap')) { hideTip(); return }
+  // The account popup is open — no tooltip on its own trigger.
+  if (userMenuOpen.value && el === userMiniRef.value) { hideTip(); return }
 
   const label = (
     el.getAttribute('data-tip') ||
@@ -777,6 +883,7 @@ function clearSearch() {
 /* ─── NOTIFICATIONS ───────────────────────────────────── */
 const notifOpen      = ref(false)
 const notifWrapRef   = ref(null)
+const bellBtnRef     = ref(null)
 
 // Where clicking a given notification type should take the user.
 // Keyed the same way notifIcon() is — add new types to both together.
@@ -809,6 +916,10 @@ function extractProductName(n) {
  *  instantly, and the store is a singleton that survives navigation, so
  *  there's nothing to race by navigating away immediately.
  *
+ *  If the signed-in role can't open the destination (e.g. a Cashier
+ *  clicking a low-stock alert), the notification is still marked read
+ *  but no navigation happens.
+ *
  *  low_stock / out_of_stock: Product List in its "Low Stock" filter,
  *  highlighting the product by NAME (extracted from the description).
  *  product_created / sale: notifiable_id is populated, so it's passed
@@ -821,6 +932,7 @@ function goToNotification(n) {
 
   const path = NOTIF_ROUTES[n.type]
   if (!path) return
+  if (!can(path)) return
 
   if (n.type === 'low_stock' || n.type === 'out_of_stock') {
     const productName = extractProductName(n)
@@ -850,9 +962,12 @@ function goToNotification(n) {
   }
 }
 
+// low_stock and out_of_stock get DIFFERENT icons as well as different
+// colours (amber vs red), so they're distinguishable at a glance and
+// not by colour alone.
 const notifIcon = (type) => ({
   low_stock: 'fa-solid fa-triangle-exclamation',
-  out_of_stock: 'fa-solid fa-circle-exclamation',
+  out_of_stock: 'fa-solid fa-circle-xmark',
   sale: 'fa-solid fa-cash-register',
   supplier_delivery: 'fa-solid fa-truck',
   product_created: 'fa-solid fa-box-open',
@@ -865,6 +980,132 @@ function timeAgo(dateStr) {
   if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'
   return Math.floor(diff / 86400) + 'd ago'
 }
+
+/* ─── LIVE TOASTS → SLIDE TO THE BELL ─────────────────────
+   When the poll (or a manual refresh) brings in a notification we
+   haven't seen yet, a compact toast drops in at the top center. After
+   TOAST_LIFETIME it slides smoothly into the bell icon, and the bell
+   rings. Clicking the toast opens whatever it's about instead.
+
+   - No timer line / loader: the toast just waits, then goes.
+   - Hovering / focusing the toast PAUSES the countdown, so there's
+     always time to read or click it.
+   - The first fetch of a session is only "primed" (recorded, no toasts),
+     so signing in doesn't spam you with old alerts.
+   - seenNotifIds / notifPrimed live in the module-level <script> block
+     above, so navigating between pages never re-toasts anything.
+   - Max 3 toasts on screen; extra ones are still in the bell list.
+──────────────────────────────────────────────────────────── */
+const TOAST_LIFETIME = 2500  // ms a toast stays before sliding to the bell
+const TOAST_FLY_MS   = 320   // must match the .toast--flying transition
+const MAX_TOASTS     = 3
+
+const toasts   = ref([])
+const bellRing = ref(false)
+const toastTimers = new Map()
+let ringTimer = null
+
+function prefersReducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+}
+
+function pushToast(n) {
+  // Keep the stack short — drop the oldest instantly if we're full.
+  while (toasts.value.length >= MAX_TOASTS) removeToast(toasts.value[0].id)
+
+  toasts.value.push({
+    id: n.id,
+    type: n.type,
+    title: n.title,
+    desc: n.description,
+    notif: n,
+    flying: false,
+    paused: false,
+    remaining: TOAST_LIFETIME,
+    startedAt: Date.now(),
+    style: {},
+  })
+  toastTimers.set(n.id, setTimeout(() => flyToast(n.id), TOAST_LIFETIME))
+}
+
+function removeToast(id) {
+  const timer = toastTimers.get(id)
+  if (timer) { clearTimeout(timer); toastTimers.delete(id) }
+  toasts.value = toasts.value.filter(t => t.id !== id)
+}
+
+/** Hover / focus: stop the countdown and remember how much was left. */
+function pauseToast(id) {
+  const t = toasts.value.find(x => x.id === id)
+  if (!t || t.flying || t.paused) return
+  const timer = toastTimers.get(id)
+  if (timer) { clearTimeout(timer); toastTimers.delete(id) }
+  t.remaining = Math.max(400, t.remaining - (Date.now() - t.startedAt))
+  t.paused = true
+}
+
+/** Pointer leaves / focus moves away: carry on with whatever time was left. */
+function resumeToast(id) {
+  const t = toasts.value.find(x => x.id === id)
+  if (!t || t.flying || !t.paused) return
+  t.paused = false
+  t.startedAt = Date.now()
+  toastTimers.set(id, setTimeout(() => flyToast(id), t.remaining))
+}
+
+function ringBell() {
+  bellRing.value = false
+  nextTick(() => {
+    bellRing.value = true
+    if (ringTimer) clearTimeout(ringTimer)
+    ringTimer = setTimeout(() => { bellRing.value = false; ringTimer = null }, 700)
+  })
+}
+
+/** Slides the toast into the bell's centre while fading it out, then
+ *  removes it and rings the bell. Falls back to a plain removal if the
+ *  bell isn't on screen or the user prefers reduced motion. */
+async function flyToast(id) {
+  const t = toasts.value.find(x => x.id === id)
+  if (!t || t.flying) return
+
+  const timer = toastTimers.get(id)
+  if (timer) { clearTimeout(timer); toastTimers.delete(id) }
+
+  const el   = document.querySelector(`[data-toast-id="${id}"]`)
+  const bell = bellBtnRef.value
+  if (!el || !bell || prefersReducedMotion()) {
+    removeToast(id)
+    ringBell()
+    return
+  }
+
+  const a  = el.getBoundingClientRect()
+  const b  = bell.getBoundingClientRect()
+  const dx = (b.left + b.width  / 2) - (a.left + a.width  / 2)
+  const dy = (b.top  + b.height / 2) - (a.top  + a.height / 2)
+
+  t.flying = true
+  t.style  = { transform: `translate(${dx}px, ${dy}px) scale(0.15)`, opacity: 0 }
+
+  setTimeout(() => { removeToast(id); ringBell() }, TOAST_FLY_MS)
+}
+
+/** Click on a toast: open what it's about (also marks it read). */
+function openToast(t) {
+  removeToast(t.id)
+  goToNotification(t.notif)
+}
+
+// Watch the store's list. Anything unread and not seen before = new.
+watch(notifications, (list) => {
+  if (!notifPrimed) return
+  const all   = list || []
+  const fresh = all.filter(n => !n.read_at && !seenNotifIds.has(n.id))
+  all.forEach(n => seenNotifIds.add(n.id))
+  // Oldest first, so the newest ends up on the bottom of the stack.
+  fresh.reverse().slice(-MAX_TOASTS).forEach(pushToast)
+}, { deep: true })
 
 // Lets any page force an immediate notification refresh instead of
 // waiting on the 30s poll — e.g. POS dispatches this after checkout.
@@ -942,6 +1183,14 @@ onMounted(async () => {
     return // no point starting notif polling if we're bouncing to login
   }
 
+  // Record everything that already exists so only notifications that
+  // arrive AFTER this point produce a toast. Only the very first Layout
+  // mount of the session does this — later remounts keep the same set.
+  if (!notifPrimed) {
+    ;(notifications.value || []).forEach(n => seenNotifIds.add(n.id))
+    notifPrimed = true
+  }
+
   notificationsStore.startPolling()
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('notifications:refresh', onNotifyRefresh)
@@ -953,6 +1202,9 @@ onBeforeUnmount(() => {
   if (showTimer) clearTimeout(showTimer)
   if (hideTimer) clearTimeout(hideTimer)
   if (clockTimer) clearInterval(clockTimer)
+  if (ringTimer) clearTimeout(ringTimer)
+  toastTimers.forEach(timer => clearTimeout(timer))
+  toastTimers.clear()
   clearPosFabTimer()
   if (tipTimer) clearTimeout(tipTimer)
   // Polling is NOT stopped here — it belongs to notificationsStore (a
@@ -969,7 +1221,7 @@ onBeforeUnmount(() => {
 })
 
 const goToProducts = () => {
-  if (!search.value.trim()) return
+  if (!can('/products') || !search.value.trim()) return
   router.push({ path: '/products', query: { search: search.value } })
 }
 
@@ -980,12 +1232,18 @@ watch(search, val => {
 
 const confirmLogout = async () => {
   loggingOut.value = true
-  try { await api.post('/logout') }
+  try { await api.post('/api/logout') }
   catch (err) { console.error('Logout error:', err) }
   finally {
     loggingOut.value = false
     showLogoutModal.value = false
     userMenuOpen.value = false
+    // Next sign-in starts fresh: no stale "seen" ids, no leftover toasts.
+    seenNotifIds.clear()
+    notifPrimed = false
+    toastTimers.forEach(timer => clearTimeout(timer))
+    toastTimers.clear()
+    toasts.value = []
     router.push('/login')
   }
 }
@@ -1024,8 +1282,7 @@ const confirmLogout = async () => {
 /* Visible keyboard focus everywhere that's interactive in the shell */
 .burger:focus-visible,
 .icon-btn:focus-visible,
-.action-btn:focus-visible,
-.user-mini:focus-visible,
+.profile-btn:focus-visible,
 .pos-fab:focus-visible,
 .search-clear:focus-visible,
 .notif-mark-all:focus-visible,
@@ -1033,7 +1290,9 @@ const confirmLogout = async () => {
 .btn-ghost:focus-visible,
 .btn-danger:focus-visible,
 .greeting-logo-link:focus-visible,
-.brand-wrap:focus-visible {
+.brand-wrap:focus-visible,
+.toast:focus-visible,
+.toast-close:focus-visible {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
 }
@@ -1246,29 +1505,77 @@ const confirmLogout = async () => {
   border-top: 1px solid var(--c-border);
 }
 
-/* user-mini is a <button> acting as the account-menu trigger */
-.user-mini {
+/* ─── SIDEBAR CLOCK (replaces the old user card) ──────── */
+.sidebar-clock {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px; border-radius: 10px;
   overflow: hidden; white-space: nowrap;
   background: transparent;
   border: 1px solid transparent;
-  transition: background-color 0.18s ease, border-color 0.18s ease;
-  cursor: pointer;
-  width: 100%;
-  font-family: inherit;
-  text-align: left;
+  cursor: default;
+  user-select: none;
 }
-.user-mini--center { justify-content: center; padding: 8px 0; }
-.user-mini:hover,
-.user-mini--open   { background: var(--c-surface-raised); border-color: var(--c-border); }
+.sidebar-clock--collapsed {
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 8px 0;
+}
+.sidebar-clock-icon {
+  width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+.sidebar-clock-info { overflow: hidden; flex: 1; min-width: 0; }
+.sidebar-clock-time {
+  font-size: 14px; font-weight: 700;
+  color: var(--c-text-primary);
+  line-height: 1.25;
+  letter-spacing: -.005em;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-clock-date {
+  font-size: 11.5px; font-weight: 500;
+  color: var(--c-text-faint);
+  margin-top: 1px;
+}
+.sidebar-clock-mini-time {
+  font-size: 13px; font-weight: 700;
+  color: var(--c-text-primary);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-clock-mini-period {
+  font-size: 10px; font-weight: 600;
+  color: var(--c-text-faint);
+  letter-spacing: .06em;
+  line-height: 1;
+}
 
-.user-avatar-wrap  { position: relative; flex-shrink: 0; }
-.user-avatar-sm    { width: 34px; height: 34px; border-radius: 9px; object-fit: cover; display: block; }
-.user-status-dot   { position: absolute; bottom: -2px; right: -2px; width: 10px; height: 10px; background: var(--c-online); border-radius: 50%; border: 2px solid var(--c-sidebar-bg); transition: background-color .2s ease; }
+/* ─── PROFILE BUTTON (topbar, far right) ──────────────── */
+.profile-btn {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0;
+  width: 38px; height: 38px;
+  border: none; border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+  transition: box-shadow .18s ease, transform .15s ease, filter .18s ease;
+}
+.profile-btn:hover { filter: brightness(1.07); }
+.profile-btn:active { transform: translateY(1px); }
+.profile-btn--open { box-shadow: 0 0 0 3px var(--c-accent-ring); }
+
+.user-avatar-wrap  { position: relative; flex-shrink: 0; display: block; }
+.user-avatar-sm    { width: 38px; height: 38px; border-radius: 10px; object-fit: cover; display: flex; }
+.user-status-dot   { position: absolute; bottom: -2px; right: -2px; width: 10px; height: 10px; background: var(--c-online); border-radius: 50%; border: 2px solid var(--c-surface); transition: background-color .2s ease; }
 .user-status-dot--offline { background: var(--c-text-faint); }
 
-/* Vector-icon avatar — shared by sidebar-mini and the teleported popup */
+/* Vector-icon avatar — shared by the topbar button and the teleported popup */
 .user-avatar-vector {
   display: flex;
   align-items: center;
@@ -1277,20 +1584,8 @@ const confirmLogout = async () => {
   color: #fff;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);
 }
-.user-avatar-sm.user-avatar-vector       { font-size: 14px; }
+.user-avatar-sm.user-avatar-vector       { font-size: 15px; }
 .profile-menu-avatar.user-avatar-vector  { font-size: 17px; }
-
-.user-mini-info { overflow: hidden; flex: 1; }
-.user-mini-name { font-size: 13px; font-weight: 600; color: var(--c-text-primary); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; }
-.user-mini-role { font-size: 11.5px; color: var(--c-text-faint); margin-top: 1px; font-weight: 500; }
-
-.user-mini-caret {
-  font-size: 10px;
-  color: var(--c-text-faint);
-  transition: transform .2s ease;
-  flex-shrink: 0;
-}
-.user-mini-caret--down { transform: rotate(180deg); }
 
 /* ─── MAIN COLUMN ─────────────────────────────────────── */
 .main-column { flex: 1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; min-width: 0; }
@@ -1353,6 +1648,8 @@ const confirmLogout = async () => {
 
 /* ─── SEARCH ──────────────────────────────────────────── */
 .search-wrap { flex: 1; min-width: 0; max-width: 440px; margin: 0 auto; position: relative; }
+/* Keeps the right-hand actions pinned right when the search box is hidden. */
+.search-spacer { flex: 1; min-width: 0; }
 .search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--c-text-placeholder); font-size: 12px; pointer-events: none; transition: color .18s ease; }
 .search-wrap:focus-within .search-icon { color: var(--c-accent); }
 .search-input {
@@ -1401,19 +1698,7 @@ const confirmLogout = async () => {
 .search-clear:hover { background: var(--c-border); color: var(--c-text-primary); }
 
 /* ─── TOPBAR ACTIONS ──────────────────────────────────── */
-.topbar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-
-.topbar-clock {
-  font-size: 13px; font-weight: 600;
-  color: var(--c-text-muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.topbar-sep {
-  width: 1px; height: 22px;
-  background: var(--c-border-strong);
-  margin: 0 2px;
-}
+.topbar-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 
 .status-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -1426,24 +1711,6 @@ const confirmLogout = async () => {
   background: var(--c-danger-soft);
   color: var(--c-danger);
 }
-
-.action-link { display: flex; text-decoration: none; }
-
-.action-btn {
-  display: flex; align-items: center; gap: 7px;
-  height: 38px; padding: 0 16px;
-  border-radius: 10px; border: none;
-  font-size: 13.5px; font-weight: 600;
-  cursor: pointer; font-family: inherit; text-decoration: none;
-  transition: background 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease, filter .18s ease;
-}
-.action-btn--primary {
-  background: var(--c-accent);
-  color: #fff;
-  box-shadow: 0 1px 2px rgba(16,24,40,.12), inset 0 1px 0 rgba(255,255,255,.14);
-}
-.action-btn--primary:hover { filter: brightness(1.07); box-shadow: var(--c-shadow-accent); }
-.action-btn--primary:active { transform: translateY(1px); filter: brightness(.97); }
 
 .icon-btn {
   width: 38px; height: 38px;
@@ -1462,6 +1729,18 @@ const confirmLogout = async () => {
 .icon-btn--active { background: var(--c-accent-soft); border-color: var(--c-accent-border); color: var(--c-accent); }
 .icon-btn--active { box-shadow: 0 0 0 3px var(--c-accent-ring); }
 
+/* Bell rings when a toast lands in it. */
+.bell-ring { animation: bell-ring .7s ease-in-out; transform-origin: 50% 8%; }
+@keyframes bell-ring {
+  0%   { transform: rotate(0); }
+  15%  { transform: rotate(20deg); }
+  30%  { transform: rotate(-17deg); }
+  45%  { transform: rotate(13deg); }
+  60%  { transform: rotate(-9deg); }
+  75%  { transform: rotate(4deg); }
+  100% { transform: rotate(0); }
+}
+
 /* Notification count badge — a number (capped at "9+") so it's a
    triage signal, not just a "something happened" flag. */
 .notif-badge {
@@ -1478,13 +1757,19 @@ const confirmLogout = async () => {
   border: 2px solid var(--c-surface);
   font-variant-numeric: tabular-nums;
 }
+.notif-badge--pop { animation: badge-pop .4s cubic-bezier(.3,1.6,.5,1); }
+@keyframes badge-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
 
 /* ─── NOTIFICATIONS ───────────────────────────────────── */
 .notif-wrap { position: relative; }
 
 .notif-menu {
   position: absolute; right: 0; top: calc(100% + 10px);
-  width: 360px; max-width: calc(100vw - 24px); max-height: 460px;
+  width: 380px; max-width: calc(100vw - 24px); max-height: 480px;
   display: flex; flex-direction: column;
   background: var(--c-surface-overlay);
   border: 1px solid var(--c-border);
@@ -1498,6 +1783,7 @@ const confirmLogout = async () => {
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px;
   padding: 10px 10px 10px;
+  flex-shrink: 0;
 }
 .notif-menu-heading { display: flex; align-items: center; gap: 8px; }
 .notif-menu-title { font-size: 14px; font-weight: 700; color: var(--c-text-primary); }
@@ -1516,7 +1802,13 @@ const confirmLogout = async () => {
 }
 .notif-mark-all:hover { background: var(--c-accent-soft); }
 
-.notif-list { list-style: none; margin: 4px 0 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.notif-list {
+  list-style: none; margin: 4px 0 0; padding: 0 2px 0 0;
+  overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border-strong) transparent;
+}
 
 .notif-item {
   display: flex; align-items: flex-start; gap: 12px;
@@ -1538,10 +1830,27 @@ const confirmLogout = async () => {
   font-size: 13px;
   background: var(--c-surface-sunken); color: var(--c-text-muted);
 }
-.notif-item-icon--low_stock,
-.notif-item-icon--out_of_stock       { background: var(--c-danger-soft);   color: var(--c-danger); }
+
+/* ── STOCK ALERT COLOURS ───────────────────────────────
+   LOW STOCK  → orange-brown (amber): a warning, still sellable.
+   OUT OF STOCK → red: it's gone, act now.
+   Fixed hex values (with a dark-theme variant) so the two never
+   collapse into the same colour if the theme's danger/warn tokens change. */
+.notif-item-icon--low_stock          { background: rgba(194,98,12,0.14);  color: #c2620c; }
+.notif-item-icon--out_of_stock       { background: var(--c-danger-soft);  color: var(--c-danger); }
+html[data-theme="dark"] .notif-item-icon--low_stock { background: rgba(251,146,60,0.18); color: #fb923c; }
+
+.notif-item-title--low_stock         { color: #b45309; }
+.notif-item-title--out_of_stock      { color: var(--c-danger); }
+html[data-theme="dark"] .notif-item-title--low_stock { color: #fdba74; }
+
+.notif-item-dot--low_stock           { background: #c2620c; }
+.notif-item-dot--out_of_stock        { background: var(--c-danger); }
+html[data-theme="dark"] .notif-item-dot--low_stock { background: #fb923c; }
+
 .notif-item-icon--sale               { background: var(--c-accent-soft);   color: var(--c-accent); }
-.notif-item-icon--supplier_delivery  { background: var(--c-surface-sunken); color: var(--c-text-secondary); }
+.notif-item-icon--supplier_delivery  { background: rgba(37,99,235,0.12); color: #2563eb; }
+html[data-theme="dark"] .notif-item-icon--supplier_delivery { background: rgba(96,165,250,0.18); color: #93c5fd; }
 /* New-product notifications get their own green so they read as a
    positive "something was added" event. */
 .notif-item-icon--product_created    { background: rgba(16,185,129,0.12); color: #10b981; }
@@ -1592,6 +1901,121 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 .pmenu-item--danger      { color: var(--c-danger); }
 .pmenu-item--danger:hover { background: var(--c-danger-soft); color: var(--c-danger); }
 .pmenu-item--danger:hover .pmenu-icon-wrap--danger { background: var(--c-danger-soft-h); }
+
+/* ═══════════════════════════════════════════════════════
+   LIVE TOASTS — compact card at the very top center.
+   Drops in, waits briefly, then slides smoothly into the bell.
+
+   • Each type has its own accent. The icon chip is SOLID accent colour
+     with a white glyph, the card is lightly tinted by that accent, and
+     the title takes the accent colour — so type reads at a glance.
+   • No timer line / loader. Hover or keyboard focus pauses the wait.
+════════════════════════════════════════════════════════ */
+.toast-stack {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 50%;
+  transform: translateX(-50%);   /* centered; toasts animate on their own transform */
+  z-index: 9000;                 /* above page + topbar, below tooltip/modal */
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;          /* the stack never blocks clicks; toasts opt back in */
+}
+
+.toast {
+  /* Per-type tokens (overridden below). */
+  --t-accent: var(--c-accent);
+  --t-title:  var(--c-text-primary);
+
+  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 8px 8px 8px;
+  background: var(--c-surface-overlay);                                            /* fallback */
+  background: color-mix(in srgb, var(--t-accent) 9%, var(--c-surface-overlay));    /* tinted */
+  border: 1px solid var(--c-border-strong);
+  border: 1px solid color-mix(in srgb, var(--t-accent) 28%, var(--c-border));
+  border-radius: 12px;
+  box-shadow:
+    0 10px 24px -8px rgba(16,24,40,.26),
+    0 2px 5px rgba(16,24,40,.10);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+  transform-origin: center;
+  transition: box-shadow .18s ease;
+  /* "backwards" (not "both"): once the entrance ends, the animation lets go
+     of `transform`, so the inline slide-to-bell transform can take over. */
+  animation: toast-in .26s cubic-bezier(.2,.8,.25,1) backwards;
+}
+.toast:hover { box-shadow: 0 14px 30px -8px rgba(16,24,40,.32), 0 3px 8px rgba(16,24,40,.12); }
+
+/* Colour-code by type — same palette as the bell list. */
+.toast--sale              { --t-accent: var(--c-accent); }
+.toast--low_stock         { --t-accent: #d97706; --t-title: #92400e; }   /* amber */
+.toast--out_of_stock      { --t-accent: var(--c-danger); --t-title: var(--c-danger); } /* red */
+.toast--product_created   { --t-accent: #059669; --t-title: #047857; }   /* green */
+.toast--supplier_delivery { --t-accent: #2563eb; --t-title: #1d4ed8; }   /* blue */
+html[data-theme="dark"] .toast--low_stock         { --t-accent: #f59e0b; --t-title: #fcd34d; }
+html[data-theme="dark"] .toast--product_created   { --t-accent: #34d399; --t-title: #6ee7b7; }
+html[data-theme="dark"] .toast--supplier_delivery { --t-accent: #60a5fa; --t-title: #93c5fd; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-16px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0)     scale(1); }
+}
+
+/* Sliding to the bell: transform + opacity are set inline from JS
+   (translate to bell centre + small scale); this just supplies a simple
+   ease. Duration must match TOAST_FLY_MS in the script. */
+.toast--flying {
+  pointer-events: none;
+  transition:
+    transform .32s cubic-bezier(.4,0,.2,1),
+    opacity   .32s ease;
+}
+
+.toast-icon {
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+  background: var(--t-accent);
+  color: #fff;
+}
+.toast-body  { flex: 1; min-width: 0; }
+.toast-title {
+  font-size: 12.5px; font-weight: 700; line-height: 1.3;
+  color: var(--t-title);
+  letter-spacing: -.005em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.toast-desc  {
+  font-size: 11.5px; color: var(--c-text-secondary); margin-top: 1px; line-height: 1.35;
+  /* up to two lines so stock alerts with long product names stay readable */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.toast-close {
+  width: 22px; height: 22px; flex-shrink: 0;
+  align-self: flex-start;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 6px;
+  background: transparent;
+  color: var(--c-text-faint);
+  font-size: 11px; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.toast-close:hover { background: color-mix(in srgb, var(--t-accent) 14%, transparent); color: var(--c-text-primary); }
 
 /* ─── PAGE CONTENT ────────────────────────────────────── */
 .page-content {
@@ -1861,14 +2285,6 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 .dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-6px) scale(.98); }
 
 /* ═══════════════════════════════════════════════════════
-   RESPONSIVE — SMALL DESKTOP (≤1180px)
-   The live clock is the first thing to go when space gets tight.
-════════════════════════════════════════════════════════ */
-@media (max-width: 1180px) {
-  .topbar-clock, .topbar-sep { display: none; }
-}
-
-/* ═══════════════════════════════════════════════════════
    RESPONSIVE — TABLET (≤1024px)
 ════════════════════════════════════════════════════════ */
 @media (max-width: 1024px) {
@@ -1884,17 +2300,18 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 ════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
   .topbar { height: 58px; min-height: 58px; padding: 0 14px; gap: 10px; }
+  .topbar-actions { gap: 10px; }
   .greeting-sub { display: none; }
   .greeting-name { font-size: 13px; }
   .greeting-logo { width: 28px; height: 28px; border-radius: 8px; }
   .search-kbd { display: none; }
   .search-wrap { max-width: none; }
   .search-input { height: 38px; }
-  /* Collapses "Add item" to an icon-only button on small screens. */
-  .action-btn--primary span { display: none; }
-  .action-btn--primary { padding: 0 11px; height: 38px; }
   .page-content { padding: 16px 16px 28px; }
   .content-inner { max-width: 100%; }
+
+  /* Toasts stay at the very top, centered. */
+  .toast-stack { top: calc(env(safe-area-inset-top, 0px) + 8px); width: 300px; max-width: calc(100vw - 20px); }
 }
 
 @media (max-width: 640px) {
@@ -1903,16 +2320,17 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 
 @media (max-width: 400px) {
   .modal { padding: 26px 18px 20px; }
-  .notif-menu { right: -8px; }
+  .notif-menu { right: -48px; }
 }
 
-/* Respect reduced-motion: no sliding, pulsing or bouncing */
+/* Respect reduced-motion: no sliding, pulsing, bouncing or flying */
 @media (prefers-reduced-motion: reduce) {
   .sidebar, .pos-fab, .pos-fab-label, .dropdown-enter-active, .dropdown-leave-active,
   .fade-enter-active, .fade-leave-active, .skip-link, .topbar, .tip-enter-active, .tip-leave-active {
     transition-duration: .01ms !important;
   }
-  .loading-bar-fill, .top-progress-fill, .loading-logo, .dot {
+  .loading-bar-fill, .top-progress-fill, .loading-logo, .dot,
+  .toast, .bell-ring, .notif-badge--pop {
     animation: none !important;
   }
 }
@@ -1939,4 +2357,5 @@ html[data-theme="dark"] .notif-item-icon--product_created { background: rgba(16,
 .user-popup-id       { min-width: 0; }
 .profile-menu-name   { font-size: 13.5px; font-weight: 700; color: var(--c-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-menu-email  { font-size: 12px; color: var(--c-text-faint); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-menu-role   { font-size: 11.5px; color: var(--c-text-faint); margin-top: 1px; font-weight: 500; }
 </style>

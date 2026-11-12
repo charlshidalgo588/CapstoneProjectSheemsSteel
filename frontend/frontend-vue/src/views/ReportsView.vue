@@ -2,7 +2,7 @@
   <Layout title="Reports">
     <div id="reports-print-area" class="reports">
 
-      <!-- ── PAGE HEADER: title + export actions ── -->
+      <!-- ── PAGE HEADER: title only (export actions live in the sticky bar below) ── -->
       <header class="page-header">
         <div class="page-heading">
           <h1 class="page-title">Reports</h1>
@@ -11,25 +11,10 @@
             <span v-if="isCurrentPeriod" class="chip chip--live">In progress</span>
           </p>
         </div>
-
-        <div class="report-toolbar" role="group" aria-label="Export this report">
-          <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying' || loading">
-            <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
-            {{ copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy' }}
-          </button>
-          <button type="button" class="rt-btn" @click="exportCSV" :disabled="loading">
-            <i class="fa-solid" :class="csvState === 'done' ? 'fa-check' : 'fa-file-csv'"></i>
-            {{ csvState === 'done' ? 'Saved' : 'CSV' }}
-          </button>
-          <button type="button" class="rt-btn rt-btn--primary" @click="printReport" :disabled="loading || printing">
-            <i class="fa-solid" :class="printing ? 'fa-spinner fa-spin' : 'fa-print'"></i>
-            {{ printing ? 'Preparing…' : 'Print' }}
-          </button>
-        </div>
       </header>
 
-      <!-- ── PERIOD BAR: group by + navigate ── -->
-      <div class="period-bar" role="group" aria-label="Report period">
+      <!-- ── PERIOD BAR (sticky at the very top): group by + navigate + export actions ── -->
+      <div class="period-bar" ref="periodBar" :style="{ top: stickyTop + 'px' }" role="group" aria-label="Report period">
         <div class="seg" role="group" aria-label="Group report by">
           <button
             v-for="m in MODES"
@@ -88,7 +73,7 @@
                   </button>
                 </div>
 
-                <!-- Days -->
+                <!-- Days (Day mode picks a day, Week mode picks the week that day belongs to) -->
                 <div v-if="pickerView === 'days'" class="pk-days">
                   <span v-for="w in PK_WEEKDAYS" :key="w" class="pk-dow">{{ w }}</span>
                   <template v-for="(c, i) in pkDayCells" :key="i">
@@ -157,21 +142,29 @@
 
         <button v-if="!isCurrentPeriod" type="button" class="link-btn" @click="goCurrent">{{ currentLabel }}</button>
 
-        <div class="period-status" aria-live="polite">
-          <span v-if="loading" class="period-status-text period-status-text--busy">
-            <i class="fa-solid fa-spinner fa-spin"></i> Updating…
-          </span>
-          <span v-else-if="lastUpdated" class="period-status-text">Updated {{ lastUpdated }}</span>
-          <button
-            type="button"
-            class="icon-btn icon-btn--sm"
-            aria-label="Refresh report"
-            title="Refresh"
-            :disabled="loading"
-            @click="loadReports"
-          >
-            <i class="fa-solid fa-rotate"></i>
-          </button>
+        <!-- Right side: status text + Copy / CSV / Print -->
+        <div class="period-end">
+          <div class="period-status" aria-live="polite">
+            <span v-if="loading" class="period-status-text period-status-text--busy">
+              <i class="fa-solid fa-spinner fa-spin"></i> Updating…
+            </span>
+            <span v-else-if="lastUpdated" class="period-status-text">Updated {{ lastUpdated }}</span>
+          </div>
+
+          <div class="report-toolbar" role="group" aria-label="Export this report">
+            <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying' || loading">
+              <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
+              {{ copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy' }}
+            </button>
+            <button type="button" class="rt-btn" @click="exportCSV" :disabled="loading">
+              <i class="fa-solid" :class="csvState === 'done' ? 'fa-check' : 'fa-file-csv'"></i>
+              {{ csvState === 'done' ? 'Saved' : 'CSV' }}
+            </button>
+            <button type="button" class="rt-btn rt-btn--primary" @click="printReport" :disabled="loading || printing">
+              <i class="fa-solid" :class="printing ? 'fa-spinner fa-spin' : 'fa-print'"></i>
+              {{ printing ? 'Preparing…' : 'Print' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -272,7 +265,7 @@
           </div>
         </section>
 
-        <!-- ── 3. HEATMAP (adapts: Day → week, Month → calendar, Year → months) ── -->
+        <!-- ── 3. HEATMAP (adapts: Day/Week → week strip, Month → calendar, Year → months) ── -->
         <section class="card" aria-labelledby="rp-heat">
           <header class="card-head">
             <div>
@@ -287,11 +280,11 @@
 
           <p v-if="mode === 'day' && weekFailed" class="heat-note heat-note--warn">
             <i class="fa-solid fa-triangle-exclamation"></i>
-            Couldn't load the other days of this week. Use Refresh to try again.
+            Couldn't load the other days of this week. Change the period and come back to try again.
           </p>
 
           <div class="heat-layout">
-            <div class="heat" :class="[`heat--${mode}`, { 'heat--profit': calMetric === 'profit' }]">
+            <div class="heat" :class="[`heat--${heatShape}`, { 'heat--profit': calMetric === 'profit' }]">
               <template v-if="mode === 'month'">
                 <span v-for="(w, i) in weekdays" :key="'w' + i" class="heat-dow">{{ w }}</span>
               </template>
@@ -309,7 +302,7 @@
                   :title="`${c.title}: ₱${price(c.v)}`"
                   @click="selectHeat(c.key)"
                 >
-                  <template v-if="mode === 'day'">
+                  <template v-if="heatShape === 'day'">
                     <span class="hc-dow">{{ c.label }}</span>
                     <span class="hc-num">{{ c.num }}</span>
                     <span class="hc-amt">{{ c.future ? '' : '₱' + compact(c.v) }}</span>
@@ -787,17 +780,42 @@ const prefersReducedMotion = () =>
 
 const formatStamp = (d = new Date()) => d.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
 
+// 'YYYY-MM-DD' shifted by n days -> 'YYYY-MM-DD'
+function shiftDayStr(dayStr, n) {
+  const d = new Date(`${dayStr}T00:00:00`)
+  d.setDate(d.getDate() + n)
+  return toDayStr(d)
+}
+// Weeks run Sunday → Saturday. weekStr is the Sunday.
+const weekEndStr = (weekStr) => shiftDayStr(weekStr, 6)
+
+// "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" / "Dec 28, 2026 – Jan 3, 2027"
+function formatWeekRange(weekStr) {
+  const s = new Date(`${weekStr}T00:00:00`)
+  const e = new Date(`${weekEndStr(weekStr)}T00:00:00`)
+  const mon = (d) => d.toLocaleDateString('en-US', { month: 'short' })
+  if (s.getFullYear() !== e.getFullYear()) {
+    return `${mon(s)} ${s.getDate()}, ${s.getFullYear()} – ${mon(e)} ${e.getDate()}, ${e.getFullYear()}`
+  }
+  if (s.getMonth() !== e.getMonth()) {
+    return `${mon(s)} ${s.getDate()} – ${mon(e)} ${e.getDate()}, ${e.getFullYear()}`
+  }
+  return `${mon(s)} ${s.getDate()} – ${e.getDate()}, ${e.getFullYear()}`
+}
+
 /* ════════════════════════════════════════════════════════════
-   PERIOD STATE  (Day / Month / Year)
+   PERIOD STATE  (Day / Week / Month / Year)
 ════════════════════════════════════════════════════════════ */
 const MODES = [
   { key: 'day',   label: 'Day' },
+  { key: 'week',  label: 'Week' },
   { key: 'month', label: 'Month' },
   { key: 'year',  label: 'Year' },
 ]
 
 const today             = new Date()
 const currentDayValue   = toDayStr(today)    // 'YYYY-MM-DD'
+const currentWeekValue  = toDayStr(weekStartOf(currentDayValue)) // Sunday of this week
 const currentMonthValue = toMonthStr(today)  // 'YYYY-MM'
 const currentYear       = today.getFullYear()
 const yearOptions       = Array.from({ length: 12 }, (_, i) => currentYear - i) // newest first, 12 = a clean 3 × 4 grid
@@ -805,6 +823,7 @@ const minYear           = yearOptions[yearOptions.length - 1]
 
 const mode          = ref('month')
 const selectedDay   = ref(currentDayValue)
+const selectedWeek  = ref(currentWeekValue) // Sunday of the selected week
 const selectedMonth = ref(currentMonthValue)
 const selectedYear  = ref(currentYear)
 
@@ -812,21 +831,23 @@ const periodLabel      = ref('')
 const printGeneratedAt = ref('')
 const lastUpdated      = ref('')
 
-const modeNoun        = computed(() => ({ day: 'day', month: 'month', year: 'year' }[mode.value]))
-const currentLabel    = computed(() => ({ day: 'Today', month: 'This month', year: 'This year' }[mode.value]))
-const seriesWord      = computed(() => ({ day: 'Hourly', month: 'Daily', year: 'Monthly' }[mode.value]))
-const bucketWord      = computed(() => ({ day: 'Hour', month: 'Day', year: 'Month' }[mode.value]))
-const peakWord        = computed(() => ({ day: 'Peak hour', month: 'Best day', year: 'Best month' }[mode.value]))
-const reportTypeLabel = computed(() => ({ day: 'Daily Sales Report', month: 'Monthly Sales Report', year: 'Annual Sales Report' }[mode.value]))
+const modeNoun        = computed(() => ({ day: 'day', week: 'week', month: 'month', year: 'year' }[mode.value]))
+const currentLabel    = computed(() => ({ day: 'Today', week: 'This week', month: 'This month', year: 'This year' }[mode.value]))
+const seriesWord      = computed(() => ({ day: 'Hourly', week: 'Daily', month: 'Daily', year: 'Monthly' }[mode.value]))
+const bucketWord      = computed(() => ({ day: 'Hour', week: 'Day', month: 'Day', year: 'Month' }[mode.value]))
+const peakWord        = computed(() => ({ day: 'Peak hour', week: 'Best day', month: 'Best day', year: 'Best month' }[mode.value]))
+const reportTypeLabel = computed(() => ({ day: 'Daily Sales Report', week: 'Weekly Sales Report', month: 'Monthly Sales Report', year: 'Annual Sales Report' }[mode.value]))
 
 const canGoNext = computed(() => {
   if (mode.value === 'year')  return selectedYear.value < currentYear
   if (mode.value === 'month') return !!selectedMonth.value && selectedMonth.value < currentMonthValue
+  if (mode.value === 'week')  return !!selectedWeek.value && selectedWeek.value < currentWeekValue
   return !!selectedDay.value && selectedDay.value < currentDayValue
 })
 const canGoPrev = computed(() => {
   if (mode.value === 'year')  return selectedYear.value > minYear
   if (mode.value === 'month') return !!selectedMonth.value
+  if (mode.value === 'week')  return !!selectedWeek.value && selectedWeek.value > `${minYear}-01-01`
   return !!selectedDay.value
 })
 const isCurrentPeriod = computed(() => !canGoNext.value)
@@ -846,6 +867,13 @@ function periodParams(offset = 0) {
       label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
     }
   }
+  if (mode.value === 'week') {
+    const start = shiftDayStr(selectedWeek.value, offset * 7)
+    return {
+      params: { mode: 'week', start, end: weekEndStr(start) },
+      label: formatWeekRange(start),
+    }
+  }
   const d = new Date(`${selectedDay.value}T00:00:00`)
   d.setDate(d.getDate() + offset)
   return {
@@ -854,19 +882,27 @@ function periodParams(offset = 0) {
   }
 }
 
-// Keeps the three pickers pointing at the same moment in time when the
-// person switches Day / Month / Year, instead of jumping back to "now".
+// Keeps the pickers pointing at the same moment in time when the
+// person switches Day / Week / Month / Year, instead of jumping back to "now".
 function syncPickers(from) {
   if (from === 'day' && selectedDay.value) {
+    selectedMonth.value = selectedDay.value.slice(0, 7)
+    selectedYear.value  = Number(selectedDay.value.slice(0, 4))
+    selectedWeek.value  = toDayStr(weekStartOf(selectedDay.value))
+  } else if (from === 'week' && selectedWeek.value) {
+    // Today if the week is the current one, otherwise the week's first day.
+    selectedDay.value   = selectedWeek.value === currentWeekValue ? currentDayValue : selectedWeek.value
     selectedMonth.value = selectedDay.value.slice(0, 7)
     selectedYear.value  = Number(selectedDay.value.slice(0, 4))
   } else if (from === 'month' && selectedMonth.value) {
     selectedYear.value = Number(selectedMonth.value.slice(0, 4))
     selectedDay.value  = selectedMonth.value === currentMonthValue ? currentDayValue : `${selectedMonth.value}-01`
+    selectedWeek.value = toDayStr(weekStartOf(selectedDay.value))
   } else if (from === 'year') {
     const y = selectedYear.value
     selectedMonth.value = y === currentYear ? currentMonthValue : `${y}-01`
     selectedDay.value   = y === currentYear ? currentDayValue   : `${y}-01-01`
+    selectedWeek.value  = toDayStr(weekStartOf(selectedDay.value))
   }
 }
 
@@ -887,6 +923,8 @@ async function shiftPeriod(delta) {
   } else if (mode.value === 'month') {
     const [yy, mm] = selectedMonth.value.split('-').map(Number)
     selectedMonth.value = toMonthStr(new Date(yy, mm - 1 + delta, 1))
+  } else if (mode.value === 'week') {
+    selectedWeek.value = shiftDayStr(selectedWeek.value, delta * 7)
   } else {
     const d = new Date(`${selectedDay.value}T00:00:00`)
     d.setDate(d.getDate() + delta)
@@ -897,13 +935,43 @@ async function shiftPeriod(delta) {
 
 async function goCurrent() {
   selectedDay.value   = currentDayValue
+  selectedWeek.value  = currentWeekValue
   selectedMonth.value = currentMonthValue
   selectedYear.value  = currentYear
   await loadReports()
 }
 
 /* ════════════════════════════════════════════════════════════
+   STICKY PERIOD BAR: stick to the very top of the scroll area
+   The app shell's scrolling container has its own top padding, and a sticky
+   element stops *inside* that padding, which leaves a strip of page content
+   visible above the bar. We measure that padding and offset the bar by the
+   same amount (a negative `top`) so it sits flush against the top edge.
+════════════════════════════════════════════════════════════ */
+const periodBar = ref(null)
+const stickyTop = ref(0)
+
+function findScrollParent(el) {
+  let node = el ? el.parentElement : null
+  while (node && node !== document.body && node !== document.documentElement) {
+    const { overflowY } = getComputedStyle(node)
+    if (/(auto|scroll|overlay)/.test(overflowY)) return node
+    node = node.parentElement
+  }
+  return null
+}
+
+function updateStickyTop() {
+  const scroller = findScrollParent(periodBar.value)
+  if (!scroller) { stickyTop.value = 0; return }
+  const cs = getComputedStyle(scroller)
+  stickyTop.value = -(parseFloat(cs.paddingTop) || 0)
+}
+
+/* ════════════════════════════════════════════════════════════
    CALENDAR PICKER  (custom popover: days → months → years)
+   Day mode picks a day. Week mode shows the same day grid, and
+   clicking any day selects the whole week (Sun – Sat) it belongs to.
 ════════════════════════════════════════════════════════════ */
 const PK_WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTH_NAMES = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'long' }))
@@ -916,19 +984,24 @@ const browseMonth   = ref(today.getMonth()) // 0-11
 const pickerRoot    = ref(null)
 const pickerTrigger = ref(null)
 
+// Day and Week both drill down to a day grid.
+const pickerDaysMode = computed(() => mode.value === 'day' || mode.value === 'week')
+
 const pickerLabel = computed(() => {
   if (mode.value === 'year') return String(selectedYear.value)
   if (mode.value === 'month') {
     const [y, m] = (selectedMonth.value || currentMonthValue).split('-').map(Number)
     return `${MONTH_NAMES[m - 1]} ${y}`
   }
+  if (mode.value === 'week') return formatWeekRange(selectedWeek.value || currentWeekValue)
   const d = new Date(`${selectedDay.value || currentDayValue}T00:00:00`)
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 })
 
 function openPicker() {
-  if (mode.value === 'day') {
-    const [y, m] = (selectedDay.value || currentDayValue).split('-').map(Number)
+  if (pickerDaysMode.value) {
+    const src = mode.value === 'week' ? (selectedWeek.value || currentWeekValue) : (selectedDay.value || currentDayValue)
+    const [y, m] = src.split('-').map(Number)
     browseYear.value = y
     browseMonth.value = m - 1
     pickerView.value = 'days'
@@ -993,14 +1066,18 @@ const pkDayCells = computed(() => {
   const count = new Date(y, m + 1, 0).getDate()
   const lead = new Date(y, m, 1).getDay()
   const out = Array(lead).fill(null)
+  const weekMode = mode.value === 'week'
+  const wkStart = selectedWeek.value
+  const wkEnd = wkStart ? weekEndStr(wkStart) : ''
   for (let d = 1; d <= count; d++) {
     const key = `${y}-${pad(m + 1)}-${pad(d)}`
     out.push({
       key, d,
       title: new Date(y, m, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
-      future: key > currentDayValue,
+      // Week mode: any day of the current week is still pickable (it selects the current week).
+      future: weekMode ? toDayStr(weekStartOf(key)) > currentWeekValue : key > currentDayValue,
       today: key === currentDayValue,
-      selected: mode.value === 'day' && key === selectedDay.value,
+      selected: weekMode ? (key >= wkStart && key <= wkEnd) : (mode.value === 'day' && key === selectedDay.value),
     })
   }
   return out
@@ -1011,6 +1088,7 @@ const pkMonthCells = computed(() =>
     const selected =
       mode.value === 'month' ? key === selectedMonth.value
       : mode.value === 'day' ? (selectedDay.value || '').startsWith(key)
+      : mode.value === 'week' ? (selectedWeek.value || '').startsWith(key)
       : false
     return {
       key, m, label,
@@ -1030,13 +1108,14 @@ const pkYearCells = computed(() =>
 )
 
 async function pkPickDay(key) {
-  selectedDay.value = key
+  if (mode.value === 'week') selectedWeek.value = toDayStr(weekStartOf(key))
+  else selectedDay.value = key
   closePicker(true)
   await loadReports()
 }
 async function pkPickMonth(m) {
-  if (mode.value === 'day') {
-    // Day mode: choosing a month just opens its days.
+  if (pickerDaysMode.value) {
+    // Day / Week mode: choosing a month just opens its days.
     browseMonth.value = m
     pickerView.value = 'days'
     return
@@ -1052,9 +1131,9 @@ async function pkPickYear(y) {
     await loadReports()
     return
   }
-  // Day / Month mode: choosing a year opens its months.
+  // Day / Week / Month mode: choosing a year opens its months.
   browseYear.value = y
-  if (mode.value === 'day' && y === currentYear && browseMonth.value > today.getMonth()) browseMonth.value = today.getMonth()
+  if (pickerDaysMode.value && y === currentYear && browseMonth.value > today.getMonth()) browseMonth.value = today.getMonth()
   pickerView.value = 'months'
 }
 async function pkGoCurrent() {
@@ -1182,11 +1261,13 @@ const trendPlain = computed(() => {
 const chartRows = computed(() => {
   const profitMap = {}
   monthlyProfitSeries.value.forEach((p) => { profitMap[p.date] = num(p.profit ?? p.total) })
-  return monthlySales.value.map((s) => ({
-    date: s.date,
-    total: num(s.total),
-    profit: profitMap[s.date] ?? num(s.profit),
-  }))
+  return monthlySales.value
+    .map((s) => ({
+      date: s.date,
+      total: num(s.total),
+      profit: profitMap[s.date] ?? num(s.profit),
+    }))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
 })
 // Only buckets that actually had activity (keeps printed/copied tables tidy).
 const breakdownRows = computed(() => chartRows.value.filter((r) => r.total || r.profit))
@@ -1343,12 +1424,13 @@ const avgPrice = (item) => (item && item.total_quantity ? item.total_sales / ite
 const PRINT_TOP_LIMIT = 15
 const brandInitials = BUSINESS_NAME.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()
 
-// Document reference, e.g. SR-M-202611 / SR-D-20261108 / SR-Y-2026
+// Document reference, e.g. SR-M-202611 / SR-W-20261108 / SR-D-20261108 / SR-Y-2026
 const reportRef = computed(() => {
-  const code = { day: 'D', month: 'M', year: 'Y' }[mode.value]
+  const code = { day: 'D', week: 'W', month: 'M', year: 'Y' }[mode.value]
   const key =
     mode.value === 'year' ? String(selectedYear.value)
     : mode.value === 'month' ? String(selectedMonth.value || '').replace('-', '')
+    : mode.value === 'week' ? String(selectedWeek.value || '').replace(/-/g, '')
     : String(selectedDay.value || '').replace(/-/g, '')
   return `SR-${code}-${key}`
 })
@@ -1565,13 +1647,16 @@ function setTopMetric(metric) {
 }
 
 /* ════════════════════════════════════════════════════════════
-   HEATMAP  (adapts to the period: Day → week, Month → calendar, Year → months)
+   HEATMAP  (adapts to the period: Day/Week → 7-day strip, Month → calendar, Year → months)
 ════════════════════════════════════════════════════════════ */
 const weekdays   = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 const calMetric  = ref('total') // 'total' | 'profit'
 const heatSelKey = ref(null)
 const weekMap    = ref({})      // 'YYYY-MM-DD' -> { total, profit }  (Day mode only)
 const weekFailed = ref(false)
+
+// Day and Week both render the same 7-day strip layout.
+const heatShape = computed(() => (mode.value === 'week' ? 'day' : mode.value))
 
 // Sunday-start week that contains the given YYYY-MM-DD.
 function weekStartOf(dayStr) {
@@ -1614,7 +1699,7 @@ async function fetchWeekMap() {
   }
 }
 
-// Month / year buckets come straight from the main report.
+// Month / week / year buckets come straight from the main report.
 const rowMap = computed(() => {
   const len = mode.value === 'year' ? 7 : 10
   const m = {}
@@ -1662,13 +1747,17 @@ const heatCells = computed(() => {
       })
     }
   } else {
-    if (!selectedDay.value) return []
-    const start = weekStartOf(selectedDay.value)
+    // Day and Week mode: a Sun–Sat strip. Week mode reads the main report; Day mode uses weekMap.
+    const isWeekMode = mode.value === 'week'
+    const anchor = isWeekMode ? selectedWeek.value : selectedDay.value
+    if (!anchor) return []
+    const start = isWeekMode ? new Date(`${anchor}T00:00:00`) : weekStartOf(anchor)
+    const source = isWeekMode ? rowMap.value : weekMap.value
     for (let i = 0; i < 7; i++) {
       const dt = new Date(start)
       dt.setDate(start.getDate() + i)
       const key = toDayStr(dt)
-      const r = weekMap.value[key]
+      const r = source[key]
       out.push({
         key,
         label: dt.toLocaleDateString('en-US', { weekday: 'short' }),
@@ -1697,18 +1786,19 @@ const heatReal    = computed(() => heatCells.value.filter(Boolean))
 const heatHasData = computed(() => heatReal.value.some((c) => c.total > 0 || c.profit > 0))
 const heatSum     = computed(() => heatReal.value.reduce((a, c) => a + c.total, 0))
 
-const heatRangeWord = computed(() => ({ day: 'week', month: 'month', year: 'year' }[mode.value]))
+const heatRangeWord = computed(() => ({ day: 'week', week: 'week', month: 'month', year: 'year' }[mode.value]))
 const heatCellWord  = computed(() => (mode.value === 'year' ? 'month' : 'day'))
 
 const heatTitle = computed(() => {
-  if (mode.value === 'day') return 'Week at a glance'
+  if (mode.value === 'day' || mode.value === 'week') return 'Week at a glance'
   return `${periodLabel.value || (mode.value === 'year' ? 'Year' : 'Month')} at a glance`
 })
 const heatSub = computed(() => {
   const what = mode.value === 'year' ? 'months' : 'days'
   const pick = `Select a ${heatCellWord.value} for its numbers.`
-  if (mode.value === 'day' && selectedDay.value) {
-    const s = weekStartOf(selectedDay.value)
+  const anchor = mode.value === 'week' ? selectedWeek.value : mode.value === 'day' ? selectedDay.value : ''
+  if (anchor) {
+    const s = mode.value === 'week' ? new Date(`${anchor}T00:00:00`) : weekStartOf(anchor)
     const e = new Date(s)
     e.setDate(e.getDate() + 6)
     const f = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -1745,7 +1835,7 @@ const heatDetail = computed(() => {
   }
 })
 
-// Drill down: month → that day's report, year → that month's report.
+// Drill down: week/month → that day's report, year → that month's report.
 const canOpenHeat = computed(() => {
   const c = heatActive.value
   if (!c || c.future) return false
@@ -1772,6 +1862,10 @@ async function openHeatCell() {
 
 /* ════════════════════════════════════════════════════════════
    API
+   Week mode calls GET /api/reports with
+     { mode: 'week', start: 'YYYY-MM-DD', end: 'YYYY-MM-DD' }
+   (start = Sunday, end = Saturday) and expects the same response shape
+   as month mode, with monthly_sales / monthly_profit dated per day.
 ════════════════════════════════════════════════════════════ */
 // Guards against out-of-order responses when the person clicks quickly.
 let requestSeq = 0
@@ -2010,7 +2104,11 @@ function buildReportCSV() {
 }
 
 function reportFileSlug() {
-  const fallback = mode.value === 'year' ? selectedYear.value : mode.value === 'month' ? selectedMonth.value : selectedDay.value
+  const fallback =
+    mode.value === 'year' ? selectedYear.value
+    : mode.value === 'month' ? selectedMonth.value
+    : mode.value === 'week' ? selectedWeek.value
+    : selectedDay.value
   const base = periodLabel.value || fallback
   const biz = BUSINESS_NAME.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
   return `${biz}-sales-report-${String(base).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
@@ -2084,7 +2182,7 @@ function chartColors(forceLight = false) {
   }
 }
 
-// Bucket keys arrive as "HH:00" (day), "YYYY-MM-DD" (month) or "YYYY-MM" (year).
+// Bucket keys arrive as "HH:00" (day), "YYYY-MM-DD" (week / month) or "YYYY-MM" (year).
 function parseBucket(raw) {
   const s = String(raw ?? '')
   let m = s.match(/^(\d{1,2}):\d{2}$/)
@@ -2291,6 +2389,9 @@ async function printReport() {
 onMounted(async () => {
   document.addEventListener('pointerdown', onDocPointer)
   document.addEventListener('keydown', onDocKey)
+  window.addEventListener('resize', updateStickyTop)
+  await nextTick()
+  updateStickyTop()
   await loadReports()
   // Rebuild the chart when the app theme toggles so its colours follow.
   themeObserver = new MutationObserver(() => buildChart())
@@ -2302,6 +2403,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(animFrame)
   document.removeEventListener('pointerdown', onDocPointer)
   document.removeEventListener('keydown', onDocKey)
+  window.removeEventListener('resize', updateStickyTop)
   if (themeObserver) themeObserver.disconnect()
   if (chartInstance) chartInstance.destroy()
 })
@@ -2347,11 +2449,20 @@ onBeforeUnmount(() => {
   --rp-ease: cubic-bezier(.16, 1, .3, 1);
   --radius: 16px;
 
+  /* ── SPACE TUNING ──────────────────────────────────────────
+     The app shell (Layout.vue) adds roughly 64px of its own padding around
+     every page. --bleed-* lets this page reclaim part of it on desktop.
+     Raise a value to push the content closer to the edge, lower it (or set
+     it to 0px) if content ever touches the sidebar or top bar. */
+  --bleed-x: 30px;
+  --bleed-y: 26px;
+  --rp-gap: 16px;
+
   min-height: 100%;
   background: var(--rp-bg);
-  padding: 28px 28px 56px;
+  padding: 16px 24px 40px;
   font-family: 'Inter', system-ui, sans-serif;
-  display: flex; flex-direction: column; gap: 18px;
+  display: flex; flex-direction: column; gap: var(--rp-gap);
   transition: background-color 0.22s ease;
 }
 
@@ -2383,14 +2494,16 @@ html[data-theme="dark"] .reports {
 .chip--live { color: var(--rp-green); background: var(--rp-green-soft); }
 .chip--accent { color: var(--rp-accent); background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border); font-size: 10.5px; padding: 2px 10px; }
 
-.report-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* ── EXPORT BUTTONS (inside the period bar) ── */
+.report-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .rt-btn {
-  display: flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 36px;
   border: 1px solid var(--rp-border-strong);
   background: var(--rp-surface-sunken);
   color: var(--rp-text-secondary);
-  font-family: inherit; font-size: 13px; font-weight: 600;
-  padding: 8px 15px; border-radius: 11px; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 600; white-space: nowrap;
+  padding: 0 15px; border-radius: 10px; cursor: pointer;
   transition: background-color .16s ease, border-color .16s ease, color .16s ease;
 }
 .rt-btn i { font-size: 12px; }
@@ -2399,18 +2512,21 @@ html[data-theme="dark"] .reports {
 .rt-btn--primary { background: var(--rp-accent); border-color: var(--rp-accent); color: #fff; }
 .rt-btn--primary:hover:not(:disabled) { background: #FB923C; border-color: #FB923C; color: #fff; }
 
-/* ── PERIOD BAR ── */
+/* ── PERIOD BAR (sticky at the very top while scrolling) ──
+   The soft halo (first box-shadow) is the page colour, so content scrolling
+   underneath is hidden around the bar instead of peeking out beside it. */
 .period-bar {
-  position: relative; z-index: 5;
+  position: sticky; top: 0; z-index: 30;
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 12px;
   background: var(--rp-surface);
   border: 1px solid var(--rp-border);
   border-radius: 14px;
-  box-shadow: var(--rp-shadow);
+  box-shadow: 0 0 0 8px var(--rp-bg), var(--rp-shadow);
 }
 .period-nav { display: flex; align-items: center; gap: 6px; }
-.period-status { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.period-end { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.period-status { display: flex; align-items: center; }
 .period-status-text { font-size: 12px; font-weight: 600; color: var(--rp-text-muted); white-space: nowrap; }
 .period-status-text--busy { color: var(--rp-accent); }
 
@@ -2440,7 +2556,6 @@ html[data-theme="dark"] .reports {
   font-size: 12px;
   transition: background-color .16s ease, border-color .16s ease, color .16s ease;
 }
-.icon-btn--sm { width: 32px; height: 32px; border-radius: 9px; }
 .icon-btn:hover:not(:disabled) { border-color: var(--rp-accent-border); color: var(--rp-text-primary); background: var(--rp-surface-raised); }
 .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
 
@@ -2562,7 +2677,7 @@ html[data-theme="dark"] .reports {
 .notice span { flex: 1; min-width: 200px; }
 
 /* ── BODY ── */
-.report-body { display: flex; flex-direction: column; gap: 20px; transition: opacity .15s ease; }
+.report-body { display: flex; flex-direction: column; gap: var(--rp-gap); transition: opacity .15s ease; }
 .report-body.is-loading { opacity: .55; pointer-events: none; }
 
 .section { display: flex; flex-direction: column; gap: 12px; }
@@ -2748,7 +2863,7 @@ html[data-theme="dark"] .reports {
 .heat-note--warn { margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; color: var(--rp-amber); background: var(--rp-amber-soft); font-weight: 600; }
 
 /* ── WHERE SALES COME FROM + INVENTORY ── */
-.content-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.content-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: var(--rp-gap); align-items: start; }
 
 .mix { container-type: inline-size; display: flex; flex-direction: column; gap: 18px; }
 .mix-insight { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border); font-size: 12.5px; line-height: 1.55; color: var(--rp-text-secondary); }
@@ -2831,25 +2946,37 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
 .coverage-fill { height: 100%; border-radius: 6px; background: var(--rp-green); transition: width .6s ease; }
 
 /* ── RESPONSIVE ── */
+/* Desktop only: pull the page outward into the shell's padding (top, left, right) */
+@media (min-width: 1001px) {
+  .reports { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+}
 @media (max-width: 1100px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat--hero { grid-column: 1 / -1; grid-row: auto; }
   .content-grid { grid-template-columns: minmax(0, 1fr); }
   .heat-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
 }
+@media (max-width: 900px) {
+  .reports { padding: 12px 14px 32px; --rp-gap: 14px; }
+}
 @media (max-width: 700px) {
   .reports { padding: 16px 16px 40px; }
   .page-header { flex-direction: column; align-items: stretch; }
-  .report-toolbar { justify-content: stretch; }
-  .rt-btn { flex: 1; justify-content: center; }
-  .period-bar { flex-direction: column; align-items: stretch; }
+
+  /* Sticky bar stays compact on phones: the "Updated" text is hidden and the
+     three export buttons share one row. */
+  .period-bar { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px; }
   .seg { width: 100%; }
   .seg-btn { flex: 1; text-align: center; }
   .period-nav { width: 100%; }
   .picker { flex: 1; min-width: 0; }
   .picker-trigger { width: 100%; min-width: 0; }
   .picker-pop { width: auto; right: 0; }
-  .period-status { margin-left: 0; justify-content: space-between; }
+  .period-end { margin-left: 0; width: 100%; }
+  .period-status { display: none; }
+  .report-toolbar { width: 100%; }
+  .rt-btn { flex: 1; padding: 0 8px; }
+
   .stat--hero { padding: 18px 16px; }
   .hero-cols { gap: 14px; }
   .hero-col--profit { padding-left: 14px; }
@@ -2916,7 +3043,7 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
     color: #0f172a !important;
   }
 
-  /* Hide every interactive piece; show only the print sheet */
+  /* Hide every interactive piece (including the sticky period bar); show only the print sheet */
   #reports-print-area > :not(.print-sheet) { display: none !important; }
   #reports-print-area .print-sheet { display: block !important; }
 

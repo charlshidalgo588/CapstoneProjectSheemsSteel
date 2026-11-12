@@ -1,6 +1,6 @@
 <template>
   <Layout>
-    <div class="sales-page">
+    <div class="sales-page" ref="pageRef" :class="{ 'sales-page--has-bar': selectedSales.length > 0 }">
 
       <!-- ── PAGE HEADER ── -->
       <div class="page-header">
@@ -19,74 +19,105 @@
         </div>
       </div>
 
-      <!-- ── TOOLBAR: SEARCH + PERIOD ── -->
-      <div class="toolbar">
-        <div class="search-field">
-          <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
-          <input
-            ref="searchInput"
-            v-model="search"
-            type="search"
-            class="search-input"
-            placeholder="Search receipt no., customer, clerk, amount…"
-            aria-label="Search sales receipts"
-            autocomplete="off"
-            @keydown.esc="search = ''"
-          />
-          <button v-if="search" class="search-clear" @click="clearSearch" aria-label="Clear search">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
-          <kbd v-else class="search-kbd" aria-hidden="true">/</kbd>
-        </div>
+      <!-- ═════════ STICKY BLOCK: summary cards + search + period ═════════
+           Stays pinned to the very top while the table scrolls. -->
+      <div class="sticky-controls" :class="{ 'is-stuck': isStuck }" ref="stickyRef">
 
-        <div class="period-dropdown-wrap period-dropdown" :class="{ 'period-dropdown-wrap--muted': isSearching }">
-          <button @click="togglePeriodDropdown" class="period-trigger" :aria-expanded="periodDropdown">
-            <span class="period-trigger-label">View by</span>
-            <span class="period-trigger-val">{{ selectedPeriodLabel }}</span>
-            <i class="fa-solid fa-chevron-down period-caret" :class="{ 'period-caret--open': periodDropdown }"></i>
-          </button>
+        <!-- Summary cards -->
+        <section class="kpi-strip" aria-label="Sales summary">
+          <div class="kpi-card">
+            <span class="kpi-icon kpi-icon--accent"><i class="fa-solid fa-receipt"></i></span>
+            <span class="kpi-body">
+              <span class="kpi-label">Receipts</span>
+              <span class="kpi-value">{{ showStats ? filteredSales.length.toLocaleString('en-US') : '—' }}</span>
+              <span class="kpi-hint">{{ showStats ? statusHint : 'Loading…' }}</span>
+            </span>
+          </div>
 
-          <transition name="dropdown-fade">
-            <div v-if="periodDropdown" class="period-menu">
-              <button
-                v-for="p in periods"
-                :key="p.key"
-                @click="setPeriod(p.key)"
-                class="period-menu-item"
-                :class="{ 'period-menu-item--active': selectedPeriod === p.key }"
-              >
-                <i class="fa-solid fa-check period-check" v-if="selectedPeriod === p.key"></i>
-                <span :style="{ marginLeft: selectedPeriod === p.key ? '0' : '20px' }">{{ p.label }}</span>
-              </button>
-            </div>
-          </transition>
-        </div>
-      </div>
+          <div class="kpi-card">
+            <span class="kpi-icon kpi-icon--green"><i class="fa-solid fa-peso-sign"></i></span>
+            <span class="kpi-body">
+              <span class="kpi-label">Total sales</span>
+              <span class="kpi-value">{{ showStats ? '₱' + formatAmount(stats.total) : '—' }}</span>
+              <span class="kpi-hint">Paid receipts only</span>
+            </span>
+          </div>
 
-      <!-- Search context: tells the user the period is ignored while searching -->
-      <p v-if="isSearching" class="search-note" role="status">
-        <i class="fa-solid fa-circle-info"></i>
-        Searching all dates —
-        <strong>{{ filteredSales.length }}</strong> match{{ filteredSales.length === 1 ? '' : 'es' }}
-        for “{{ search.trim() }}”.
-        <button class="link-btn" @click="clearSearch">Clear search</button>
-      </p>
+          <div class="kpi-card">
+            <span class="kpi-icon kpi-icon--blue"><i class="fa-solid fa-chart-simple"></i></span>
+            <span class="kpi-body">
+              <span class="kpi-label">Average sale</span>
+              <span class="kpi-value">{{ showStats ? '₱' + formatAmount(stats.average) : '—' }}</span>
+              <span class="kpi-hint">Per paid receipt</span>
+            </span>
+          </div>
 
-      <!-- ── SUMMARY STRIP ── -->
-      <div v-if="!loading && !loadError" class="stats">
-        <div class="stat">
-          <span class="stat-label">Receipts</span>
-          <strong class="stat-val">{{ filteredSales.length }}</strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Total sales</span>
-          <strong class="stat-val">₱{{ formatAmount(stats.total) }}</strong>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Average sale</span>
-          <strong class="stat-val">₱{{ formatAmount(stats.average) }}</strong>
-        </div>
-        <span class="stat-scope">{{ isSearching ? 'All dates' : selectedPeriodLabel }}</span>
+          <div class="kpi-card kpi-card--scope" :class="{ 'kpi-card--search': isSearching }">
+            <span class="kpi-icon" :class="isSearching ? 'kpi-icon--amber' : 'kpi-icon--violet'">
+              <i class="fa-solid" :class="isSearching ? 'fa-magnifying-glass' : 'fa-calendar-days'"></i>
+            </span>
+            <span class="kpi-body">
+              <span class="kpi-label">Showing</span>
+              <span class="kpi-value kpi-value--text">{{ isSearching ? 'All dates' : selectedPeriodLabel }}</span>
+              <span class="kpi-hint">{{ isSearching ? 'Search ignores the period' : 'Change it with “View by”' }}</span>
+            </span>
+          </div>
+        </section>
+
+        <!-- Toolbar: search + period -->
+        <section class="toolbar" aria-label="Search and period">
+          <div class="search-field">
+            <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+            <input
+              ref="searchInput"
+              v-model="search"
+              type="search"
+              class="search-input"
+              placeholder="Search receipt no., customer, clerk, amount…"
+              aria-label="Search sales receipts"
+              autocomplete="off"
+              @keydown.esc="search = ''"
+            />
+            <button v-if="search" class="search-clear" @click="clearSearch" aria-label="Clear search">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+            <kbd v-else class="search-kbd" aria-hidden="true">/</kbd>
+          </div>
+
+          <div class="period-dropdown-wrap period-dropdown" :class="{ 'period-dropdown-wrap--muted': isSearching }">
+            <button @click="togglePeriodDropdown" class="period-trigger" :aria-expanded="periodDropdown" aria-haspopup="listbox">
+              <i class="fa-regular fa-calendar period-trigger-ico" aria-hidden="true"></i>
+              <span class="period-trigger-label">View by</span>
+              <span class="period-trigger-val">{{ selectedPeriodLabel }}</span>
+              <i class="fa-solid fa-chevron-down period-caret" :class="{ 'period-caret--open': periodDropdown }"></i>
+            </button>
+
+            <transition name="dropdown-fade">
+              <div v-if="periodDropdown" class="period-menu">
+                <button
+                  v-for="p in periods"
+                  :key="p.key"
+                  @click="setPeriod(p.key)"
+                  class="period-menu-item"
+                  :class="{ 'period-menu-item--active': selectedPeriod === p.key }"
+                >
+                  <i class="fa-solid fa-check period-check" v-if="selectedPeriod === p.key"></i>
+                  <span :style="{ marginLeft: selectedPeriod === p.key ? '0' : '20px' }">{{ p.label }}</span>
+                </button>
+              </div>
+            </transition>
+          </div>
+        </section>
+
+        <!-- Search context -->
+        <p v-if="isSearching" class="search-note" role="status">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>
+            <strong>{{ filteredSales.length }}</strong> match{{ filteredSales.length === 1 ? '' : 'es' }}
+            for “{{ search.trim() }}” across all dates.
+          </span>
+          <button class="link-btn" @click="clearSearch">Clear search</button>
+        </p>
       </div>
 
       <!-- ── TABLE CARD ── -->
@@ -221,7 +252,38 @@
 
     </div>
 
-    <!-- ── ADMIN PASSWORD MODAL ── -->
+    <!-- ── FLOATING SELECTION BAR ──
+         Stays pinned to the bottom of the screen while receipts are selected,
+         so Cancel / Delete are reachable no matter how far the list is
+         scrolled. Hidden while a modal is open. -->
+    <Teleport to="body">
+      <transition name="float-bar">
+        <div
+          v-if="selectedSales.length > 0 && !passwordModal && !successModal"
+          class="float-bar"
+          role="region"
+          aria-label="Selected receipts actions"
+        >
+          <span class="float-bar-count" aria-live="polite">
+            <span class="float-bar-badge">{{ selectedSales.length }}</span>
+            selected
+          </span>
+          <div class="float-bar-actions">
+            <button type="button" class="float-btn float-btn--cancel" @click="clearSelection">
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i> Cancel
+            </button>
+            <button type="button" class="float-btn float-btn--delete" @click="openPasswordModal">
+              <i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete
+            </button>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
+
+    <!-- ── ADMIN PASSWORD MODAL ──
+         Admins confirm with their own password; everyone else (e.g. a
+         Cashier) needs an administrator to type theirs. The server checks
+         it against the active administrators — see SaleController. -->
     <transition name="modal-fade">
       <div v-if="passwordModal" class="modal-backdrop" @click.self="closePasswordModal">
         <div class="del-modal">
@@ -232,18 +294,21 @@
             <h3 class="del-modal-title">Admin Verification Required</h3>
             <p class="del-modal-desc">
               You're about to delete <strong>{{ selectedSales.length }}</strong> sale receipt{{ selectedSales.length !== 1 ? 's' : '' }}.
-              Stock for the items sold will be returned to inventory. Enter your admin password to confirm.
+              Stock for the items sold will be returned to inventory.
+              <template v-if="isAdmin">Enter your admin password to confirm.</template>
+              <template v-else>Ask an administrator to enter their password to approve this.</template>
             </p>
 
             <div class="pw-field">
-              <label class="pw-label">Admin Password</label>
+              <label class="pw-label">{{ isAdmin ? 'Admin Password' : 'Administrator Password' }}</label>
               <div class="input-wrap">
                 <i class="fa-solid fa-lock input-icon"></i>
                 <input
                   :type="showPw ? 'text' : 'password'"
                   v-model="adminPassword"
                   class="pw-input"
-                  placeholder="Enter your password"
+                  :placeholder="isAdmin ? 'Enter your password' : 'Enter administrator password'"
+                  autocomplete="off"
                   @keyup.enter="confirmDelete"
                 />
                 <button type="button" class="pw-toggle" @click="showPw = !showPw">
@@ -309,9 +374,15 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Layout from '@/components/Layout.vue'
 import api from '@/api/axios'
+import { useAuthStore } from '@/stores/auth'
 
 const route  = useRoute()
 const router = useRouter()
+
+// Role-aware wording in the delete modal (admins use their own password,
+// a Cashier needs an administrator to enter theirs).
+const authStore = useAuthStore()
+const isAdmin   = computed(() => authStore.user?.role === 'Administrator')
 
 /* ────────────────────────────────────────────────────────────
    HELPERS
@@ -319,6 +390,84 @@ const router = useRouter()
 const formatAmount = v =>
   Number(v || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const receiptNo = s => `SR-${String(s.SaleID).padStart(5, '0')}`
+
+/* ────────────────────────────────────────────────────────────
+   STICKY BLOCK
+   The summary cards + search + period pin to the VERY top of the
+   scrolling area (same technique as the Product List page).
+   The app shell's scroll area has its own top padding; a sticky element
+   would stop that far below the top edge, leaving a strip where rows
+   show through. We find the scrolling parent and pull --sticky-top up by
+   that padding, then self-correct after the first real scroll.
+──────────────────────────────────────────────────────────── */
+const pageRef   = ref(null)
+const stickyRef = ref(null)
+const isStuck   = ref(false)
+
+let scrollEl      = null   // the shell's scrolling element (null = the window scrolls)
+let stickyTop     = 0
+let calibrations  = 0
+let scrollTicking = false
+
+function findScrollParent(el) {
+  let node = el?.parentElement
+  while (node && node !== document.body && node !== document.documentElement) {
+    if (/(auto|scroll|overlay)/.test(getComputedStyle(node).overflowY)) return node
+    node = node.parentElement
+  }
+  return null
+}
+const scrollOffset = () => (scrollEl ? scrollEl.scrollTop : window.scrollY)
+const viewportTop  = () => (scrollEl ? scrollEl.getBoundingClientRect().top + scrollEl.clientTop : 0)
+
+function applyStickyTop(px) {
+  stickyTop = px
+  pageRef.value?.style.setProperty('--sticky-top', `${px}px`)
+}
+
+function syncSticky() {
+  const sticky = stickyRef.value
+  if (!sticky || getComputedStyle(sticky).position !== 'sticky') { isStuck.value = false; return }
+
+  const gap      = sticky.getBoundingClientRect().top - viewportTop()
+  const scrolled = scrollOffset()
+  isStuck.value = scrolled > 0 && gap <= 1
+
+  // Far enough down that the block is certainly pinned, yet a gap remains: close it.
+  if (scrolled > 250 && Math.abs(gap) > 1 && Math.abs(gap) < 160 && calibrations < 4) {
+    calibrations++
+    applyStickyTop(stickyTop - gap)
+    requestAnimationFrame(syncSticky)
+  }
+}
+
+function onScrollSticky() {
+  if (scrollTicking) return
+  scrollTicking = true
+  requestAnimationFrame(() => { scrollTicking = false; syncSticky() })
+}
+
+function initStickyTop() {
+  calibrations = 0
+  const padTop = scrollEl ? parseFloat(getComputedStyle(scrollEl).paddingTop) || 0 : 0
+  applyStickyTop(-padTop)
+}
+
+function onResizeSticky() { initStickyTop(); syncSticky() }
+
+function teardownSticky() {
+  (scrollEl || window).removeEventListener('scroll', onScrollSticky)
+  window.removeEventListener('resize', onResizeSticky)
+}
+
+function setupSticky() {
+  teardownSticky()
+  scrollEl = findScrollParent(pageRef.value)
+  ;(scrollEl || window).addEventListener('scroll', onScrollSticky, { passive: true })
+  window.addEventListener('resize', onResizeSticky)
+  initStickyTop()
+  syncSticky()
+}
 
 /* ────────────────────────────────────────────────────────────
    LOAD
@@ -509,6 +658,18 @@ const stats = computed(() => {
   return { total, average: paid.length ? total / paid.length : 0 }
 })
 
+// Summary cards show real numbers only once the data is in.
+const showStats = computed(() => !loading.value && !loadError.value)
+
+// "20 paid · 5 voided" hint under the Receipts number
+const statusHint = computed(() => {
+  const list = filteredSales.value
+  if (!list.length) return 'No receipts'
+  const paid = list.filter(s => s.Status === 'Paid').length
+  const voided = list.length - paid
+  return voided ? `${paid} paid · ${voided} voided` : `${paid} paid`
+})
+
 /* Back to page 1 whenever the result set changes. */
 watch([search, selectedPeriod, sortKey, sortDir, pageSize], () => { page.value = 1 })
 
@@ -531,6 +692,8 @@ function toggleOne(id) {
     ? selectedSales.value.filter(x => x !== id)
     : [...selectedSales.value, id]
 }
+// Used by the floating bar's Cancel button.
+function clearSelection() { selectedSales.value = [] }
 watch([search, selectedPeriod, sortKey, sortDir, pageSize, page], () => { selectedSales.value = [] })
 
 /* Click anywhere on a row to open it (checkbox / link clicks keep their own behavior). */
@@ -572,9 +735,13 @@ async function applyHighlightFromQuery() {
 function handleClickOutside(e) {
   if (!e.target.closest('.period-dropdown')) periodDropdown.value = false
 }
+// Re-measure the pinned block when its height can change.
+watch([loading, isSearching], () => nextTick(syncSticky))
+
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
   window.addEventListener('keydown', onGlobalKey)
+  nextTick(setupSticky)   // pin the cards / search / period to the very top
   await loadSales()
   applyHighlightFromQuery()
 })
@@ -582,6 +749,7 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('keydown', onGlobalKey)
   clearTimeout(highlightTimer)
+  teardownSticky()
 })
 
 /* ────────────────────────────────────────────────────────────
@@ -634,7 +802,10 @@ async function confirmDelete() {
     if (page.value > totalPages.value) page.value = totalPages.value
     successModal.value = true
   } catch (err) {
-    deleteError.value = err?.response?.data?.message || 'Incorrect password or request failed.'
+    deleteError.value =
+      err?.response?.data?.errors?.admin_password?.[0] ||
+      err?.response?.data?.message ||
+      'Incorrect password or request failed.'
   } finally {
     deleting.value = false
   }
@@ -660,15 +831,36 @@ async function confirmDelete() {
   --sp-ring:           var(--c-accent-ring);
   --sp-green:          #10b981;
   --sp-red:            #f43f5e;
+  --sp-blue:           #3b82f6;
+  --sp-amber:          #f59e0b;
+  --sp-violet:         #6366f1;
   --radius: 16px;
 
+  /* ── SPACE TUNING (same values as Product List, Home, Reports) ──
+     The app shell (Layout.vue) adds roughly 64px of its own padding around
+     every page. --bleed-* lets this page reclaim part of it on desktop,
+     on the top and on BOTH sides. Raise a value to push the content closer
+     to the edge, lower it (or set it to 0px) if content ever touches the
+     sidebar or top bar. */
+  --bleed-x: 30px;
+  --bleed-y: 26px;
+  --sp-gap: 16px;
+
+  /* Where the sticky block stops. Set automatically by the script (it
+     cancels the shell's top padding so the block sits flush at the top). */
+  --sticky-top: 0px;
+
   min-height: 100%;
+  overflow-x: clip;            /* never scrolls sideways (clip keeps sticky working) */
   background: var(--sp-bg);
-  padding: 28px 28px 64px;
+  padding: 16px 24px 40px;
   font-family: 'Inter', system-ui, sans-serif;
-  display: flex; flex-direction: column; gap: 16px;
-  transition: background-color .22s;
+  display: flex; flex-direction: column; gap: var(--sp-gap);
+  transition: background-color .22s, padding-bottom .22s;
 }
+.sales-page > * { min-width: 0; }
+/* Extra room at the bottom so the floating bar never covers the pager / last row. */
+.sales-page--has-bar { padding-bottom: 120px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* PAGE HEADER */
@@ -698,40 +890,84 @@ html[data-theme="dark"] .btn--danger { background: rgba(244,63,94,.14); color: #
 html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 .selected-count { background: var(--sp-red); color: #fff; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 1px 7px; margin-left: 2px; }
 
-/* TOOLBAR */
-.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.search-field { position: relative; flex: 1 1 320px; display: flex; align-items: center; }
-.search-icon { position: absolute; left: 14px; font-size: 13px; color: var(--sp-text-faint); pointer-events: none; }
+/* ── STICKY BLOCK ── */
+.sticky-controls { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* SUMMARY CARDS (same compact style as the Product List cards) */
+.kpi-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.kpi-card {
+  display: flex; align-items: center; gap: 10px; text-align: left; min-width: 0;
+  padding: 8px 12px; font-family: inherit;
+  background: var(--sp-surface); border: 1px solid var(--sp-border);
+  border-radius: 14px; box-shadow: var(--c-shadow-sm);
+  transition: border-color .18s, background-color .22s, box-shadow .18s;
+  animation: kpi-rise .6s cubic-bezier(.16, 1, .3, 1) backwards;
+}
+.kpi-card:nth-child(2) { animation-delay: 60ms; }
+.kpi-card:nth-child(3) { animation-delay: 120ms; }
+.kpi-card:nth-child(4) { animation-delay: 180ms; }
+@keyframes kpi-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.kpi-card--search { border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.07); }
+.kpi-icon {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.kpi-icon--accent { background: var(--sp-accent-soft); color: var(--sp-accent); }
+.kpi-icon--green  { background: rgba(16,185,129,.14); color: var(--sp-green); }
+.kpi-icon--blue   { background: rgba(59,130,246,.14); color: var(--sp-blue); }
+.kpi-icon--amber  { background: rgba(245,158,11,.16); color: var(--sp-amber); }
+.kpi-icon--violet { background: rgba(99,102,241,.14); color: var(--sp-violet); }
+.kpi-body  { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kpi-label { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--sp-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-value {
+  font-size: 20px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1;
+  color: var(--sp-text-primary); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kpi-value--text { font-size: 17px; letter-spacing: -.02em; }
+.kpi-hint { font-size: 11.5px; color: var(--sp-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* TOOLBAR: search + period in one card */
+.toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--sp-surface); border: 1px solid var(--sp-border);
+  border-radius: var(--radius); padding: 8px 10px;
+  box-shadow: var(--c-shadow-sm);
+}
+.search-field { position: relative; flex: 1 1 320px; min-width: 0; display: flex; align-items: center; }
+.search-icon { position: absolute; left: 13px; font-size: 12px; color: var(--sp-text-faint); pointer-events: none; }
 .search-input {
-  width: 100%; height: 42px; padding: 0 44px 0 40px;
+  width: 100%; height: 38px; padding: 0 40px 0 36px;
   border: 1.5px solid var(--sp-border-strong); border-radius: 10px;
-  background: var(--sp-surface); color: var(--sp-text-primary);
+  background: var(--sp-surface-raised); color: var(--sp-text-primary);
   font-size: 13.5px; font-family: inherit; outline: none;
   transition: border-color .18s, box-shadow .18s, background-color .22s, color .22s;
   -webkit-appearance: none; appearance: none;
 }
 .search-input::-webkit-search-cancel-button { display: none; }
-.search-input:focus { border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); }
+.search-input:focus { border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); background: var(--sp-surface); }
 .search-input::placeholder { color: var(--sp-text-faint); }
 .search-clear {
-  position: absolute; right: 8px; width: 28px; height: 28px; border: none; border-radius: 7px;
+  position: absolute; right: 7px; width: 26px; height: 26px; border: none; border-radius: 7px;
   background: none; color: var(--sp-text-faint); cursor: pointer; font-size: 12px;
   display: flex; align-items: center; justify-content: center; transition: background .15s, color .15s;
 }
-.search-clear:hover { background: var(--sp-surface-raised); color: var(--sp-text-primary); }
+.search-clear:hover { background: var(--sp-border); color: var(--sp-text-primary); }
 .search-kbd {
-  position: absolute; right: 12px; min-width: 22px; height: 22px; padding: 0 6px;
+  position: absolute; right: 10px; min-width: 22px; height: 22px; padding: 0 6px;
   display: flex; align-items: center; justify-content: center;
   font: 600 11px 'Inter', system-ui, sans-serif; color: var(--sp-text-faint);
   border: 1px solid var(--sp-border-strong); border-radius: 6px; pointer-events: none;
 }
 .search-note {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0;
-  font-size: 13px; color: var(--sp-text-muted);
+  padding: 8px 14px; border-radius: 10px;
+  font-size: 12.5px; color: var(--sp-text-secondary);
+  background: var(--sp-accent-soft); border: 1px solid var(--sp-accent-border);
 }
 .search-note i { color: var(--sp-accent); }
 .search-note strong { color: var(--sp-text-primary); }
-.link-btn { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--sp-accent); cursor: pointer; }
+.link-btn { background: none; border: none; padding: 0; margin-left: auto; font: inherit; font-weight: 700; color: var(--sp-accent); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
 
 /* PERIOD DROPDOWN */
@@ -739,16 +975,18 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 .period-dropdown-wrap--muted { opacity: .55; }
 .period-trigger {
   display: inline-flex; align-items: center; gap: 8px;
-  height: 42px; padding: 0 16px;
+  height: 38px; padding: 0 14px;
   border: 1.5px solid var(--sp-border-strong); border-radius: 10px;
   background: var(--sp-surface); color: var(--sp-text-secondary);
   font-size: 13px; font-family: inherit; cursor: pointer;
-  transition: border-color .18s, background-color .22s, color .22s;
+  transition: border-color .18s, background-color .22s, color .22s, box-shadow .18s;
 }
 .period-trigger:hover { border-color: var(--sp-accent-border); }
+.period-trigger[aria-expanded="true"] { border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); }
 .period-trigger:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+.period-trigger-ico { font-size: 12px; color: var(--sp-accent); }
 .period-trigger-label { font-weight: 600; color: var(--sp-text-faint); font-size: 12px; }
-.period-trigger-val   { font-weight: 600; color: var(--sp-text-primary); transition: color .22s; }
+.period-trigger-val   { font-weight: 700; color: var(--sp-text-primary); transition: color .22s; }
 .period-caret { font-size: 10px; color: var(--sp-text-faint); transition: transform .2s; }
 .period-caret--open { transform: rotate(180deg); }
 .period-menu {
@@ -768,17 +1006,6 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 .period-check { font-size: 10px; margin-right: 8px; color: var(--sp-accent); }
 .dropdown-fade-enter-active, .dropdown-fade-leave-active { transition: opacity .15s ease, transform .15s ease; }
 .dropdown-fade-enter-from, .dropdown-fade-leave-to { opacity: 0; transform: translateY(-6px); }
-
-/* SUMMARY STRIP */
-.stats {
-  display: flex; align-items: stretch; flex-wrap: wrap;
-  background: var(--sp-surface); border: 1px solid var(--sp-border); border-radius: 12px;
-  transition: background-color .22s, border-color .22s;
-}
-.stat { display: flex; flex-direction: column; gap: 3px; padding: 12px 22px; border-right: 1px solid var(--sp-border); }
-.stat-label { font-size: 12px; color: var(--sp-text-muted); }
-.stat-val { font-size: 18px; font-weight: 800; letter-spacing: -.02em; color: var(--sp-text-primary); font-variant-numeric: tabular-nums; }
-.stat-scope { margin-left: auto; align-self: center; padding: 0 20px; font-size: 12px; font-weight: 600; color: var(--sp-text-faint); }
 
 /* TABLE CARD */
 .table-card { background: var(--sp-surface); border: 1px solid var(--sp-border); border-radius: var(--radius); box-shadow: var(--c-shadow-sm); overflow: hidden; transition: background-color .22s, border-color .22s; }
@@ -899,6 +1126,65 @@ html[data-theme="dark"] .status-pill--void { background: rgba(244,63,94,.18);  c
 .pager-btn:disabled { opacity: .4; cursor: not-allowed; }
 .pager-btn:focus-visible, .pager-size select:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
 
+/* FLOATING SELECTION BAR
+   Rendered through <Teleport to="body">, so it can't see the .sales-page
+   token bridge; it uses the global --c-* tokens (with fallbacks) instead. */
+.float-bar {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 900;
+  display: flex; align-items: center; gap: 18px;
+  max-width: calc(100vw - 24px);
+  padding: 10px 10px 10px 18px;
+  background: var(--c-surface, #FFFFFF);
+  border: 1px solid var(--c-border-strong, #E5E7EB);
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, .26), 0 2px 8px rgba(15, 23, 42, .10);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+html[data-theme="dark"] .float-bar {
+  background: var(--c-surface, #1E2130);
+  border-color: var(--c-border-strong, #2A2D3E);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .6), 0 2px 8px rgba(0, 0, 0, .35);
+}
+.float-bar-count {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 13px; font-weight: 600; color: var(--c-text-secondary, #475569);
+  white-space: nowrap;
+}
+.float-bar-badge {
+  min-width: 26px; height: 26px; padding: 0 8px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(244, 63, 94, .12); color: #f43f5e;
+  font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+html[data-theme="dark"] .float-bar-badge { background: rgba(244, 63, 94, .18); color: #F87171; }
+.float-bar-actions { display: flex; align-items: center; gap: 8px; }
+.float-btn {
+  height: 38px; padding: 0 16px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font: 700 13px 'Inter', system-ui, sans-serif;
+  border-radius: 10px; cursor: pointer; white-space: nowrap;
+  transition: background-color .15s, border-color .15s, color .15s, filter .15s, transform .12s, box-shadow .15s;
+}
+.float-btn:active { transform: scale(.97); }
+.float-btn:focus-visible { outline: 2px solid #f43f5e; outline-offset: 2px; }
+.float-btn--cancel {
+  background: var(--c-surface-raised, #F3F4F6);
+  border: 1.5px solid var(--c-border-strong, #E5E7EB);
+  color: var(--c-text-secondary, #475569);
+}
+.float-btn--cancel:hover { background: var(--c-border, #E5E7EB); color: var(--c-text-primary, #0F172A); }
+.float-btn--delete {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  border: none; color: #fff;
+  box-shadow: 0 2px 12px rgba(244, 63, 94, .35);
+}
+.float-btn--delete:hover { filter: brightness(1.08); box-shadow: 0 4px 20px rgba(244, 63, 94, .5); transform: translateY(-1px); }
+
+.float-bar-enter-active { transition: opacity .22s ease, transform .22s cubic-bezier(.34, 1.3, .64, 1); }
+.float-bar-leave-active { transition: opacity .16s ease, transform .16s ease; }
+.float-bar-enter-from, .float-bar-leave-to { opacity: 0; transform: translate(-50%, 22px); }
+
 /* SUCCESS CONFIRMATION MODAL */
 .success-modal {
   width: 100%; max-width: 420px;
@@ -1016,18 +1302,60 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
 .del-modal-btn--confirm { background: linear-gradient(135deg, #f43f5e, #e11d48); border: none; color: #fff; box-shadow: 0 2px 12px rgba(244,63,94,.35); }
 .del-modal-btn--confirm:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 4px 20px rgba(244,63,94,.50); transform: translateY(-1px); }
 
+/* ── RESPONSIVE ── */
+
+/* Desktop only: pull the page outward into the shell's padding (top, left AND right),
+   exactly like the Product List / Home pages, so the space is fully used. */
+@media (min-width: 1001px) {
+  .sales-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+}
+
+/* Wide screens: cards + search + period stay pinned at the very top while the table scrolls.
+   The block reaches the page edges on both sides (negative margin + matching padding),
+   so no table row can peek out beside it, and a soft shadow shows when it is pinned. */
+@media (min-width: 901px) {
+  .sticky-controls {
+    position: sticky; top: var(--sticky-top); z-index: 20;
+    background: var(--sp-bg);
+    padding: 10px 24px 10px; margin: -10px -24px -10px;
+    transition: box-shadow .2s ease;
+  }
+  .sticky-controls.is-stuck {
+    box-shadow: 0 1px 0 var(--sp-border), 0 14px 18px -16px rgba(0, 0, 0, .55);
+  }
+}
+
+@media (max-width: 1100px) {
+  .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .sales-page { padding: 12px 14px 32px; --sp-gap: 14px; }
+  .sales-page--has-bar { padding-bottom: 110px; }
+}
+
 @media (max-width: 700px) {
   .sales-page { padding: 16px 16px 48px; }
+  .sales-page--has-bar { padding-bottom: 110px; }
   .header-actions { flex-direction: column; align-items: stretch; }
-  .period-dropdown-wrap { flex: 1 1 100%; }
-  .period-trigger { width: 100%; justify-content: space-between; }
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .search-field { flex-basis: auto; }
+  .period-dropdown-wrap { width: 100%; }
+  .period-trigger { width: 100%; }
+  .period-trigger .period-caret { margin-left: auto; }
   .period-menu { left: 0; right: 0; width: auto; }
-  .stat { padding: 10px 14px; flex: 1 1 33%; }
-  .stat-scope { display: none; }
+  .kpi-value { font-size: 18px; }
   .pager { justify-content: center; }
+
+  /* Floating bar: full-width strip at the bottom on phones */
+  .float-bar { left: 12px; right: 12px; bottom: 12px; transform: none; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 14px; }
+  .float-bar-enter-from, .float-bar-leave-to { transform: translateY(22px); }
+  .float-btn { padding: 0 13px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skel-row, .row-highlight td, .success-modal-icon { animation: none; }
+  .skel-row, .row-highlight td, .success-modal-icon, .kpi-card { animation: none; }
+  .sticky-controls { transition: none; }
+  .float-bar-enter-active, .float-bar-leave-active { transition: opacity .01s; }
 }
 </style>

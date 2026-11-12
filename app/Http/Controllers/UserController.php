@@ -10,16 +10,12 @@ use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
-    // Keep this the single source of truth for allowed roles — mirror
-    // any change here in Users.vue's ROLE_OPTIONS constant.
+    // Single source of truth for allowed roles — mirror any change in
+    // Settings.vue's ROLE_OPTIONS and in src/utils/permissions.js.
     private const ROLES = ['Administrator', 'Cashier', 'Inventory Staff'];
 
     public function index(Request $request)
     {
-        // Every route in this controller should already sit behind an
-        // admin-only middleware/gate (see routes/api.php note below) —
-        // this second check is a deliberate belt-and-braces guard, not
-        // a substitute for that.
         $this->authorizeAdmin($request);
 
         $users = User::query()
@@ -50,10 +46,7 @@ class UserController extends Controller
             'must_change_password' => true,
         ]);
 
-        // Returned once, in plaintext, on this response only — never
-        // logged, never stored anywhere, never returned again. This is
-        // the one moment the admin can see it, matching the "shown once"
-        // copy in Users.vue's success modal.
+        // Plaintext, once, on this response only.
         return response()->json([
             'user'          => $user->only(['id', 'name', 'email', 'role', 'status']),
             'temp_password' => $tempPassword,
@@ -69,12 +62,32 @@ class UserController extends Controller
             'status' => ['sometimes', Rule::in(['active', 'disabled'])],
         ]);
 
-        // Guard against an admin locking themselves out by disabling
-        // their own account or demoting the last remaining admin — swap
-        // the second check for a real "count remaining admins" query
-        // once you have more than a couple of accounts.
-        if (($data['status'] ?? null) === 'disabled' && $user->id === $request->user()->id) {
-            return response()->json(['message' => 'You can\u2019t disable your own account.'], 422);
+        $isSelf = $user->id === $request->user()->id;
+
+        if ($isSelf && ($data['status'] ?? null) === 'disabled') {
+            return response()->json(['message' => "You can\u{2019}t disable your own account."], 422);
+        }
+
+        if ($isSelf && isset($data['role']) && $data['role'] !== 'Administrator') {
+            return response()->json(['message' => "You can\u{2019}t remove your own administrator access."], 422);
+        }
+
+        // Never leave the system without an active administrator.
+        $losesAdmin =
+            $user->role === 'Administrator' && $user->status === 'active' && (
+                (isset($data['role']) && $data['role'] !== 'Administrator') ||
+                (($data['status'] ?? null) === 'disabled')
+            );
+
+        if ($losesAdmin) {
+            $otherAdmins = User::where('role', 'Administrator')
+                ->where('status', 'active')
+                ->where('id', '!=', $user->id)
+                ->count();
+
+            if ($otherAdmins === 0) {
+                return response()->json(['message' => 'At least one active administrator is required.'], 422);
+            }
         }
 
         $user->update($data);
@@ -98,12 +111,7 @@ class UserController extends Controller
 
     private function generateTempPassword(): string
     {
-        // Human-relayable (typed over Viber/in person), not e-mailed —
-        // this system has no outbound mail flow yet. Format matches the
-        // mockup shown to the client: three dash-separated groups.
-        $groups = collect(range(1, 3))->map(
-            fn () => Str::lower(Str::random(4))
-        );
+        $groups = collect(range(1, 3))->map(fn () => Str::lower(Str::random(4)));
 
         return $groups->implode('-');
     }

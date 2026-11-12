@@ -1,6 +1,6 @@
 <template>
   <Layout title="Inventory Logs">
-    <div id="inventory-print-area" class="inv-logs">
+    <div id="inventory-print-area" class="inv-logs" ref="rootEl">
 
       <!-- ══════════════ PRINT-ONLY LETTERHEAD ══════════════ -->
       <div class="print-only print-header">
@@ -33,26 +33,58 @@
         <p class="ph-lead">{{ execSummary }}</p>
       </div>
 
-      <!-- PAGE HEADER -->
-      <div class="page-header">
-        <div class="page-header-left">
-          <p class="page-eyebrow">Sales Intelligence</p>
-          <h1 class="page-title">Inventory Logs</h1>
-          <p class="page-sub">Showing <strong>{{ filterLabel }}</strong></p>
-        </div>
+      <!-- ══════════════ SCREEN HEADER ══════════════
+           .page-top uses display: contents, so its children sit directly inside
+           .inv-logs. -->
+      <div class="page-top">
+        <header class="page-header">
+          <div class="page-heading">
+            <h1 class="page-title">Inventory Logs</h1>
+            <p class="page-sub">
+              <span>{{ filterLabel || 'Loading…' }}</span>
+              <span v-if="isCurrentPeriod" class="chip chip--live">In progress</span>
+            </p>
+          </div>
+        </header>
+      </div>
 
-        <div class="period-control">
-          <div class="period-mode-toggle">
-            <button type="button" class="period-mode-seg" :class="{ 'period-mode-seg--active': periodMode === 'month' }" @click="setPeriodMode('month')">By Month</button>
-            <button type="button" class="period-mode-seg" :class="{ 'period-mode-seg--active': periodMode === 'date' }" @click="setPeriodMode('date')">Specific Date</button>
+      <!-- ══════════════ STICKY STACK ══════════════
+           Period bar (group by / navigate / export) AND the summary cards
+           stay together at the top while scrolling. Sticky only works while the
+           parent (.inv-logs) is tall, so this sits directly inside it. -->
+      <div class="sticky-stack" ref="stickyStack" :style="{ top: stickyTop + 'px' }">
+
+        <!-- Print-only heading for the summary tiles -->
+        <h2 class="section-title print-only print-sec-title">Inventory Activity Summary</h2>
+
+        <!-- PERIOD BAR -->
+        <div class="period-bar" role="group" aria-label="Report period">
+          <div class="seg" role="group" aria-label="Group logs by">
+            <button
+              v-for="m in MODES"
+              :key="m.key"
+              type="button"
+              class="seg-btn"
+              :class="{ 'seg-btn--active': periodMode === m.key }"
+              :aria-pressed="periodMode === m.key"
+              @click="setPeriodMode(m.key)"
+            >
+              {{ m.label }}
+            </button>
           </div>
 
           <div class="period-nav">
-            <button type="button" class="icon-btn" :disabled="!canGoPrev || isFiltering" :aria-label="`Previous ${periodNoun}`" @click="shiftPeriod(-1)">
+            <button
+              type="button"
+              class="icon-btn"
+              :disabled="!canGoPrev || isFiltering"
+              :aria-label="`Previous ${periodNoun}`"
+              @click="shiftPeriod(-1)"
+            >
               <i class="fa-solid fa-chevron-left"></i>
             </button>
 
-            <!-- Custom calendar picker (replaces the native month / date inputs) -->
+            <!-- Custom calendar picker -->
             <div class="picker" ref="pickerRoot">
               <button
                 ref="pickerTrigger"
@@ -84,7 +116,7 @@
                     </button>
                   </div>
 
-                  <!-- Days -->
+                  <!-- Days (Day mode picks a day, Week mode picks the week that day belongs to) -->
                   <div v-if="pickerView === 'days'" class="pk-days">
                     <span v-for="w in PK_WEEKDAYS" :key="w" class="pk-dow">{{ w }}</span>
                     <template v-for="(c, i) in pkDayCells" :key="i">
@@ -140,111 +172,74 @@
               </Transition>
             </div>
 
-            <button type="button" class="icon-btn" :disabled="!canGoNext || isFiltering" :aria-label="`Next ${periodNoun}`" @click="shiftPeriod(1)">
+            <button
+              type="button"
+              class="icon-btn"
+              :disabled="!canGoNext || isFiltering"
+              :aria-label="`Next ${periodNoun}`"
+              @click="shiftPeriod(1)"
+            >
               <i class="fa-solid fa-chevron-right"></i>
             </button>
           </div>
 
           <button v-if="!isCurrentPeriod" type="button" class="link-btn" :disabled="isFiltering" @click="goCurrent">{{ currentLabel }}</button>
 
-          <span class="date-filter-loading" v-if="isFiltering">
-            <i class="fa-solid fa-spinner fa-spin"></i>
-          </span>
+          <!-- Right side: status text + Copy / CSV / Print -->
+          <div class="period-end">
+            <div class="period-status" aria-live="polite">
+              <span v-if="isFiltering" class="period-status-text period-status-text--busy">
+                <i class="fa-solid fa-spinner fa-spin"></i> Updating…
+              </span>
+              <span v-else-if="lastUpdated" class="period-status-text">Updated {{ lastUpdated }}</span>
+            </div>
+
+            <div class="report-toolbar" role="group" aria-label="Export this report">
+              <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying' || isFiltering">
+                <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
+                {{ copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy' }}
+              </button>
+              <button type="button" class="rt-btn" @click="exportCSV" :disabled="isFiltering">
+                <i class="fa-solid" :class="csvState === 'done' ? 'fa-check' : 'fa-file-csv'"></i>
+                {{ csvState === 'done' ? 'Saved' : 'CSV' }}
+              </button>
+              <button type="button" class="rt-btn rt-btn--primary" @click="printReport" :disabled="isFiltering || printing">
+                <i class="fa-solid" :class="printing ? 'fa-spinner fa-spin' : 'fa-print'"></i>
+                {{ printing ? 'Preparing…' : 'Print' }}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <!-- REPORT ACTIONS -->
-      <div class="report-toolbar">
-        <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying'">
-          <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
-          {{ copyState === 'copied' ? 'Copied!' : copyState === 'error' ? 'Copy failed' : 'Copy' }}
-        </button>
-        <button type="button" class="rt-btn" @click="exportCSV">
-          <i class="fa-solid fa-file-csv"></i>CSV
-        </button>
-        <button type="button" class="rt-btn rt-btn--primary" @click="printReport">
-          <i class="fa-solid fa-print"></i>Print
-        </button>
-      </div>
-
-      <!-- Summary Cards -->
-      <div class="section">
-        <div class="section-header">
-          <p class="card-eyebrow">Overview</p>
-          <h2 class="section-title">Inventory Activity Summary</h2>
-        </div>
-
+        <!-- SUMMARY CARDS (compact, clickable: each one jumps to its data) -->
         <div class="kpi-strip">
-          <div class="kpi-card kpi-card--featured">
+          <button
+            v-for="c in kpiCards"
+            :key="c.key"
+            type="button"
+            class="kpi-card"
+            :class="{ 'kpi-card--featured': c.featured, 'kpi-card--alert': c.alert }"
+            :title="c.hint"
+            :aria-label="`${c.label}: ${c.value}. ${c.hint}`"
+            @click="jumpTo(c.target, c.filter)"
+          >
             <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap kpi-icon-wrap--orange"><i class="fa-solid fa-sliders"></i></div>
+              <div class="kpi-icon-wrap" :class="'kpi-icon-wrap--' + c.color"><i class="fa-solid" :class="c.icon"></i></div>
               <div class="kpi-body">
-                <p class="kpi-label">Total Adjustments</p>
-                <p class="kpi-value">{{ formatNumber(summaryDisplay.total_adjustments) }}</p>
+                <p class="kpi-label">{{ c.label }}</p>
+                <p class="kpi-value" :class="c.tone ? 'kpi-value--' + c.tone : ''">{{ c.value }}</p>
               </div>
             </div>
-            <div class="kpi-accent-bar kpi-accent-bar--orange"></div>
-          </div>
-
-          <div class="kpi-card kpi-card--clickable" role="button" tabindex="0"
-            @click="openBreakdown('stock_in')" @keydown.enter="openBreakdown('stock_in')" @keydown.space.prevent="openBreakdown('stock_in')">
-            <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap kpi-icon-wrap--green"><i class="fa-solid fa-download"></i></div>
-              <div class="kpi-body">
-                <p class="kpi-label">Total Stock In</p>
-                <p class="kpi-value kpi-value--green">+{{ formatNumber(summaryDisplay.total_stock_in) }}</p>
-                <p class="kpi-hint">View breakdown</p>
-              </div>
-            </div>
-            <div class="kpi-accent-bar kpi-accent-bar--green"></div>
-          </div>
-
-          <div class="kpi-card kpi-card--alert kpi-card--clickable" role="button" tabindex="0"
-            @click="openBreakdown('stock_out')" @keydown.enter="openBreakdown('stock_out')" @keydown.space.prevent="openBreakdown('stock_out')">
-            <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap kpi-icon-wrap--red"><i class="fa-solid fa-arrow-up-from-bracket"></i></div>
-              <div class="kpi-body">
-                <p class="kpi-label">Total Stock Out</p>
-                <p class="kpi-value kpi-value--red">-{{ formatNumber(summaryDisplay.total_stock_out) }}</p>
-                <p class="kpi-hint">View breakdown</p>
-              </div>
-            </div>
-            <div class="kpi-accent-bar kpi-accent-bar--red"></div>
-          </div>
-
-          <div class="kpi-card">
-            <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap kpi-icon-wrap--violet"><i class="fa-solid fa-pen-to-square"></i></div>
-              <div class="kpi-body">
-                <p class="kpi-label">Manual Adjustments</p>
-                <p class="kpi-value kpi-value--violet">{{ formatNumber(summaryDisplay.manual_adjustments) }}</p>
-              </div>
-            </div>
-            <div class="kpi-accent-bar kpi-accent-bar--violet"></div>
-          </div>
-
-          <div class="kpi-card">
-            <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap kpi-icon-wrap--orange"><i class="fa-solid fa-scissors"></i></div>
-              <div class="kpi-body">
-                <p class="kpi-label">Cut Pieces Sold</p>
-                <p class="kpi-value">{{ formatNumber(summaryDisplay.cut_count) }}</p>
-              </div>
-            </div>
-            <div class="kpi-accent-bar kpi-accent-bar--orange"></div>
-          </div>
-
-          <div class="kpi-card">
-            <div class="kpi-card-inner">
-              <div class="kpi-icon-wrap kpi-icon-wrap--green"><i class="fa-solid fa-screwdriver-wrench"></i></div>
-              <div class="kpi-body">
-                <p class="kpi-label">Service Fees</p>
-                <p class="kpi-value kpi-value--green">{{ peso(summaryDisplay.service_revenue) }}</p>
-              </div>
-            </div>
-            <div class="kpi-accent-bar kpi-accent-bar--green"></div>
-          </div>
+            <div class="kpi-accent-bar" :class="'kpi-accent-bar--' + c.color"></div>
+          </button>
         </div>
+      </div>
+
+      <!-- ERROR NOTICE -->
+      <div v-if="loadError" class="notice" role="alert">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>{{ loadError }}</span>
+        <button type="button" class="link-btn" @click="refresh">Try again</button>
       </div>
 
       <!-- Recent Activity (screen only: the printed report lists every movement in the Full History section) -->
@@ -350,9 +345,9 @@
         </div>
       </div>
 
-      <!-- Extra Services (labour) — plain table, not DataTables -->
-      <div class="section">
-        <div class="card">
+      <!-- Extra Services (labour) — plain table, paged 10 per page on screen -->
+      <div id="sec-services" class="section sec-anchor">
+        <div class="card" :class="{ 'card--flash': flashId === 'sec-services' }">
           <div class="card-header">
             <div>
               <p class="card-eyebrow">Labour</p>
@@ -373,7 +368,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(s, i) in services" :key="s.SaleID + '-' + i">
+                <tr v-for="(s, i) in visibleServices" :key="s.SaleID + '-' + i">
                   <td data-label="Date" class="cell-faint">{{ s.SaleDate }}</td>
                   <td data-label="Receipt" class="cell-muted">{{ receiptNo(s.SaleID) }}</td>
                   <td data-label="Service" class="cell-product">{{ s.Description }}</td>
@@ -388,7 +383,7 @@
               </tbody>
               <tfoot v-if="services.length">
                 <tr class="svc-total">
-                  <td colspan="3">Total</td>
+                  <td colspan="3">Total<span v-if="services.length > SVC_PAGE_SIZE"> (all {{ services.length }})</span></td>
                   <td>{{ peso(serviceTotals.fee) }}</td>
                   <td></td>
                   <td>{{ peso(serviceTotals.worker) }}</td>
@@ -397,12 +392,21 @@
               </tfoot>
             </table>
           </div>
+
+          <div v-if="services.length > SVC_PAGE_SIZE && !printAll" class="svc-pager">
+            <span class="svc-pager-info">Showing {{ svcFrom }} to {{ svcTo }} of {{ services.length }}</span>
+            <div class="svc-pager-btns">
+              <button type="button" class="svc-pg-btn" :disabled="svcPage <= 1" @click="svcPage--">Previous</button>
+              <span class="svc-pg-now">Page {{ svcPage }} of {{ svcPages }}</span>
+              <button type="button" class="svc-pg-btn" :disabled="svcPage >= svcPages" @click="svcPage++">Next</button>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- Full Inventory Logs -->
-      <div class="section">
-        <div class="card">
+      <div id="sec-logs" class="section sec-anchor">
+        <div class="card" :class="{ 'card--flash': flashId === 'sec-logs' }">
           <div class="card-header">
             <div>
               <p class="card-eyebrow">Full History</p>
@@ -410,6 +414,17 @@
               <p class="card-sub">Every stock movement in this period, including cut sales and leftover updates.</p>
             </div>
           </div>
+
+          <!-- Active filter from the summary cards -->
+          <div v-if="logFilter !== 'all'" class="filter-bar">
+            <span class="filter-chip">
+              <i class="fa-solid fa-filter"></i>
+              Showing {{ logFilterLabel }} · {{ filteredLogCount }} of {{ inventoryLogs.length }}
+            </span>
+            <button v-if="logFilter === 'stock_in' || logFilter === 'stock_out'" type="button" class="link-btn" @click="openBreakdown(logFilter)">View breakdown</button>
+            <button type="button" class="link-btn" @click="clearLogFilter">Show all</button>
+          </div>
+
           <div class="table-wrap">
             <table id="inventoryLogsTable" class="data-table data-table--fixed data-table--stack">
               <thead>
@@ -590,51 +605,136 @@ const inventoryLogs       = ref([])
 const services            = ref([])
 
 /* ════════════════════════════════════════════════════════════
-   PERIOD FILTER + CALENDAR PICKER
+   PAGE SIZES
+   Every table shows at most 10 rows per page, except the Full
+   History table which shows at most 15.
 ════════════════════════════════════════════════════════════ */
-const periodMode = ref('month') // 'month' | 'date'
+const PAGE_SMALL = 10
+const PAGE_LOGS  = 15
+const SVC_PAGE_SIZE = PAGE_SMALL
+
+/* ════════════════════════════════════════════════════════════
+   PERIOD FILTER + CALENDAR PICKER  (Day / Week / Month / Year)
+   Same behaviour as the Reports page.
+   The backend already filters on date_from / date_to, so every mode
+   simply sends a different range:
+     Day   → that day
+     Week  → Sunday – Saturday
+     Month → 1st – last day
+     Year  → Jan 1 – Dec 31
+════════════════════════════════════════════════════════════ */
+const MODES = [
+  { key: 'day',   label: 'Day' },
+  { key: 'week',  label: 'Week' },
+  { key: 'month', label: 'Month' },
+  { key: 'year',  label: 'Year' },
+]
+
+const periodMode = ref('month') // 'day' | 'week' | 'month' | 'year'
 
 const pad = (n) => String(n).padStart(2, '0')
-function currentMonthValue() {
-  const now = new Date()
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
-}
-function currentDateValue() {
-  const now = new Date()
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-}
 const toDayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const toMonthStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
 
+// Sunday-start week that contains the given YYYY-MM-DD.
+function weekStartOf(dayStr) {
+  const d = new Date(`${dayStr}T00:00:00`)
+  d.setDate(d.getDate() - d.getDay())
+  return d
+}
+// 'YYYY-MM-DD' shifted by n days -> 'YYYY-MM-DD'
+function shiftDayStr(dayStr, n) {
+  const d = new Date(`${dayStr}T00:00:00`)
+  d.setDate(d.getDate() + n)
+  return toDayStr(d)
+}
+// Weeks run Sunday → Saturday. weekStr is the Sunday.
+const weekEndStr = (weekStr) => shiftDayStr(weekStr, 6)
+
+// "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" / "Dec 28, 2026 – Jan 3, 2027"
+function formatWeekRange(weekStr) {
+  const s = new Date(`${weekStr}T00:00:00`)
+  const e = new Date(`${weekEndStr(weekStr)}T00:00:00`)
+  const mon = (d) => d.toLocaleDateString('en-US', { month: 'short' })
+  if (s.getFullYear() !== e.getFullYear()) {
+    return `${mon(s)} ${s.getDate()}, ${s.getFullYear()} – ${mon(e)} ${e.getDate()}, ${e.getFullYear()}`
+  }
+  if (s.getMonth() !== e.getMonth()) {
+    return `${mon(s)} ${s.getDate()} – ${mon(e)} ${e.getDate()}, ${e.getFullYear()}`
+  }
+  return `${mon(s)} ${s.getDate()} – ${e.getDate()}, ${e.getFullYear()}`
+}
+
 const todayDate  = new Date()
-const CUR_MONTH  = currentMonthValue()
-const CUR_DATE   = currentDateValue()
+const CUR_DATE   = toDayStr(todayDate)                         // 'YYYY-MM-DD'
+const CUR_WEEK   = toDayStr(weekStartOf(CUR_DATE))             // Sunday of this week
+const CUR_MONTH  = toMonthStr(todayDate)                       // 'YYYY-MM'
 const CUR_YEAR   = todayDate.getFullYear()
 const yearOptions = Array.from({ length: 12 }, (_, i) => CUR_YEAR - i) // newest first (clean 3 × 4 grid)
 const MIN_YEAR   = yearOptions[yearOptions.length - 1]
 
-const selectedMonth = ref(CUR_MONTH)
 const selectedDate  = ref(CUR_DATE)
+const selectedWeek  = ref(CUR_WEEK) // Sunday of the selected week
+const selectedMonth = ref(CUR_MONTH)
+const selectedYear  = ref(CUR_YEAR)
+
 const isFiltering   = ref(false)
+const loadError     = ref('')
+const lastUpdated   = ref('')
 
-const currentTopLimit = ref(10)
+const currentTopLimit = ref(PAGE_SMALL)
 
-// Report actions (Copy / CSV / Print): 'idle' | 'copying' | 'copied' | 'error'
-const copyState = ref('idle')
+// Report actions (Copy / CSV / Print)
+const copyState = ref('idle') // 'idle' | 'copying' | 'copied' | 'error'
+const csvState  = ref('idle') // 'idle' | 'done'
+const printing  = ref(false)
+const printAll  = ref(false)  // true while printing: tables show every row
 const printGeneratedAt = ref('')
 
-const periodNoun   = computed(() => (periodMode.value === 'month' ? 'month' : 'day'))
-const currentLabel = computed(() => (periodMode.value === 'month' ? 'This month' : 'Today'))
+const periodNoun   = computed(() => ({ day: 'day', week: 'week', month: 'month', year: 'year' }[periodMode.value]))
+const currentLabel = computed(() => ({ day: 'Today', week: 'This week', month: 'This month', year: 'This year' }[periodMode.value]))
 
-const isCurrentPeriod = computed(() =>
-  periodMode.value === 'month' ? selectedMonth.value >= CUR_MONTH : selectedDate.value >= CUR_DATE
-)
-const canGoNext = computed(() => !isCurrentPeriod.value)
-const canGoPrev = computed(() =>
-  periodMode.value === 'month' ? selectedMonth.value > `${MIN_YEAR}-01` : selectedDate.value > `${MIN_YEAR}-01-01`
-)
+const canGoNext = computed(() => {
+  if (periodMode.value === 'year')  return selectedYear.value < CUR_YEAR
+  if (periodMode.value === 'month') return !!selectedMonth.value && selectedMonth.value < CUR_MONTH
+  if (periodMode.value === 'week')  return !!selectedWeek.value && selectedWeek.value < CUR_WEEK
+  return !!selectedDate.value && selectedDate.value < CUR_DATE
+})
+const canGoPrev = computed(() => {
+  if (periodMode.value === 'year')  return selectedYear.value > MIN_YEAR
+  if (periodMode.value === 'month') return !!selectedMonth.value && selectedMonth.value > `${MIN_YEAR}-01`
+  if (periodMode.value === 'week')  return !!selectedWeek.value && selectedWeek.value > `${MIN_YEAR}-01-01`
+  return !!selectedDate.value && selectedDate.value > `${MIN_YEAR}-01-01`
+})
+const isCurrentPeriod = computed(() => !canGoNext.value)
 
-/* ── calendar popover (days → months → years) ── */
+// Keeps the pickers pointing at the same moment in time when the
+// person switches Day / Week / Month / Year, instead of jumping back to "now".
+function syncPickers(from) {
+  if (from === 'day' && selectedDate.value) {
+    selectedMonth.value = selectedDate.value.slice(0, 7)
+    selectedYear.value  = Number(selectedDate.value.slice(0, 4))
+    selectedWeek.value  = toDayStr(weekStartOf(selectedDate.value))
+  } else if (from === 'week' && selectedWeek.value) {
+    // Today if the week is the current one, otherwise the week's first day.
+    selectedDate.value  = selectedWeek.value === CUR_WEEK ? CUR_DATE : selectedWeek.value
+    selectedMonth.value = selectedDate.value.slice(0, 7)
+    selectedYear.value  = Number(selectedDate.value.slice(0, 4))
+  } else if (from === 'month' && selectedMonth.value) {
+    selectedYear.value = Number(selectedMonth.value.slice(0, 4))
+    selectedDate.value = selectedMonth.value === CUR_MONTH ? CUR_DATE : `${selectedMonth.value}-01`
+    selectedWeek.value = toDayStr(weekStartOf(selectedDate.value))
+  } else if (from === 'year') {
+    const y = selectedYear.value
+    selectedMonth.value = y === CUR_YEAR ? CUR_MONTH : `${y}-01`
+    selectedDate.value  = y === CUR_YEAR ? CUR_DATE  : `${y}-01-01`
+    selectedWeek.value  = toDayStr(weekStartOf(selectedDate.value))
+  }
+}
+
+/* ── calendar popover (days → months → years) ──
+   Day mode picks a day. Week mode shows the same day grid, and clicking
+   any day selects the whole week (Sun – Sat) it belongs to. */
 const PK_WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTH_NAMES = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'long' }))
 const MONTH_SHORT = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'short' }))
@@ -646,24 +746,33 @@ const browseMonth   = ref(todayDate.getMonth()) // 0-11
 const pickerRoot    = ref(null)
 const pickerTrigger = ref(null)
 
+// Day and Week both drill down to a day grid.
+const pickerDaysMode = computed(() => periodMode.value === 'day' || periodMode.value === 'week')
+
 const pickerLabel = computed(() => {
+  if (periodMode.value === 'year') return String(selectedYear.value)
   if (periodMode.value === 'month') {
     const [y, m] = (selectedMonth.value || CUR_MONTH).split('-').map(Number)
     return `${MONTH_NAMES[m - 1]} ${y}`
   }
+  if (periodMode.value === 'week') return formatWeekRange(selectedWeek.value || CUR_WEEK)
   const d = new Date(`${selectedDate.value || CUR_DATE}T00:00:00`)
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 })
 
 function openPicker() {
-  if (periodMode.value === 'date') {
-    const [y, m] = (selectedDate.value || CUR_DATE).split('-').map(Number)
+  if (pickerDaysMode.value) {
+    const src = periodMode.value === 'week' ? (selectedWeek.value || CUR_WEEK) : (selectedDate.value || CUR_DATE)
+    const [y, m] = src.split('-').map(Number)
     browseYear.value = y
     browseMonth.value = m - 1
     pickerView.value = 'days'
-  } else {
+  } else if (periodMode.value === 'month') {
     browseYear.value = Number((selectedMonth.value || CUR_MONTH).slice(0, 4))
     pickerView.value = 'months'
+  } else {
+    browseYear.value = selectedYear.value
+    pickerView.value = 'years'
   }
   pickerOpen.value = true
 }
@@ -716,14 +825,18 @@ const pkDayCells = computed(() => {
   const count = new Date(y, m + 1, 0).getDate()
   const lead = new Date(y, m, 1).getDay()
   const out = Array(lead).fill(null)
+  const weekMode = periodMode.value === 'week'
+  const wkStart = selectedWeek.value
+  const wkEnd = wkStart ? weekEndStr(wkStart) : ''
   for (let d = 1; d <= count; d++) {
     const key = `${y}-${pad(m + 1)}-${pad(d)}`
     out.push({
       key, d,
       title: new Date(y, m, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
-      future: key > CUR_DATE,
+      // Week mode: any day of the current week is still pickable (it selects the current week).
+      future: weekMode ? toDayStr(weekStartOf(key)) > CUR_WEEK : key > CUR_DATE,
       today: key === CUR_DATE,
-      selected: periodMode.value === 'date' && key === selectedDate.value,
+      selected: weekMode ? (key >= wkStart && key <= wkEnd) : (periodMode.value === 'day' && key === selectedDate.value),
     })
   }
   return out
@@ -731,9 +844,11 @@ const pkDayCells = computed(() => {
 const pkMonthCells = computed(() =>
   MONTH_SHORT.map((label, m) => {
     const key = `${browseYear.value}-${pad(m + 1)}`
-    const selected = periodMode.value === 'month'
-      ? key === selectedMonth.value
-      : (selectedDate.value || '').startsWith(key)
+    const selected =
+      periodMode.value === 'month' ? key === selectedMonth.value
+      : periodMode.value === 'day' ? (selectedDate.value || '').startsWith(key)
+      : periodMode.value === 'week' ? (selectedWeek.value || '').startsWith(key)
+      : false
     return {
       key, m, label,
       title: `${MONTH_NAMES[m]} ${browseYear.value}`,
@@ -747,19 +862,23 @@ const pkYearCells = computed(() =>
   [...yearOptions].reverse().map((y) => ({
     y,
     today: y === CUR_YEAR,
-    selected: y === browseYear.value,
+    selected: periodMode.value === 'year' ? y === selectedYear.value : y === browseYear.value,
   }))
 )
 
 async function pkPickDay(key) {
-  selectedDate.value = key
-  selectedMonth.value = key.slice(0, 7)
+  if (periodMode.value === 'week') {
+    selectedWeek.value = toDayStr(weekStartOf(key))
+  } else {
+    selectedDate.value = key
+    selectedMonth.value = key.slice(0, 7)
+  }
   closePicker(true)
   await applyDateFilter()
 }
 async function pkPickMonth(m) {
-  if (periodMode.value === 'date') {
-    // Specific-date mode: choosing a month just opens its days.
+  if (pickerDaysMode.value) {
+    // Day / Week mode: choosing a month just opens its days.
     browseMonth.value = m
     pickerView.value = 'days'
     return
@@ -768,9 +887,16 @@ async function pkPickMonth(m) {
   closePicker(true)
   await applyDateFilter()
 }
-function pkPickYear(y) {
+async function pkPickYear(y) {
+  if (periodMode.value === 'year') {
+    selectedYear.value = y
+    closePicker(true)
+    await applyDateFilter()
+    return
+  }
+  // Day / Week / Month mode: choosing a year opens its months.
   browseYear.value = y
-  if (y === CUR_YEAR && browseMonth.value > todayDate.getMonth()) browseMonth.value = todayDate.getMonth()
+  if (pickerDaysMode.value && y === CUR_YEAR && browseMonth.value > todayDate.getMonth()) browseMonth.value = todayDate.getMonth()
   pickerView.value = 'months'
 }
 async function pkGoCurrent() {
@@ -783,9 +909,13 @@ async function shiftPeriod(delta) {
   if (delta > 0 && !canGoNext.value) return
   if (delta < 0 && !canGoPrev.value) return
 
-  if (periodMode.value === 'month') {
+  if (periodMode.value === 'year') {
+    selectedYear.value += delta
+  } else if (periodMode.value === 'month') {
     const [yy, mm] = selectedMonth.value.split('-').map(Number)
     selectedMonth.value = toMonthStr(new Date(yy, mm - 1 + delta, 1))
+  } else if (periodMode.value === 'week') {
+    selectedWeek.value = shiftDayStr(selectedWeek.value, delta * 7)
   } else {
     const d = new Date(`${selectedDate.value}T00:00:00`)
     d.setDate(d.getDate() + delta)
@@ -796,8 +926,57 @@ async function shiftPeriod(delta) {
 }
 
 async function goCurrent() {
+  selectedDate.value  = CUR_DATE
+  selectedWeek.value  = CUR_WEEK
   selectedMonth.value = CUR_MONTH
-  selectedDate.value = CUR_DATE
+  selectedYear.value  = CUR_YEAR
+  await applyDateFilter()
+}
+
+/* ── STICKY STACK (period bar + summary cards) ──
+   The app shell's scrolling container has its own top padding, and a sticky
+   element stops *inside* that padding, which leaves a strip of page content
+   visible above the stack. We measure that padding and offset the stack by the
+   same amount (a negative `top`) so it sits flush against the top edge.
+   We also publish the stack's height as --sticky-h so that "jump to section"
+   scrolling stops just below the stack instead of hiding under it. */
+const rootEl      = ref(null)
+const stickyStack = ref(null)
+const stickyTop   = ref(0)
+let stackObserver = null
+
+function findScrollParent(el) {
+  let node = el ? el.parentElement : null
+  while (node && node !== document.body && node !== document.documentElement) {
+    const { overflowY } = getComputedStyle(node)
+    if (/(auto|scroll|overlay)/.test(overflowY)) return node
+    node = node.parentElement
+  }
+  return null
+}
+
+function updateStickyTop() {
+  const scroller = findScrollParent(stickyStack.value)
+  if (!scroller) { stickyTop.value = 0; return }
+  const cs = getComputedStyle(scroller)
+  stickyTop.value = -(parseFloat(cs.paddingTop) || 0)
+}
+
+function updateStickyHeight() {
+  const el = stickyStack.value
+  const root = rootEl.value
+  if (!el || !root) return
+  const isSticky = getComputedStyle(el).position === 'sticky'
+  root.style.setProperty('--sticky-h', isSticky ? `${el.offsetHeight}px` : '0px')
+}
+
+function onResize() {
+  updateStickyTop()
+  updateStickyHeight()
+}
+
+// Reload the current period (used by the "Try again" button in the error notice).
+async function refresh() {
   await applyDateFilter()
 }
 
@@ -917,12 +1096,23 @@ function typePill(item) {
 
 const withQty = (row) => ({ ...row, qty_info: qtyInfo(row), type_pill: typePill(row) })
 
-/* ── EXTRA SERVICES totals ── */
+/* ── EXTRA SERVICES: totals + paging ── */
 const serviceTotals = computed(() => ({
   fee:    services.value.reduce((s, r) => s + num(r.Fee), 0),
   worker: services.value.reduce((s, r) => s + num(r.WorkerAmount), 0),
   owner:  services.value.reduce((s, r) => s + num(r.OwnerAmount), 0),
 }))
+
+const svcPage  = ref(1)
+const svcPages = computed(() => Math.max(1, Math.ceil(services.value.length / SVC_PAGE_SIZE)))
+const svcFrom  = computed(() => (services.value.length ? (svcPage.value - 1) * SVC_PAGE_SIZE + 1 : 0))
+const svcTo    = computed(() => Math.min(svcPage.value * SVC_PAGE_SIZE, services.value.length))
+// While printing, every service is listed so nothing is cut off the paper.
+const visibleServices = computed(() => {
+  if (printAll.value) return services.value
+  const start = (svcPage.value - 1) * SVC_PAGE_SIZE
+  return services.value.slice(start, start + SVC_PAGE_SIZE)
+})
 
 /* ── UNITS ── */
 const UNIT_LABELS = {
@@ -987,7 +1177,96 @@ function totalsText(list, fallbackTotal, sign) {
   return `${sign}${fallbackTotal}`
 }
 
-/* ── KPI BREAKDOWN (click Stock In / Stock Out) ──
+/* ════════════════════════════════════════════════════════════
+   SUMMARY CARDS  (compact + clickable)
+   Each card jumps to the section that holds its data. The ones that
+   describe a kind of movement also filter the Full History table.
+     Total Adjustments → Full History (all rows)
+     Total Stock In    → Full History, stock in only
+     Total Stock Out   → Full History, stock out only
+     Manual Adjustments→ Full History (all rows)
+     Cut Pieces Sold   → Full History, cut sales only
+     Service Fees      → Extra Services
+════════════════════════════════════════════════════════════ */
+const kpiCards = computed(() => {
+  const s = summaryDisplay.value
+  return [
+    { key: 'adj',    label: 'Total Adjustments',  value: formatNumber(s.total_adjustments),  icon: 'fa-sliders',               color: 'orange', featured: true,
+      target: 'sec-logs', filter: 'all',       hint: 'Go to all inventory logs' },
+    { key: 'in',     label: 'Total Stock In',     value: '+' + formatNumber(s.total_stock_in),  icon: 'fa-download',            color: 'green',  tone: 'green',
+      target: 'sec-logs', filter: 'stock_in',  hint: 'Show stock in logs' },
+    { key: 'out',    label: 'Total Stock Out',    value: '-' + formatNumber(s.total_stock_out), icon: 'fa-arrow-up-from-bracket', color: 'red',  tone: 'red', alert: true,
+      target: 'sec-logs', filter: 'stock_out', hint: 'Show stock out logs' },
+    { key: 'manual', label: 'Manual Adjustments', value: formatNumber(s.manual_adjustments), icon: 'fa-pen-to-square',         color: 'violet', tone: 'violet',
+      target: 'sec-logs', filter: 'all',       hint: 'Go to inventory logs' },
+    { key: 'cut',    label: 'Cut Pieces Sold',    value: formatNumber(s.cut_count),          icon: 'fa-scissors',              color: 'orange',
+      target: 'sec-logs', filter: 'cut',       hint: 'Show cut sales' },
+    { key: 'svc',    label: 'Service Fees',       value: peso(s.service_revenue),            icon: 'fa-screwdriver-wrench',    color: 'green',  tone: 'green',
+      target: 'sec-services', filter: null,    hint: 'Go to extra services' },
+  ]
+})
+
+/* ── Full History filter (set by the cards) ── */
+const logFilter = ref('all') // 'all' | 'stock_in' | 'stock_out' | 'cut'
+const LOG_FILTER_LABELS = { stock_in: 'stock in', stock_out: 'stock out', cut: 'cut sales' }
+const logFilterLabel = computed(() => LOG_FILTER_LABELS[logFilter.value] || 'all')
+
+function logMatchesFilter(item) {
+  switch (logFilter.value) {
+    case 'stock_in':  return item.type === 'stock_in'
+    case 'stock_out': return item.type === 'stock_out'
+    case 'cut':       return !!item.is_cut
+    default:          return true
+  }
+}
+const filteredLogCount = computed(() => inventoryLogs.value.filter(logMatchesFilter).length)
+
+// DataTables custom search: only applies to the Full History table.
+// Rows are rendered by Vue in the same order as inventoryLogs, so dataIndex lines up.
+const logsSearchFn = (settings, data, dataIndex) => {
+  if (!settings.nTable || settings.nTable.id !== 'inventoryLogsTable') return true
+  if (logFilter.value === 'all') return true
+  const item = inventoryLogs.value[dataIndex]
+  return item ? logMatchesFilter(item) : true
+}
+let logsSearchRegistered = false
+function registerLogsSearch() {
+  if (logsSearchRegistered || !window.$ || !$.fn || !$.fn.dataTable) return
+  $.fn.dataTable.ext.search.push(logsSearchFn)
+  logsSearchRegistered = true
+}
+function unregisterLogsSearch() {
+  if (!logsSearchRegistered) return
+  const list = $.fn.dataTable.ext.search
+  const i = list.indexOf(logsSearchFn)
+  if (i > -1) list.splice(i, 1)
+  logsSearchRegistered = false
+}
+
+function clearLogFilter() {
+  logFilter.value = 'all'
+  if (dtLogs) dtLogs.draw()
+}
+
+// Highlight flash on the section we just jumped to
+const flashId = ref('')
+let flashTimer = null
+
+async function jumpTo(id, filter = null) {
+  if (filter !== null) {
+    logFilter.value = filter
+    if (dtLogs) dtLogs.draw()
+  }
+  await nextTick()
+  const el = document.getElementById(id)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  flashId.value = id
+  clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => { flashId.value = '' }, 1600)
+}
+
+/* ── KPI BREAKDOWN (opened from the filter bar for Stock In / Stock Out) ──
    Each product shows its total, then one line per size (VariantLabel). */
 const breakdown = ref({ open: false, type: 'stock_in' })
 
@@ -1072,7 +1351,12 @@ function animateSummaryTo(target, duration = 750) {
   requestAnimationFrame(tick)
 }
 
+// The date range sent to the API for the selected period.
 function computeRange() {
+  if (periodMode.value === 'year') {
+    const y = selectedYear.value
+    return { from: `${y}-01-01`, to: `${y}-12-31` }
+  }
   if (periodMode.value === 'month') {
     const [year, month] = selectedMonth.value.split('-').map(Number)
     const from = `${selectedMonth.value}-01`
@@ -1080,25 +1364,36 @@ function computeRange() {
     const to = `${selectedMonth.value}-${pad(lastDay)}`
     return { from, to }
   }
+  if (periodMode.value === 'week') {
+    return { from: selectedWeek.value, to: weekEndStr(selectedWeek.value) }
+  }
   return { from: selectedDate.value, to: selectedDate.value }
 }
 
 const filterLabel = computed(() => {
+  if (periodMode.value === 'year') return selectedYear.value ? String(selectedYear.value) : 'All Time'
   if (periodMode.value === 'month') {
     if (!selectedMonth.value) return 'All Time'
     const [year, month] = selectedMonth.value.split('-').map(Number)
     return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  }
+  if (periodMode.value === 'week') {
+    return selectedWeek.value ? formatWeekRange(selectedWeek.value) : 'All Time'
   }
   if (!selectedDate.value) return 'All Time'
   return new Date(`${selectedDate.value}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 })
 
 /* ── PRINT: document reference + opening paragraph ── */
+// e.g. IL-M-202611 / IL-W-20261108 / IL-D-20261111 / IL-Y-2026
 const reportRef = computed(() => {
-  const key = periodMode.value === 'month'
-    ? String(selectedMonth.value || '').replace('-', '')
+  const code = { day: 'D', week: 'W', month: 'M', year: 'Y' }[periodMode.value]
+  const key =
+    periodMode.value === 'year' ? String(selectedYear.value)
+    : periodMode.value === 'month' ? String(selectedMonth.value || '').replace('-', '')
+    : periodMode.value === 'week' ? String(selectedWeek.value || '').replace(/-/g, '')
     : String(selectedDate.value || '').replace(/-/g, '')
-  return `IL-${periodMode.value === 'month' ? 'M' : 'D'}-${key}`
+  return `IL-${code}-${key}`
 })
 
 const execSummary = computed(() => {
@@ -1161,7 +1456,8 @@ function timeOnly(raw) {
   return d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : ''
 }
 
-async function loadInventoryLogs({ topLimit = 10, dateFromVal = null, dateToVal = null } = {}) {
+async function loadInventoryLogs({ topLimit = PAGE_SMALL, dateFromVal = null, dateToVal = null } = {}) {
+  loadError.value = ''
   try {
     const res = await api.get('/api/inventory/logs', {
       params: {
@@ -1179,10 +1475,13 @@ async function loadInventoryLogs({ topLimit = 10, dateFromVal = null, dateToVal 
     topAdjustedProducts.value = res.data.top_adjusted_products
     inventoryLogs.value       = (res.data.inventory_logs ?? []).map(withQty)
     services.value            = res.data.services ?? []
+    svcPage.value             = 1
 
+    lastUpdated.value = new Date().toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
     animateSummaryTo(summary.value)
   } catch (err) {
     console.error('Inventory logs API error:', err)
+    loadError.value = err?.response?.data?.message || 'Could not load these logs. Check your connection and try again.'
   }
 }
 
@@ -1311,7 +1610,12 @@ function buildReportCSV() {
 }
 
 function reportFileSlug() {
-  const base = filterLabel.value || (periodMode.value === 'month' ? selectedMonth.value : selectedDate.value)
+  const fallback =
+    periodMode.value === 'year' ? selectedYear.value
+    : periodMode.value === 'month' ? selectedMonth.value
+    : periodMode.value === 'week' ? selectedWeek.value
+    : selectedDate.value
+  const base = filterLabel.value || fallback
   return `inventory-logs-${String(base).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
 }
 
@@ -1353,34 +1657,56 @@ function exportCSV() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+    csvState.value = 'done'
+    setTimeout(() => { csvState.value = 'idle' }, 1800)
   } catch (err) {
     console.error('CSV export failed:', err)
   }
 }
 
 /* ── PRINT ──
-   The Full History table is paginated on screen (25 rows). For paper it is
-   switched to "show all" first so nothing is cut off, then put back after
-   the print dialog closes. */
+   The Full History table and the Extra Services list are paginated on
+   screen. For paper they are switched to "show all" (and any card filter is
+   cleared) first so nothing is cut off, then put back after the print
+   dialog closes. */
 let printRestoreLen = null
+let printRestoreFilter = null
 
 async function printReport() {
-  closePicker()
-  closeBreakdown()
-  printGeneratedAt.value = new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+  if (printing.value) return
+  printing.value = true
+  try {
+    closePicker()
+    closeBreakdown()
+    printGeneratedAt.value = new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
 
-  if (dtLogs) {
-    printRestoreLen = dtLogs.page.len()
-    dtLogs.page.len(-1).draw(false)
+    printAll.value = true
+    printRestoreFilter = logFilter.value
+    logFilter.value = 'all'
+
+    if (dtLogs) {
+      printRestoreLen = dtLogs.page.len()
+      dtLogs.page.len(-1).draw(false)
+    }
+    await nextTick()
+    // One extra frame so the expanded rows are painted before the dialog opens.
+    await new Promise((r) => requestAnimationFrame(r))
+    window.print()
+  } finally {
+    printing.value = false
   }
-  await nextTick()
-  // One extra frame so the expanded rows are painted before the dialog opens.
-  await new Promise((r) => requestAnimationFrame(r))
-  window.print()
 }
 
 function restoreAfterPrint() {
-  if (dtLogs && printRestoreLen) dtLogs.page.len(printRestoreLen).draw(false)
+  printAll.value = false
+  if (printRestoreFilter !== null) {
+    logFilter.value = printRestoreFilter
+    printRestoreFilter = null
+  }
+  if (dtLogs) {
+    if (printRestoreLen) dtLogs.page.len(printRestoreLen)
+    dtLogs.draw(false)
+  }
   printRestoreLen = null
 }
 
@@ -1391,12 +1717,19 @@ function restoreAfterPrint() {
 
    autoWidth is off so the column widths set in the template
    are respected and the tables fit without sideways scrolling.
+
+   Page sizes: Recent Activity and Top Adjusted show at most 10
+   rows per page. Full History shows at most 15.
 ──────────────────────────────────────────────────────────── */
+const SMALL_MENU = [[5, 10], [5, 10]]
+const LOGS_MENU  = [[10, 15], [10, 15]]
+
 function initRecentTable() {
   dtRecent = $('#recentActivityTable').DataTable({
     dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
     order: [],
-    pageLength: 25,
+    pageLength: PAGE_SMALL,
+    lengthMenu: SMALL_MENU,
     autoWidth: false,
   })
 }
@@ -1405,7 +1738,8 @@ function initTopTable() {
   dtTop = $('#topAdjustedTable').DataTable({
     dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
     order: [],
-    pageLength: 25,
+    pageLength: PAGE_SMALL,
+    lengthMenu: SMALL_MENU,
     autoWidth: false,
   })
 
@@ -1423,9 +1757,11 @@ function initTopTable() {
 }
 
 function initLogsTable() {
+  registerLogsSearch()
   dtLogs = $('#inventoryLogsTable').DataTable({
     dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
-    pageLength: 25,
+    pageLength: PAGE_LOGS,
+    lengthMenu: LOGS_MENU,
     order: [],
     autoWidth: false,
   })
@@ -1448,6 +1784,8 @@ async function applyDateFilter() {
   isFiltering.value = true
   try {
     destroyAllTables()
+    // A new period starts with the full list again.
+    logFilter.value = 'all'
 
     const { from, to } = computeRange()
     await loadInventoryLogs({
@@ -1463,16 +1801,12 @@ async function applyDateFilter() {
   }
 }
 
-// Keeps both pickers on the same moment when switching By Month / Specific Date.
-function setPeriodMode(mode) {
-  if (periodMode.value === mode) return
+// Keeps the pickers on the same moment when switching Day / Week / Month / Year.
+function setPeriodMode(next) {
+  if (periodMode.value === next) return
   closePicker()
-  if (mode === 'month') {
-    selectedMonth.value = (selectedDate.value || CUR_DATE).slice(0, 7)
-  } else {
-    selectedDate.value = selectedMonth.value === CUR_MONTH ? CUR_DATE : `${selectedMonth.value}-01`
-  }
-  periodMode.value = mode
+  syncPickers(periodMode.value)
+  periodMode.value = next
   applyDateFilter()
 }
 
@@ -1480,6 +1814,14 @@ onMounted(async () => {
   window.addEventListener('keydown', onEscKey)
   window.addEventListener('afterprint', restoreAfterPrint)
   document.addEventListener('pointerdown', onDocPointer)
+  window.addEventListener('resize', onResize)
+  await nextTick()
+  updateStickyTop()
+  updateStickyHeight()
+  if (window.ResizeObserver && stickyStack.value) {
+    stackObserver = new ResizeObserver(updateStickyHeight)
+    stackObserver.observe(stickyStack.value)
+  }
   const { from, to } = computeRange()
   await loadInventoryLogs({ dateFromVal: from, dateToVal: to })
   await nextTick()
@@ -1493,7 +1835,11 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onEscKey)
   window.removeEventListener('afterprint', restoreAfterPrint)
   document.removeEventListener('pointerdown', onDocPointer)
+  window.removeEventListener('resize', onResize)
+  if (stackObserver) { stackObserver.disconnect(); stackObserver = null }
+  clearTimeout(flashTimer)
   destroyAllTables()
+  unregisterLogsSearch()
 })
 </script>
 
@@ -1519,9 +1865,11 @@ onBeforeUnmount(() => {
   --il-shadow-lg:      var(--c-shadow-md);
 
   --il-green:          #10b981;
+  --il-green-soft:     rgba(16,185,129,0.12);
   --il-blue:           #3b82f6;
   --il-violet:         #6366f1;
   --il-red:            #f43f5e;
+  --il-red-soft:       rgba(244,63,94,0.12);
   --il-amber:          #B45309;
 
   --il-green-icon:     #D1FAE5;
@@ -1532,13 +1880,26 @@ onBeforeUnmount(() => {
   --radius: 16px;
   --il-ease: cubic-bezier(.16, 1, .3, 1);
 
+  /* Height of the sticky stack (set from script). "Jump to section" uses it
+     so the target stops just below the stack. */
+  --sticky-h: 0px;
+
+  /* ── SPACE TUNING (same values as Home and Reports) ────────
+     The app shell (Layout.vue) adds roughly 64px of its own padding around
+     every page. --bleed-* lets this page reclaim part of it on desktop.
+     Raise a value to push the content closer to the edge, lower it (or set
+     it to 0px) if content ever touches the sidebar or top bar. */
+  --bleed-x: 30px;
+  --bleed-y: 26px;
+  --il-gap: 16px;
+
   min-height: 100%;
   background: var(--il-bg);
-  padding: 28px 28px 56px;
+  padding: 16px 24px 40px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: var(--il-gap);
   transition: background-color 0.22s ease;
 }
 
@@ -1548,79 +1909,88 @@ html[data-theme="dark"] .inv-logs {
   --il-blue-icon:    rgba(59,130,246,0.18);
   --il-violet-icon:  rgba(99,102,241,0.18);
   --il-red-icon:     rgba(244,63,94,0.18);
+  --il-green-soft:   rgba(16,185,129,0.16);
+  --il-red-soft:     rgba(244,63,94,0.16);
 }
 
 .inv-logs button:focus-visible,
 .inv-logs a:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
 
-/* ── PAGE HEADER ── */
-.page-header { position: relative; z-index: 5; display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
-.page-eyebrow {
-  font-size: 11px; font-weight: 700; letter-spacing: .12em;
-  color: var(--il-accent); text-transform: uppercase; margin: 0 0 5px;
-}
-.page-title {
-  font-size: 26px; font-weight: 800;
-  color: var(--il-text-primary);
-  letter-spacing: -.03em; margin: 0;
-  transition: color 0.22s ease;
-}
-.page-sub { margin: 4px 0 0; font-size: 13px; color: var(--il-text-muted); }
-.page-sub strong { color: var(--il-text-secondary); font-weight: 700; }
+/* ── TOP BLOCK ──
+   display: contents removes this wrapper from the layout, so the header
+   becomes a direct child of .inv-logs. */
+.page-top { display: contents; }
 
-/* ── REPORT ACTIONS ── */
-.report-toolbar {
-  display: flex; align-items: center; justify-content: flex-end;
-  gap: 10px; flex-wrap: wrap;
+/* ── PAGE HEADER ── */
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.page-title  { font-size: 26px; font-weight: 800; color: var(--il-text-primary); letter-spacing: -.03em; margin: 0; }
+.page-sub    { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--il-text-secondary); }
+.chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 20px; }
+.chip--live { color: var(--il-green); background: var(--il-green-soft); }
+
+/* ── STICKY STACK: period bar + summary cards stay together ──
+   The page colour fills the stack and a soft halo (box-shadow) surrounds it,
+   so rows scrolling underneath are hidden around it instead of peeking out. */
+.sticky-stack {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--il-bg);
+  box-shadow: 0 0 0 8px var(--il-bg);
+  transition: background-color 0.22s ease, box-shadow 0.22s ease;
 }
+
+/* Jump-to-section targets stop just below the sticky stack */
+.sec-anchor { scroll-margin-top: calc(var(--sticky-h, 0px) + 16px); }
+
+/* ── EXPORT BUTTONS (inside the period bar) ── */
+.report-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .rt-btn {
-  display: flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 36px;
   border: 1px solid var(--il-border-strong);
   background: var(--il-surface-sunken);
   color: var(--il-text-secondary);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 13px; font-weight: 600;
-  padding: 9px 16px; border-radius: 11px; cursor: pointer;
-  transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .12s ease, box-shadow .16s ease;
+  font-family: inherit; font-size: 13px; font-weight: 600; white-space: nowrap;
+  padding: 0 15px; border-radius: 10px; cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
 }
 .rt-btn i { font-size: 12px; }
-.rt-btn:hover:not(:disabled) {
-  background: var(--il-surface-raised);
-  border-color: var(--il-accent-border);
-  color: var(--il-text-primary);
-  transform: translateY(-1px);
-}
-.rt-btn:disabled { opacity: .65; cursor: default; }
-.rt-btn--primary {
-  background: var(--il-accent); border-color: var(--il-accent); color: #fff;
-  box-shadow: 0 2px 8px rgba(234,88,12,0.28);
-}
-.rt-btn--primary:hover { background: #FB923C; border-color: #FB923C; color: #fff; }
+.rt-btn:hover:not(:disabled) { background: var(--il-surface-raised); border-color: var(--il-accent-border); color: var(--il-text-primary); }
+.rt-btn:disabled { opacity: .6; cursor: default; }
+.rt-btn--primary { background: var(--il-accent); border-color: var(--il-accent); color: #fff; }
+.rt-btn--primary:hover:not(:disabled) { background: #FB923C; border-color: #FB923C; color: #fff; }
 
-/* ── PERIOD CONTROL ── */
-.period-control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* ── PERIOD BAR (lives inside the sticky stack) ── */
+.period-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--il-surface);
+  border: 1px solid var(--il-border);
+  border-radius: 14px;
+  box-shadow: var(--il-shadow);
+}
+.period-nav { display: flex; align-items: center; gap: 6px; }
+.period-end { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.period-status { display: flex; align-items: center; }
+.period-status-text { font-size: 12px; font-weight: 600; color: var(--il-text-muted); white-space: nowrap; }
+.period-status-text--busy { color: var(--il-accent); }
 
-.period-mode-toggle {
-  display: inline-flex; align-items: center;
+.seg {
+  display: inline-flex; gap: 2px; padding: 3px;
   background: var(--il-surface-sunken);
   border: 1px solid var(--il-border);
-  border-radius: 12px; padding: 3px; gap: 2px;
+  border-radius: 11px;
 }
-.period-mode-seg {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: none; background: transparent;
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 12.5px; font-weight: 600;
+.seg-btn {
+  border: none; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
   color: var(--il-text-muted);
-  padding: 8px 16px; border-radius: 9px; cursor: pointer;
-  transition: background-color .18s ease, color .18s ease;
-  white-space: nowrap;
+  padding: 7px 14px; border-radius: 8px; white-space: nowrap;
+  transition: background-color .16s ease, color .16s ease;
 }
-.period-mode-seg:hover { color: var(--il-text-secondary); }
-.period-mode-seg--active { background: var(--il-accent); color: #fff; }
-.period-mode-seg--active:hover { color: #fff; }
+.seg-btn:hover:not(.seg-btn--active) { color: var(--il-text-primary); }
+.seg-btn--active { background: var(--il-accent); color: #fff; }
 
-.period-nav { display: flex; align-items: center; gap: 6px; }
 .icon-btn {
   width: 36px; height: 36px; border-radius: 10px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
@@ -1641,7 +2011,15 @@ html[data-theme="dark"] .inv-logs {
 .link-btn:hover:not(:disabled) { background: var(--il-accent-soft); }
 .link-btn:disabled { opacity: .5; cursor: default; }
 
-.date-filter-loading { font-size: 12px; color: var(--il-accent); display: flex; align-items: center; gap: 6px; }
+/* ── NOTICE ── */
+.notice {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: 12px;
+  font-size: 13px; font-weight: 600; color: var(--il-red);
+  background: var(--il-red-soft);
+  border: 1px solid rgba(244,63,94,0.28);
+}
+.notice span { flex: 1; min-width: 200px; }
 
 /* ── CALENDAR PICKER ── */
 .picker { position: relative; }
@@ -1664,14 +2042,14 @@ html[data-theme="dark"] .inv-logs {
 .picker-trigger--open .picker-caret { transform: rotate(180deg); }
 
 .picker-pop {
-  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 40;
   width: 300px; max-width: calc(100vw - 32px);
   padding: 14px;
   background: var(--il-surface);
   border: 1px solid var(--il-border-strong);
   border-radius: 18px;
   box-shadow: 0 28px 56px -18px rgba(0,0,0,.5), 0 4px 14px rgba(0,0,0,.14);
-  transform-origin: top right;
+  transform-origin: top left;
 }
 .pop-enter-active, .pop-leave-active { transition: opacity .16s ease, transform .2s var(--il-ease); }
 .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(-6px) scale(.97); }
@@ -1741,8 +2119,7 @@ html[data-theme="dark"] .inv-logs {
 .pk-link--muted:hover:not(:disabled) { background: var(--il-surface-raised); color: var(--il-text-primary); }
 
 /* ── SECTION ── */
-.section        { display: flex; flex-direction: column; gap: 14px; }
-.section-header { display: flex; flex-direction: column; }
+.section        { display: flex; flex-direction: column; gap: 12px; }
 .section-title  {
   font-size: 17px; font-weight: 700; color: var(--il-text-primary);
   margin: 0; letter-spacing: -.01em; transition: color 0.22s ease;
@@ -1752,30 +2129,37 @@ html[data-theme="dark"] .inv-logs {
   color: var(--il-accent); text-transform: uppercase; margin: 0 0 4px;
 }
 
-/* ── KPI STRIP ── */
-.kpi-strip { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+/* ── KPI STRIP (compact, clickable) ──
+   All six cards sit on ONE row, each with the icon beside the text so the
+   cards stay short. minmax(0, 1fr) lets every column shrink evenly. When the
+   screen gets narrow the row scrolls sideways instead of growing taller. */
+.kpi-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
 
 .kpi-card {
+  appearance: none; -webkit-appearance: none;
+  font: inherit; text-align: left; cursor: pointer;
   background: var(--il-surface);
-  border-radius: var(--radius);
+  border-radius: 12px;
   border: 1px solid var(--il-border);
   box-shadow: var(--il-shadow);
-  padding: 20px 20px 16px;
+  padding: 9px 12px 11px;
   position: relative; overflow: hidden;
-  transition: transform .2s ease, box-shadow .2s ease, background-color 0.22s ease, border-color 0.22s ease;
+  min-width: 0;
+  transition: transform .18s ease, box-shadow .18s ease, background-color 0.22s ease, border-color 0.22s ease;
 }
-.kpi-card:hover { transform: translateY(-2px); box-shadow: var(--il-shadow-lg); }
+.kpi-card:hover { transform: translateY(-1px); box-shadow: var(--il-shadow-lg); border-color: var(--il-accent-border); }
+.kpi-card:active { transform: translateY(0); }
 
 .kpi-card--featured { background: var(--il-accent-soft); border-color: var(--il-accent-border); }
 .kpi-card--alert { background: rgba(244,63,94,0.08); border-color: rgba(244,63,94,0.25); }
 html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); border-color: rgba(244,63,94,0.28); }
 
-.kpi-card-inner { display: flex; align-items: flex-start; gap: 12px; }
+.kpi-card-inner { display: flex; flex-direction: row; align-items: center; gap: 10px; }
 
 .kpi-icon-wrap {
-  width: 40px; height: 40px; border-radius: 11px;
+  width: 30px; height: 30px; border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 15px; flex-shrink: 0;
+  font-size: 12px; flex-shrink: 0;
   transition: background-color 0.22s ease;
 }
 .kpi-icon-wrap--orange { background: var(--il-accent-soft);  color: var(--il-accent); }
@@ -1784,14 +2168,16 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
 .kpi-icon-wrap--violet { background: var(--il-violet-icon);  color: var(--il-violet); }
 .kpi-icon-wrap--red    { background: var(--il-red-icon);     color: var(--il-red); }
 
-.kpi-body  { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kpi-body  { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
 .kpi-label {
-  font-size: 11px; font-weight: 600; color: var(--il-text-muted);
-  text-transform: uppercase; letter-spacing: .07em;
+  font-size: 9.5px; font-weight: 600; color: var(--il-text-muted);
+  text-transform: uppercase; letter-spacing: .04em; line-height: 1.25; margin: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .kpi-value {
-  font-size: 23px; font-weight: 800; color: var(--il-text-primary);
-  letter-spacing: -.04em; line-height: 1.1; margin: 0;
+  font-size: 16px; font-weight: 800; color: var(--il-text-primary);
+  letter-spacing: -.03em; line-height: 1.2; margin: 0;
+  overflow-wrap: anywhere;
   transition: color 0.22s ease;
 }
 .kpi-value--green  { color: var(--il-green); }
@@ -1800,8 +2186,7 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
 .kpi-value--red    { color: var(--il-red); }
 
 .kpi-accent-bar {
-  position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
-  border-radius: 0 0 var(--radius) var(--radius);
+  position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
 }
 .kpi-accent-bar--orange { background: linear-gradient(90deg, var(--il-accent), #FB923C); }
 .kpi-accent-bar--green  { background: var(--il-green); }
@@ -1809,12 +2194,25 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
 .kpi-accent-bar--violet { background: var(--il-violet); }
 .kpi-accent-bar--red    { background: var(--il-red); }
 
-.kpi-card--clickable { cursor: pointer; }
-.kpi-hint {
-  margin: 2px 0 0; font-size: 11px; font-weight: 600;
-  color: var(--il-text-faint); transition: color .16s ease;
+/* ── FILTER BAR (Full History, set by the cards) ── */
+.filter-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: -6px 0 14px;
 }
-.kpi-card--clickable:hover .kpi-hint { color: var(--il-text-secondary); }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 700; color: var(--il-accent);
+  background: var(--il-accent-soft); border: 1px solid var(--il-accent-border);
+  border-radius: 20px; padding: 4px 12px;
+}
+.filter-chip i { font-size: 10.5px; }
+
+/* ── JUMP HIGHLIGHT ── */
+@keyframes il-flash {
+  0%   { box-shadow: 0 0 0 3px var(--il-accent-border), var(--il-shadow); }
+  100% { box-shadow: 0 0 0 0 transparent, var(--il-shadow); }
+}
+.card--flash { animation: il-flash 1.4s ease-out; }
 
 /* ── BREAKDOWN MODAL ── */
 .il-modal-backdrop {
@@ -1894,6 +2292,7 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
   border: 1px solid var(--il-border);
   box-shadow: var(--il-shadow);
   padding: 22px 24px 20px;
+  min-width: 0;
   transition: background-color 0.22s ease, border-color 0.22s ease;
 }
 .card-header {
@@ -1952,6 +2351,25 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
   font-weight: 800; color: var(--il-text-primary);
   padding: 12px 14px; border-top: 1px solid var(--il-border-strong);
 }
+.svc-total td span { font-weight: 600; color: var(--il-text-muted); font-size: 12px; }
+
+/* ── EXTRA SERVICES PAGER (matches the DataTables pagers) ── */
+.svc-pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding-top: 12px;
+}
+.svc-pager-info { font-size: 12.5px; color: var(--il-text-muted); }
+.svc-pager-btns { display: flex; align-items: center; gap: 8px; }
+.svc-pg-now { font-size: 12.5px; font-weight: 600; color: var(--il-text-secondary); }
+.svc-pg-btn {
+  border: 1.5px solid var(--il-border-strong); border-radius: 8px;
+  background: var(--il-surface); color: var(--il-text-secondary);
+  font: inherit; font-size: 12.5px; font-weight: 600; line-height: 1.4;
+  padding: 5px 12px; cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+.svc-pg-btn:hover:not(:disabled) { background: var(--il-accent-soft); border-color: var(--il-accent-border); color: var(--il-accent); }
+.svc-pg-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ── QUANTITY CELL ── */
 .qty-main {
@@ -2018,8 +2436,24 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 /* Print-only blocks are hidden on screen */
 .print-only { display: none; }
 
-/* Screen-only breakpoints (kept off the print media so the report never collapses into mobile cards) */
-@media screen and (max-width: 1100px) { .kpi-strip { grid-template-columns: repeat(2,1fr); } }
+/* ── RESPONSIVE (same breakpoints as Home and Reports) ──
+   Desktop only: pull the page outward into the shell's padding (top, left, right).
+   Screen only, so the printed report is never shifted. */
+@media screen and (min-width: 1001px) {
+  .inv-logs { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+}
+
+/* Screen-only breakpoints (kept off the print media so the report never collapses into mobile cards).
+   Below 1100px the six cards no longer fit evenly, so they scroll sideways in one short row
+   (the sticky stack never gets taller). */
+@media screen and (max-width: 1100px) {
+  .kpi-strip { display: flex; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+  .kpi-card { flex: 0 0 172px; }
+}
+
+@media screen and (max-width: 900px) {
+  .inv-logs { padding: 12px 14px 32px; --il-gap: 14px; }
+}
 
 /* ── NARROW SCREENS: each table row becomes a labelled card ── */
 @media screen and (max-width: 900px) {
@@ -2051,23 +2485,31 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 @media screen and (max-width: 700px)  {
   .inv-logs  { padding: 16px 16px 40px; }
   .card { padding: 18px 16px 16px; }
-  .kpi-strip { grid-template-columns: 1fr; }
   .page-header { flex-direction: column; align-items: stretch; }
-  .period-control { flex-direction: column; align-items: stretch; }
-  .period-mode-toggle { justify-content: stretch; }
-  .period-mode-seg { flex: 1; text-align: center; justify-content: center; }
+
+  /* On phones the period bar alone is already tall, so the stack scrolls
+     with the page instead of covering the screen. */
+  .sticky-stack { position: static; box-shadow: none; }
+  .sec-anchor { scroll-margin-top: 16px; }
+
+  .period-bar { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px; }
+  .seg { width: 100%; }
+  .seg-btn { flex: 1; text-align: center; }
   .period-nav { width: 100%; }
   .picker { flex: 1; min-width: 0; }
   .picker-trigger { width: 100%; min-width: 0; }
-  .picker-pop { left: 0; right: 0; width: auto; transform-origin: top center; }
-  .report-toolbar { justify-content: stretch; }
-  .rt-btn { flex: 1; justify-content: center; }
+  .picker-pop { width: auto; right: 0; }
+  .period-end { margin-left: 0; width: 100%; }
+  .period-status { display: none; }
+  .report-toolbar { width: 100%; }
+  .rt-btn { flex: 1; padding: 0 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .kpi-card, .rt-btn, .picker-caret, .pk-day, .pk-cell { transition: none; }
-  .kpi-card:hover, .rt-btn:hover:not(:disabled) { transform: none; }
+  .kpi-card:hover { transform: none; }
   .pop-enter-active, .pop-leave-active { transition: none; }
+  .card--flash { animation: none; }
 }
 
 /* ════════════════ PRINT MODE (scoped) ════════════════
@@ -2099,6 +2541,7 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 
     background: #ffffff !important;
     padding: 0 !important;
+    margin: 0 !important;
     gap: 16px !important;
     counter-reset: ps;
     font-family: 'Inter', Arial, sans-serif !important;
@@ -2113,13 +2556,22 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   }
 
   /* Hide everything interactive. The letterhead replaces the screen header. */
-  .page-header,
-  .period-control,
-  .report-toolbar,
+  .page-top,
+  .period-bar,
+  .notice,
+  .filter-bar,
+  .svc-pager,
   .section--screen,
-  .kpi-hint,
   .card-eyebrow,
   .il-modal-backdrop { display: none !important; }
+
+  /* The sticky stack is just a plain block on paper (only the summary tiles remain) */
+  .sticky-stack {
+    position: static !important;
+    display: block !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
 
   /* ── Letterhead ── */
   .print-header { display: block !important; margin-bottom: 4px; }
@@ -2163,7 +2615,6 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 
   /* ── Numbered section headings (01, 02, …) ── */
   .section { gap: 10px !important; margin-bottom: 2px !important; }
-  .section-header { margin: 0 !important; }
   .section-title,
   .card-title {
     display: flex !important; align-items: center; gap: 9px;
@@ -2182,24 +2633,25 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   }
   .card-sub { margin: -4px 0 10px !important; max-width: none !important; color: #64748b !important; font-size: 9.5px !important; }
 
-  /* ── KPI tiles ── */
-  .kpi-strip { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 9px !important; }
+  /* ── KPI tiles: all six on one row, compact so peso amounts fit ── */
+  .kpi-strip { display: grid !important; grid-template-columns: repeat(6, minmax(0, 1fr)) !important; gap: 6px !important; overflow: visible !important; }
   .kpi-card {
+    flex: none !important;
     background: #ffffff !important; border: 1px solid #e2e8f0 !important; border-left: 3px solid #EA580C !important;
-    box-shadow: none !important; border-radius: 6px !important;
-    padding: 10px 12px 9px !important; break-inside: avoid; page-break-inside: avoid;
+    box-shadow: none !important; border-radius: 6px !important; transform: none !important;
+    padding: 8px 8px 7px !important; break-inside: avoid; page-break-inside: avoid;
   }
   .kpi-card--featured { background: #FFF1E8 !important; border-color: #FED7AA !important; border-left-color: #EA580C !important; }
   .kpi-card--alert { background: #FFF1F2 !important; border-color: #FECDD3 !important; border-left-color: #e11d48 !important; }
-  .kpi-card-inner { gap: 9px !important; }
-  .kpi-icon-wrap { width: 26px !important; height: 26px !important; border-radius: 7px !important; font-size: 11px !important; }
+  .kpi-card-inner { flex-direction: column !important; align-items: flex-start !important; gap: 5px !important; }
+  .kpi-icon-wrap { width: 22px !important; height: 22px !important; border-radius: 6px !important; font-size: 9px !important; }
   .kpi-icon-wrap--orange { background: #FFEDD5 !important; color: #EA580C !important; }
   .kpi-icon-wrap--green  { background: #D1FAE5 !important; color: #059669 !important; }
   .kpi-icon-wrap--blue   { background: #DBEAFE !important; color: #2563EB !important; }
   .kpi-icon-wrap--violet { background: #E0E7FF !important; color: #6366F1 !important; }
   .kpi-icon-wrap--red    { background: #FFE4E6 !important; color: #e11d48 !important; }
-  .kpi-label { color: #64748b !important; font-size: 8px !important; font-weight: 800 !important; letter-spacing: .07em !important; }
-  .kpi-value { color: #0f172a !important; font-size: 17px !important; }
+  .kpi-label { color: #64748b !important; font-size: 7px !important; font-weight: 800 !important; letter-spacing: .05em !important; }
+  .kpi-value { color: #0f172a !important; font-size: 12.5px !important; }
   .kpi-value--green  { color: #047857 !important; }
   .kpi-value--blue   { color: #2563EB !important; }
   .kpi-value--violet { color: #6366F1 !important; }
@@ -2210,7 +2662,7 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .card {
     background: #ffffff !important; border: none !important;
     box-shadow: none !important; border-radius: 0 !important;
-    padding: 0 !important;
+    padding: 0 !important; animation: none !important;
   }
   .card-header { display: block !important; margin-bottom: 0 !important; }
   .table-wrap { overflow: visible !important; }

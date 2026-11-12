@@ -13,209 +13,160 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\UserController;
-use App\Http\Middleware\UpdateLastActive;
-use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\POSController;
+use App\Http\Middleware\UpdateLastActive;
+use App\Http\Middleware\EnsureUserIsActive;
+use App\Http\Middleware\EnsureRole;
 
+/*
+|--------------------------------------------------------------------------
+| ROLE GROUPS
+|--------------------------------------------------------------------------
+| Administrator  -> everything
+| Cashier        -> Home, POS, Transactions, Customers
+| Inventory Staff-> Home, Products, Categories, Suppliers, Inventory Logs
+| Reports + Team -> Administrator ONLY
+| Keep in sync with src/utils/permissions.js on the frontend.
+*/
+$adminOnly       = EnsureRole::class . ':Administrator';
+$salesAccess     = EnsureRole::class . ':Administrator,Cashier';
+$inventoryAccess = EnsureRole::class . ':Administrator,Inventory Staff';
+$anyRole         = EnsureRole::class . ':Administrator,Cashier,Inventory Staff';
 
-
-// 🔑 Token-based login (Sanctum personal access tokens)
+/*
+|--------------------------------------------------------------------------
+| PUBLIC (NO LOGIN) — only what the login page truly needs
+|--------------------------------------------------------------------------
+*/
 Route::post('/login', [AuthController::class, 'login'])
     ->middleware('throttle:5,1'); // 5 attempts per 1 minute, per IP
 
-/*
-|--------------------------------------------------------------------------
-| PUBLIC API ROUTES (NO AUTH REQUIRED)
-|--------------------------------------------------------------------------
-*/
-
-// 🟦 Dashboard JSON for Vue Home Page
-Route::get('/dashboard', [HomeController::class, 'dashboard']);
-
-// 🟦 Vue Product List (POS / Inventory)
-Route::get('/product-list', [ProductController::class, 'productList']);
-
-// 🟦 Category Public JSON
-Route::get('/categories', [CategoryController::class, 'index']);
-Route::get('/categories/{id}', [CategoryController::class, 'show']);
-
-// 🟦 Supplier Public JSON
-Route::get('/suppliers', [SupplierController::class, 'apiIndex']);
-Route::get('/suppliers/{id}', [SupplierController::class, 'apiShow']);
-
-// 🟦 Product Public JSON
-Route::get('/products/barcode/{barcode}', [ProductController::class, 'findByBarcode']);
-Route::get('/products/{id}', [ProductController::class, 'show']);
-Route::get('/products/{id}/stock', [ProductController::class, 'getStock']);
-
-// 🟦 Auto SKU Generator
-Route::get('/generate-sku/{name}', [ProductController::class, 'generateSku']);
-
-// 🟦 Best Sellers (login page, public)
+// Best Sellers (login page, public) — safe shape, no cost price
 Route::get('/public/best-sellers', [SaleController::class, 'bestSellers']);
 
-// 🟦 Sales List (Read-only)
-Route::get('/sales', [SaleController::class, 'apiList']);
-
-// 🟦 View Single Sale
-Route::get('/sales/{id}', [SaleController::class, 'apiShow']);
-
-// 🟦 Reports JSON
-Route::get('/reports', [ReportsController::class, 'index']);
-
-// NOTE: /inventory/logs was moved to the protected group below. It returns
-// service worker/owner splits and leftover stock, so it needs a login.
+// Login-page shop catalog (read-only, no login needed).
+// publicList() never exposes cost prices, barcodes or exact stock.
+Route::get('/public/product-list', [ProductController::class, 'publicList']);
 
 /*
 |--------------------------------------------------------------------------
-| AUTHENTICATED USER (SANCTUM)
+| EVERYTHING BELOW REQUIRES LOGIN
+| EnsureUserIsActive rejects disabled accounts; UpdateLastActive tags the
+| "last active" timestamp.
+|
+| NOTE: the closure must `use` the role variables, otherwise PHP throws
+| "Undefined variable $anyRole" and every API route returns 500.
 |--------------------------------------------------------------------------
 */
+Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::class])
+    ->group(function () use ($adminOnly, $salesAccess, $inventoryAccess, $anyRole) {
 
-// 🔐 Get authenticated user (used by Layout, Settings, Profile restore)
-// EnsureUserIsActive runs first so a disabled user gets rejected/logged
-// out before anything else happens; UpdateLastActive tags along after
-// it — this is the single most frequent authenticated hit (fired by
-// Layout.vue on every page load), so it's the fastest place a disabled
-// user gets caught, and the best signal for "last active" of anything
-// in this file.
-Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::class])->get('/user', [AuthController::class, 'user']);
+    /* ─── ANY SIGNED-IN USER ─────────────────────────────── */
 
-/*
-|--------------------------------------------------------------------------
-| PROTECTED ROUTES (REQUIRE LOGIN)
-|--------------------------------------------------------------------------
-*/
-Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::class])->group(function () {
-
-    // 🧪 API Health Check
+    Route::get('/user', [AuthController::class, 'user']);
     Route::get('/test', fn () => response()->json('Laravel API Connected Successfully!'));
-
     Route::post('/logout', [AuthController::class, 'logout']);
 
-    /*
-    |--------------------------------------------------------------------------
-    | SALES (REQUIRE LOGIN)
-    |--------------------------------------------------------------------------
-    */
+    // Dashboard JSON for the Home page (every role lands here)
+    Route::get('/dashboard', [HomeController::class, 'dashboard']);
 
-    // 🟦 POS Sale Processing (moved here so the real clerk is recorded)
-    Route::post('/sales/process', [SaleController::class, 'processSale']);
-
-    // 🟦 Delete Sales (re-checks the logged-in user's password in the controller)
-    Route::post('/sales/bulk-delete', [SaleController::class, 'bulkDelete']);
-
-    Route::get('/pos/remnants', [POSController::class, 'remnants']);
-    /*
-    |--------------------------------------------------------------------------
-    | INVENTORY LOGS + LEFTOVER (CUT) PIECES
-    |--------------------------------------------------------------------------
-    */
-
-    // 🟦 Inventory Logs JSON (logs, summary, services)
-    Route::get('/inventory/logs', [InventoryLogController::class, 'index']);
-
-    // 🟦 Leftover pieces list for the Inventory (Product List) page
-    Route::get('/inventory/remnants', [InventoryLogController::class, 'remnants']);
-
-    // 🟦 Leftover pieces: mark used / scrapped / available (also writes a history row)
-    Route::patch('/inventory/remnants/{id}', [InventoryLogController::class, 'updateRemnant']);
-
-    /*
-    |--------------------------------------------------------------------------
-    | USER SETTINGS / PROFILE
-    |--------------------------------------------------------------------------
-    */
-
-    // ✅ Update name & email
+    // Profile / settings (own account)
     Route::put('/user', [AuthController::class, 'update']);
-
-    // ✅ Update password
     Route::put('/user/password', [AuthController::class, 'updatePassword']);
-
     Route::put('/user/set-initial-password', [AuthController::class, 'setInitialPassword']);
 
-    /*
-    |--------------------------------------------------------------------------
-    | CATEGORY CRUD
-    |--------------------------------------------------------------------------
-    */
-    Route::post('/categories', [CategoryController::class, 'store']);
-    Route::put('/categories/{id}', [CategoryController::class, 'update']);
-    Route::post('/categories/{id}', [CategoryController::class, 'update']);
-    Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
-
-    /*
-    |--------------------------------------------------------------------------
-    | PRODUCT CRUD
-    |--------------------------------------------------------------------------
-    */
-    Route::get('/products', [ProductController::class, 'index']);
-    Route::post('/products', [ProductController::class, 'store']);
-
-    // Vue PUT fallback
-    Route::put('/products/{id}', [ProductController::class, 'update']);
-    Route::post('/products/{id}', [ProductController::class, 'update']);
-
-    Route::delete('/products/{id}', [ProductController::class, 'destroy']);
-
-    // 🔄 Product Restock
-    Route::post('/products/{id}/restock', [ProductController::class, 'restock']);
-
-    /*
-    |--------------------------------------------------------------------------
-    | PRODUCT TRANSACTIONS (VUE)
-    |--------------------------------------------------------------------------
-    */
-
-    // ✅ Product Transactions Table
-    Route::get('/products/{id}/transactions', [TransactionController::class, 'apiProductTransactions']);
-
-    // ✅ Product Summary Cards
-    Route::get('/products/{id}/summary', [TransactionController::class, 'apiProductSummary']);
-
-    // ✅ Product History Tab
-    Route::get('/products/{id}/history', [TransactionController::class, 'apiProductHistory']);
-
-    /*
-    |--------------------------------------------------------------------------
-    | CUSTOMERS (repeat buyer tracking)
-    |--------------------------------------------------------------------------
-    */
-    Route::get('/customers',         [CustomerController::class, 'index']);
-    Route::get('/customers/list',    [CustomerController::class, 'list']);
-    Route::post('/customers',        [CustomerController::class, 'store']);
-    Route::get('/customers/{id}',    [CustomerController::class, 'show']);
-    Route::put('/customers/{id}',    [CustomerController::class, 'update']);
-    Route::delete('/customers/{id}', [CustomerController::class, 'destroy']);
-
-    /*
-    |--------------------------------------------------------------------------
-    | SUPPLIER CRUD
-    |--------------------------------------------------------------------------
-    */
-    Route::post('/suppliers', [SupplierController::class, 'apiStore']);
-    Route::put('/suppliers/{id}', [SupplierController::class, 'apiUpdate']);
-    Route::patch('/suppliers/{id}', [SupplierController::class, 'apiUpdate']);
-    Route::delete('/suppliers/{id}', [SupplierController::class, 'apiDestroy']);
-
-    /*
-    |--------------------------------------------------------------------------
-    | NOTIFICATIONS
-    |--------------------------------------------------------------------------
-    */
+    // Notifications
     Route::get('/notifications', [NotificationController::class, 'index']);
-    Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
+    Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
 
-    /*
-    |--------------------------------------------------------------------------
-    | TEAM / USER MANAGEMENT
-    |--------------------------------------------------------------------------
-    */
-    Route::get   ('/users',                       [UserController::class, 'index']);
-    Route::post  ('/users',                       [UserController::class, 'store']);
-    Route::patch ('/users/{user}',                [UserController::class, 'update']);
-    Route::post  ('/users/{user}/reset-password', [UserController::class, 'resetPassword']);
+    /* ─── SHARED READS (POS needs them, Inventory needs them) ─── */
+    Route::middleware($anyRole)->group(function () {
+        Route::get('/product-list', [ProductController::class, 'productList']);
+
+        Route::get('/categories', [CategoryController::class, 'index']);
+        Route::get('/categories/{id}', [CategoryController::class, 'show']);
+
+        Route::get('/products', [ProductController::class, 'index']);
+        // NOTE: barcode route must stay above /products/{id}
+        Route::get('/products/barcode/{barcode}', [ProductController::class, 'findByBarcode']);
+        Route::get('/products/{id}', [ProductController::class, 'show']);
+        Route::get('/products/{id}/stock', [ProductController::class, 'getStock']);
+    });
+
+    /* ─── SALES: Administrator + Cashier ─────────────────── */
+    Route::middleware($salesAccess)->group(function () {
+
+        // POS checkout (records the real clerk)
+        Route::post('/sales/process', [SaleController::class, 'processSale']);
+
+        // Delete receipts — needs an ADMIN password.
+        Route::post('/sales/bulk-delete', [SaleController::class, 'bulkDelete'])
+            ->middleware('throttle:10,1'); // slows admin-password guessing
+
+        Route::get('/pos/remnants', [POSController::class, 'remnants']);
+
+        // Transactions list + single receipt
+        Route::get('/sales', [SaleController::class, 'apiList']);
+        Route::get('/sales/{id}', [SaleController::class, 'apiShow']);
+
+        // Customers (repeat buyer tracking). /customers/list before /customers/{id}
+        Route::get('/customers',         [CustomerController::class, 'index']);
+        Route::get('/customers/list',    [CustomerController::class, 'list']);
+        Route::post('/customers',        [CustomerController::class, 'store']);
+        Route::get('/customers/{id}',    [CustomerController::class, 'show']);
+        Route::put('/customers/{id}',    [CustomerController::class, 'update']);
+        Route::delete('/customers/{id}', [CustomerController::class, 'destroy']);
+    });
+
+    /* ─── INVENTORY: Administrator + Inventory Staff ─────── */
+    Route::middleware($inventoryAccess)->group(function () {
+
+        Route::get('/generate-sku/{name}', [ProductController::class, 'generateSku']);
+
+        // Category writes
+        Route::post('/categories', [CategoryController::class, 'store']);
+        Route::put('/categories/{id}', [CategoryController::class, 'update']);
+        Route::post('/categories/{id}', [CategoryController::class, 'update']);
+        Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
+
+        // Product writes
+        Route::post('/products', [ProductController::class, 'store']);
+        Route::put('/products/{id}', [ProductController::class, 'update']);
+        Route::post('/products/{id}', [ProductController::class, 'update']); // Vue PUT fallback
+        Route::delete('/products/{id}', [ProductController::class, 'destroy']);
+        Route::post('/products/{id}/restock', [ProductController::class, 'restock']);
+
+        // Product detail tabs
+        Route::get('/products/{id}/transactions', [TransactionController::class, 'apiProductTransactions']);
+        Route::get('/products/{id}/summary', [TransactionController::class, 'apiProductSummary']);
+        Route::get('/products/{id}/history', [TransactionController::class, 'apiProductHistory']);
+
+        // Suppliers
+        Route::get('/suppliers', [SupplierController::class, 'apiIndex']);
+        Route::get('/suppliers/{id}', [SupplierController::class, 'apiShow']);
+        Route::post('/suppliers', [SupplierController::class, 'apiStore']);
+        Route::put('/suppliers/{id}', [SupplierController::class, 'apiUpdate']);
+        Route::patch('/suppliers/{id}', [SupplierController::class, 'apiUpdate']);
+        Route::delete('/suppliers/{id}', [SupplierController::class, 'apiDestroy']);
+
+        // Inventory logs + leftover (cut) pieces
+        Route::get('/inventory/logs', [InventoryLogController::class, 'index']);
+        Route::get('/inventory/remnants', [InventoryLogController::class, 'remnants']);
+        Route::patch('/inventory/remnants/{id}', [InventoryLogController::class, 'updateRemnant']);
+    });
+
+    /* ─── ADMINISTRATOR ONLY ─────────────────────────────── */
+    Route::middleware($adminOnly)->group(function () {
+
+        // Reports
+        Route::get('/reports', [ReportsController::class, 'index']);
+
+        // Team / user management
+        Route::get   ('/users',                       [UserController::class, 'index']);
+        Route::post  ('/users',                       [UserController::class, 'store']);
+        Route::patch ('/users/{user}',                [UserController::class, 'update']);
+        Route::post  ('/users/{user}/reset-password', [UserController::class, 'resetPassword']);
+    });
 });

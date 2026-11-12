@@ -128,6 +128,8 @@ class ProductController extends Controller
      *   - EXISTING size  → StockAdjustment is added (+ stock_in / stock_out log),
      *                      and may not push stock below zero
      *   - REMOVED size   → blocked while it still has stock
+     * After each size is saved, its low / out-of-stock alert is re-checked
+     * (StockService::notifyIfLow), so manual edits raise or clear alerts too.
      * Sales keep their own VariantLabel snapshot, so history is safe.
      * Must run inside a DB transaction (it uses lockForUpdate).
      */
@@ -177,6 +179,9 @@ class ProductController extends Controller
                     );
                 }
 
+                // Also covers the case where only the reorder level was changed.
+                StockService::notifyIfLow($existing->fresh(), $product->ProductName);
+
                 $keep[] = $existing->VariantID;
             } else {
                 $created = $product->variants()->create($attrs);
@@ -190,6 +195,8 @@ class ProductController extends Controller
                         $product->wasRecentlyCreated ? 'New product added' : 'New size added'
                     );
                 }
+
+                StockService::notifyIfLow($created->fresh(), $product->ProductName);
 
                 $keep[] = $created->VariantID;
             }
@@ -511,7 +518,8 @@ class ProductController extends Controller
                     : null,
             ]);
 
-            // SIZES, PRICES + PER-SIZE OPENING STOCK (+ one stock_in log per size)
+            // SIZES, PRICES + PER-SIZE OPENING STOCK (+ one stock_in log per size,
+            // + a low / out-of-stock alert for any size that starts out low)
             $this->syncVariants($product, $variants);
 
             // INVENTORY = product total (sum of the sizes' stock)
@@ -670,6 +678,7 @@ class ProductController extends Controller
      * =========================================================
      * Body: { quantity, variant_id }
      * variant_id may be omitted only when the product has a single size.
+     * StockService::add() also clears stale low / out-of-stock alerts.
      */
     public function restock(Request $request, $id)
     {
@@ -779,5 +788,97 @@ class ProductController extends Controller
             'success' => true,
             'product' => $this->formatProduct($product),
         ]);
+    }
+
+    /**
+     * =========================================================
+     * PUBLIC FORMATTER — login-page shop only (NO login required)
+     * =========================================================
+     * Never exposes CostPrice, barcodes or the reorder levels themselves.
+     * The real number of available units (per size and product total)
+     * IS sent so the storefront can show "In Stock · 24".
+     *
+     * StockStatus is decided HERE from the reorder level:
+     *   oos  → quantity is 0 (or less)
+     *   low  → quantity is above 0 but at or below the reorder level
+     *   ok   → quantity is above the reorder level
+     * A reorder level of 0 means "no low-stock warning" for that item.
+     * Per size  → uses that size's ReorderLevel.
+     * Per product → uses the sum of its sizes' reorder levels (or the
+     *               inventory ReorderLevel when it has no sizes).
+     *
+     * NOTE: StockService::notifyIfLow() falls back to a default threshold of 5
+     * when a size has no reorder level. This formatter does not, so a size with
+     * level 0 and 4 units shows an in-app alert but "In Stock" on the storefront.
+     * To make them agree, use StockService::DEFAULT_LOW_STOCK here as the
+     * fallback when a reorder level is 0.
+     *
+     * CategoryName is included so the login page can group products by
+     * category. Callers must eager-load `category` (see publicList()).
+     */
+    public function formatPublic(Product $p): array
+    {
+        $qty = fn ($n) => max(0, (int) $n);
+
+        $status = function (int $quantity, int $reorder): string {
+            if ($quantity <= 0) return 'oos';
+            return ($reorder > 0 && $quantity <= $reorder) ? 'low' : 'ok';
+        };
+
+        $totalQty = $qty($p->inventory->QuantityOnHand ?? 0);
+
+        // Product-level reorder point: sum of the sizes' levels when it has
+        // sizes, otherwise the inventory row's own level.
+        $productReorder = $p->variants->count()
+            ? (int) $p->variants->sum('ReorderLevel')
+            : (int) ($p->inventory->ReorderLevel ?? 0);
+        if ($productReorder <= 0) {
+            $productReorder = (int) ($p->inventory->ReorderLevel ?? 0);
+        }
+
+        return [
+            'ProductID'    => $p->ProductID,
+            'ProductName'  => $p->ProductName,
+            'SKU'          => $p->SKU,
+            'Brand'        => $p->Brand,
+            'Unit'         => $p->Unit,
+            'CategoryID'   => $p->CategoryID,
+            'CategoryName' => $p->category->CategoryName ?? null,
+            'SellingPrice' => (float) $p->SellingPrice,
+
+            'variants' => $p->variants->map(fn ($v) => [
+                'VariantID'    => $v->VariantID,
+                'Label'        => $v->Label,
+                'SellingPrice' => (float) $v->SellingPrice,
+                'Stock'        => $qty($v->QuantityOnHand),
+                'StockStatus'  => $status($qty($v->QuantityOnHand), (int) $v->ReorderLevel),
+            ])->values(),
+
+            'inventory' => [
+                'QuantityOnHand' => $totalQty,
+            ],
+            'Stock'       => $totalQty,
+            'StockStatus' => $status($totalQty, $productReorder),
+
+            'ImageURL' => $p->Product_Image
+                ? asset('storage/' . $p->Product_Image)
+                : null,
+        ];
+    }
+
+    /** GET /api/public/product-list — safe version of productList() */
+    public function publicList()
+    {
+        $products = Product::query()
+            ->with([
+                'category:CategoryID,CategoryName',
+                'inventory:ProductID,QuantityOnHand,ReorderLevel',
+                'variants:VariantID,ProductID,Label,SellingPrice,QuantityOnHand,ReorderLevel',
+            ])
+            ->orderBy('ProductID', 'desc')
+            ->get()
+            ->map(fn ($p) => $this->formatPublic($p));
+
+        return response()->json($products);
     }
 }

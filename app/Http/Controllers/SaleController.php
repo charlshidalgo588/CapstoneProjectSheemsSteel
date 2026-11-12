@@ -474,10 +474,15 @@ class SaleController extends Controller
         return response()->json($data);
     }
 
-    /** PUBLIC: BEST SELLERS (login page) */
+    /**
+     * PUBLIC: BEST SELLERS (login page)
+     * Returns the SAFE public shape (no cost price, sizes + category included)
+     * via ProductController::formatPublic().
+     * Only filters on `sales.Status` when that column exists.
+     */
     public function bestSellers()
     {
-        $products = Cache::remember('public_best_sellers', now()->addMinutes(10), function () {
+        $products = Cache::remember('public_best_sellers_v3', now()->addMinutes(10), function () {
             $sale       = new Sale;
             $relation   = $sale->salesItems();
             $itemsTable = $relation->getRelated()->getTable();
@@ -486,7 +491,10 @@ class SaleController extends Controller
             $topIds = DB::table($itemsTable)
                 ->join($salesTable, $relation->getQualifiedParentKeyName(), '=', $relation->getQualifiedForeignKeyName())
                 ->where("$salesTable.SaleDate", '>=', now()->subDays(90))
-                ->where("$salesTable.Status", 'Paid')
+                ->when(
+                    Schema::hasColumn($salesTable, 'Status'),
+                    fn ($q) => $q->where("$salesTable.Status", 'Paid')
+                )
                 ->groupBy("$itemsTable.ProductID")
                 ->orderByRaw("SUM($itemsTable.Quantity) DESC")
                 ->limit(10)
@@ -496,15 +504,49 @@ class SaleController extends Controller
                 return collect();
             }
 
-            $found = Product::with('inventory')
+            $found = Product::with(['category', 'inventory', 'variants'])
                 ->whereIn('ProductID', $topIds)
                 ->get()
                 ->keyBy('ProductID');
 
-            return $topIds->map(fn ($id) => $found->get($id))->filter()->values();
+            $fmt = app(\App\Http\Controllers\ProductController::class);
+
+            return $topIds
+                ->map(fn ($id) => $found->get($id))
+                ->filter()
+                ->map(fn ($p) => $fmt->formatPublic($p))
+                ->values();
         });
 
         return response()->json($products);
+    }
+
+    /**
+     * True only if $password matches an Administrator account's password.
+     * Assumes the users table has a `role` column ('Administrator' for admins),
+     * the same value EnsureRole checks. Disabled accounts are skipped when the
+     * table has an is_active column.
+     */
+    private function isAdminPassword(?string $password): bool
+    {
+        if (!$password) {
+            return false;
+        }
+
+        $admins = \App\Models\User::where('role', 'Administrator')
+            ->when(
+                Schema::hasColumn('users', 'is_active'),
+                fn ($q) => $q->where('is_active', true)
+            )
+            ->get();
+
+        foreach ($admins as $admin) {
+            if (Hash::check($password, $admin->password)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** BULK DELETE + RESTORE STOCK (per size) */
@@ -521,7 +563,10 @@ class SaleController extends Controller
             return response()->json(['message' => 'Unauthenticated. Please log in again.'], 401);
         }
 
-        if (!Hash::check($request->admin_password, $user->password)) {
+        // The password must belong to an ADMINISTRATOR account. A cashier typing
+        // their own password (or anything else) is rejected.
+        if (!$this->isAdminPassword($request->admin_password)) {
+            Log::warning("Sale delete blocked: bad admin password (user #{$user->id})");
             return response()->json(['message' => 'Invalid admin password'], 403);
         }
 

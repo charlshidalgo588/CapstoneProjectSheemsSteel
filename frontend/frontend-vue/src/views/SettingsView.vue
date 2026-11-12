@@ -406,14 +406,27 @@
             <h2 class="team-modal-title">{{ addSuccess.name }}'s account is ready</h2>
             <p class="team-modal-desc">Share this password with them directly — it won't be shown again. They'll be asked to set their own on first sign-in.</p>
 
-            <div class="temp-password-box">
+            <div class="temp-password-box" :class="{ 'temp-password-box--copied': copiedKey === 'add' && !copyError }">
               <p class="temp-password-label">Temporary password</p>
               <div class="temp-password-row">
                 <code class="temp-password-value">{{ addSuccess.tempPassword }}</code>
-                <button type="button" class="icon-btn-sm" @click="copyPassword(addSuccess.tempPassword)" aria-label="Copy password">
-                  <i class="fa-solid fa-copy"></i>
+                <button
+                  type="button"
+                  class="copy-btn"
+                  :class="copyBtnClass('add')"
+                  @click="copyPassword(addSuccess.tempPassword, 'add')"
+                  :aria-label="copiedKey === 'add' && !copyError ? 'Password copied' : 'Copy password'"
+                >
+                  <i class="fa-solid" :class="copyIcon('add')"></i>
+                  <span>{{ copyLabel('add') }}</span>
                 </button>
               </div>
+              <p class="copy-status" :class="{ 'copy-status--error': copiedKey === 'add' && copyError }" role="status" aria-live="polite">
+                <template v-if="copiedKey === 'add'">
+                  <i class="fa-solid" :class="copyError ? 'fa-triangle-exclamation' : 'fa-circle-check'"></i>
+                  {{ copyMessage }}
+                </template>
+              </p>
             </div>
 
             <button type="button" class="btn btn--primary" style="width:100%; justify-content:center;" @click="closeAddModal">Done</button>
@@ -504,14 +517,27 @@
             </div>
             <h2 class="team-modal-title">Password reset</h2>
             <p class="team-modal-desc">Share this with {{ confirmModal.user.name }} — it won't be shown again.</p>
-            <div class="temp-password-box">
+            <div class="temp-password-box" :class="{ 'temp-password-box--copied': copiedKey === 'reset' && !copyError }">
               <p class="temp-password-label">New temporary password</p>
               <div class="temp-password-row">
                 <code class="temp-password-value">{{ resetResult.tempPassword }}</code>
-                <button type="button" class="icon-btn-sm" @click="copyPassword(resetResult.tempPassword)" aria-label="Copy password">
-                  <i class="fa-solid fa-copy"></i>
+                <button
+                  type="button"
+                  class="copy-btn"
+                  :class="copyBtnClass('reset')"
+                  @click="copyPassword(resetResult.tempPassword, 'reset')"
+                  :aria-label="copiedKey === 'reset' && !copyError ? 'Password copied' : 'Copy password'"
+                >
+                  <i class="fa-solid" :class="copyIcon('reset')"></i>
+                  <span>{{ copyLabel('reset') }}</span>
                 </button>
               </div>
+              <p class="copy-status" :class="{ 'copy-status--error': copiedKey === 'reset' && copyError }" role="status" aria-live="polite">
+                <template v-if="copiedKey === 'reset'">
+                  <i class="fa-solid" :class="copyError ? 'fa-triangle-exclamation' : 'fa-circle-check'"></i>
+                  {{ copyMessage }}
+                </template>
+              </p>
             </div>
             <button type="button" class="btn btn--primary" style="width:100%; justify-content:center;" @click="closeConfirmModal">Done</button>
           </template>
@@ -728,8 +754,73 @@ function timeAgo(dateStr) {
   return Math.floor(diff / 86400) + 'd ago'
 }
 
-function copyPassword(pw) {
-  navigator.clipboard?.writeText(pw).catch(() => {})
+/* ══════════════════════════════════════════════════════════
+   COPY TEMP PASSWORD — with visible feedback.
+   `copiedKey` says WHICH box was just copied ('add' = new-account
+   modal, 'reset' = reset-password modal) so only that box reacts.
+   The button flips to a green "Copied!" and a status line appears
+   under the password for ~2.5s. If the browser blocks the
+   clipboard API (e.g. page not on HTTPS), we fall back to the old
+   execCommand method, and only show "Copy failed" if both fail.
+══════════════════════════════════════════════════════════ */
+const copiedKey = ref(null)
+const copyError = ref(false)
+let copyTimer   = null
+
+const copyMessage = computed(() =>
+  copyError.value
+    ? 'Couldn’t copy automatically. Select the password and copy it manually.'
+    : 'Copied to clipboard. Paste it into a message to share.'
+)
+
+function legacyCopy(text) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.opacity  = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  let ok = false
+  try { ok = document.execCommand('copy') } catch { ok = false }
+  document.body.removeChild(ta)
+  return ok
+}
+
+async function copyPassword(pw, key) {
+  let ok = false
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(pw)
+      ok = true
+    }
+  } catch { ok = false }
+  if (!ok) ok = legacyCopy(pw)
+
+  copyError.value = !ok
+  copiedKey.value = key
+  clearTimeout(copyTimer)
+  copyTimer = setTimeout(resetCopyState, ok ? 2500 : 4000)
+}
+
+function resetCopyState() {
+  clearTimeout(copyTimer)
+  copiedKey.value = null
+  copyError.value = false
+}
+
+// Small helpers so the two password boxes in the template stay readable.
+function copyBtnClass(key) {
+  if (copiedKey.value !== key) return ''
+  return copyError.value ? 'copy-btn--error' : 'copy-btn--done'
+}
+function copyIcon(key) {
+  if (copiedKey.value !== key) return 'fa-copy'
+  return copyError.value ? 'fa-triangle-exclamation' : 'fa-check'
+}
+function copyLabel(key) {
+  if (copiedKey.value !== key) return 'Copy'
+  return copyError.value ? 'Failed' : 'Copied!'
 }
 
 const openMenuId = ref(null)
@@ -796,12 +887,14 @@ function openAddModal() {
   addErrors.value  = {}
   addSuccess.value = null
   addRoleOpen.value = false
+  resetCopyState()
   showAddModal.value = true
 }
 function closeAddModal() {
   showAddModal.value = false
   addSuccess.value   = null
   addRoleOpen.value  = false
+  resetCopyState()
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -870,11 +963,13 @@ function confirmToggleStatus(u) {
 function confirmResetPassword(u) {
   confirmModal.value = { type: 'reset', user: u }
   resetResult.value  = null
+  resetCopyState()
   openMenuId.value = null
 }
 function closeConfirmModal() {
   confirmModal.value = null
   resetResult.value  = null
+  resetCopyState()
 }
 
 const confirmIcon = computed(() => ({
@@ -939,6 +1034,7 @@ onMounted(async () => {
   window.addEventListener('resize', onScrollOrResizeRowMenu)
 })
 onBeforeUnmount(() => {
+  clearTimeout(copyTimer)
   document.removeEventListener('click', onDocumentClick)
   document.removeEventListener('keydown', onDocumentKeydown)
   window.removeEventListener('scroll', onScrollOrResizeRowMenu, true)
@@ -1501,13 +1597,75 @@ html[data-theme="dark"] .team-modal-icon--success { background: rgba(16,185,129,
   background: var(--s-accent-soft);
   border: 1px solid var(--s-accent-border);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 12px 14px 10px;
   margin-bottom: 16px;
   text-align: left;
+  transition: background-color .2s ease, border-color .2s ease;
 }
 .temp-password-label { font-size: 10.5px; font-weight: 700; color: var(--s-accent); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
 .temp-password-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.temp-password-value { font-size: 15px; font-weight: 700; color: var(--s-text-primary); letter-spacing: 0.02em; font-family: 'Courier New', monospace; }
+.temp-password-value {
+  font-size: 15px; font-weight: 700; color: var(--s-text-primary); letter-spacing: 0.02em;
+  font-family: 'Courier New', monospace;
+  user-select: all; /* one click selects the whole password */
+}
+
+/* Box turns green for a moment after a successful copy */
+.temp-password-box--copied {
+  background: rgba(16,185,129,.10);
+  border-color: rgba(16,185,129,.40);
+}
+.temp-password-box--copied .temp-password-label { color: var(--s-green); }
+html[data-theme="dark"] .temp-password-box--copied { background: rgba(16,185,129,.16); }
+
+/* Copy button — icon + word, so it's clear what it does and that it worked */
+.copy-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border: 1.5px solid var(--s-accent-border);
+  border-radius: 8px;
+  background: var(--s-surface);
+  color: var(--s-accent);
+  font-family: inherit; font-size: 12px; font-weight: 700;
+  cursor: pointer; flex-shrink: 0;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .15s ease;
+}
+.copy-btn i { font-size: 11px; }
+.copy-btn:hover { background: var(--s-accent-soft); }
+.copy-btn:active { transform: scale(0.96); }
+.copy-btn:focus-visible { outline: 3px solid var(--s-ring); outline-offset: 1px; }
+.copy-btn--done {
+  background: var(--s-green); border-color: var(--s-green); color: #fff;
+  animation: copy-pop .28s ease;
+}
+.copy-btn--done:hover { background: var(--s-green); }
+.copy-btn--error {
+  background: var(--s-red); border-color: var(--s-red); color: #fff;
+}
+.copy-btn--error:hover { background: var(--s-red); }
+@keyframes copy-pop {
+  0%   { transform: scale(0.92); }
+  60%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+/* Status line under the password. Height is reserved so the modal
+   doesn't jump when the message appears. */
+.copy-status {
+  min-height: 18px;
+  margin: 8px 0 0;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; line-height: 1.4;
+  color: var(--s-green);
+}
+.copy-status i { font-size: 11px; flex-shrink: 0; }
+.copy-status--error { color: var(--s-red); }
+html[data-theme="dark"] .copy-status { color: #4ADE80; }
+html[data-theme="dark"] .copy-status--error { color: #F87171; }
+
+@media (prefers-reduced-motion: reduce) {
+  .copy-btn--done { animation: none; }
+}
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }

@@ -1,9 +1,9 @@
 <template>
   <Layout>
-    <div class="prod-list-page">
+    <div class="prod-list-page" ref="pageRef">
 
       <!-- ═════════════ 1. PAGE HEADER ═════════════ -->
-      <header class="page-header">
+      <header ref="headerRef" class="page-header">
         <div>
           <p class="page-eyebrow">Inventory</p>
           <h1 class="page-title">{{ view === 'cuts' ? 'Cut Tracking' : 'Product List' }}</h1>
@@ -56,159 +56,117 @@
       ═════════════════════════════════════════════════════════ -->
       <template v-if="view === 'products'">
 
-        <!-- Summary strip: every card applies its filter AND scrolls down to the table -->
-        <section v-if="!loading" class="kpi-strip" aria-label="Inventory summary">
-          <button type="button" class="kpi-card" @click="showAllProducts">
-            <span class="kpi-icon kpi-icon--accent"><i class="fa-solid fa-boxes-stacked"></i></span>
-            <span class="kpi-body">
-              <span class="kpi-label">Products</span>
-              <span class="kpi-value">{{ products.length }}</span>
-              <span class="kpi-hint">{{ totalSizes }} sizes tracked</span>
-            </span>
-          </button>
+        <!-- STICKY BLOCK: summary cards + search + filters stay pinned to the very top while the table scrolls -->
+        <div class="sticky-controls" :class="{ 'is-stuck': isStuck }" ref="stickyRef">
 
-          <!-- LOW STOCK: above 0 but at/below the reorder level -->
-          <button type="button" class="kpi-card" :class="{ 'kpi-card--warn': lowStockCount > 0 }" @click="pickStockFilter('low')">
-            <span class="kpi-icon" :class="lowStockCount > 0 ? 'kpi-icon--amber' : 'kpi-icon--green'">
-              <i class="fa-solid" :class="lowStockCount > 0 ? 'fa-triangle-exclamation' : 'fa-circle-check'"></i>
-            </span>
-            <span class="kpi-body">
-              <span class="kpi-label">Low stock</span>
-              <span class="kpi-value">{{ lowStockCount }}</span>
-              <span class="kpi-hint">
-                {{ lowStockCount === 0 ? 'No size is running low' : 'Sizes at or below their reorder level' }}
+          <!-- Summary cards (one row). Each card is also the stock filter; click it again to clear.
+               Clicking a card applies its filter AND scrolls down to the table (same as the Customers page).
+               The numbers count up (same "running numbers" effect as the Home page). -->
+          <section v-if="!loading" class="kpi-strip" aria-label="Inventory summary. Select a card to filter the list.">
+            <button type="button" class="kpi-card kpi-card--featured" :class="{ 'kpi-card--on': stockFilter === 'all' }"
+              :aria-pressed="stockFilter === 'all'" :title="`${products.length} products · ${totalSizes} sizes`" @click="showAllProducts">
+              <span class="kpi-icon kpi-icon--accent"><i class="fa-solid fa-boxes-stacked"></i></span>
+              <span class="kpi-body">
+                <span class="kpi-label">Products</span>
+                <span class="kpi-value">{{ fmt(anim.products) }}</span>
+                <span class="kpi-hint">Show all <i class="fa-solid fa-arrow-down"></i></span>
               </span>
-            </span>
-          </button>
+            </button>
 
-          <!-- OUT OF STOCK: exactly 0 -->
-          <button type="button" class="kpi-card" :class="{ 'kpi-card--alert': outOfStockCount > 0 }" @click="pickStockFilter('out')">
-            <span class="kpi-icon" :class="outOfStockCount > 0 ? 'kpi-icon--red' : 'kpi-icon--green'">
-              <i class="fa-solid" :class="outOfStockCount > 0 ? 'fa-circle-xmark' : 'fa-circle-check'"></i>
-            </span>
-            <span class="kpi-body">
-              <span class="kpi-label">Out of stock</span>
-              <span class="kpi-value">{{ outOfStockCount }}</span>
-              <span class="kpi-hint">
-                {{ outOfStockCount === 0 ? 'Every size has stock' : 'Sizes with 0 left' }}
+            <!-- ACTIVE: sizes above the reorder level -->
+            <button type="button" class="kpi-card" :class="{ 'kpi-card--on': stockFilter === 'active' }"
+              :aria-pressed="stockFilter === 'active'" :title="`${activeCount} sizes above their reorder level`" @click="pickStockFilter('active')">
+              <span class="kpi-icon kpi-icon--green"><i class="fa-solid fa-circle-check"></i></span>
+              <span class="kpi-body">
+                <span class="kpi-label">Active</span>
+                <span class="kpi-value">{{ fmt(anim.active) }}</span>
+                <span class="kpi-hint">Show active sizes <i class="fa-solid fa-arrow-down"></i></span>
               </span>
-            </span>
-          </button>
+            </button>
 
-          <button type="button" class="kpi-card" @click="openCuts()">
-            <span class="kpi-icon kpi-icon--blue"><i class="fa-solid fa-scissors"></i></span>
-            <span class="kpi-body">
-              <span class="kpi-label">Leftover pieces</span>
-              <span class="kpi-value">{{ availableCount }}</span>
-              <span class="kpi-hint">
-                <template v-if="remnantTotalsByUnit.length">
-                  {{ remnantTotalsByUnit.map(u => `${lenText(u.total)} ${u.unit}`).join(' · ') }} on hand
-                </template>
-                <template v-else>None on hand</template>
+            <!-- LOW STOCK: above 0 but at/below the reorder level -->
+            <button type="button" class="kpi-card" :class="{ 'kpi-card--warn': lowStockCount > 0, 'kpi-card--on': stockFilter === 'low' }"
+              :aria-pressed="stockFilter === 'low'" :title="`${lowStockCount} sizes at or below their reorder level (still in stock)`" @click="pickStockFilter('low')">
+              <span class="kpi-icon" :class="lowStockCount > 0 ? 'kpi-icon--amber' : 'kpi-icon--green'">
+                <i class="fa-solid" :class="lowStockCount > 0 ? 'fa-triangle-exclamation' : 'fa-circle-check'"></i>
               </span>
-            </span>
-          </button>
-        </section>
+              <span class="kpi-body">
+                <span class="kpi-label">Low stock</span>
+                <span class="kpi-value">{{ fmt(anim.low) }}</span>
+                <span class="kpi-hint">Show low stock <i class="fa-solid fa-arrow-down"></i></span>
+              </span>
+            </button>
 
-        <!-- Toolbar -->
-        <section class="toolbar" aria-label="Search and filters">
-          <div class="toolbar-row">
-            <div class="search-wrap">
-              <i class="fa-solid fa-magnifying-glass search-icon"></i>
-              <input
-                v-model="searchInput"
-                type="search"
-                class="search-input"
-                placeholder="Search name, SKU, category or size…"
-                aria-label="Search products"
-              />
-              <button v-if="searchInput" class="search-clear" @click="searchInput = ''" aria-label="Clear search">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
-            </div>
+            <!-- OUT OF STOCK: exactly 0 -->
+            <button type="button" class="kpi-card" :class="{ 'kpi-card--alert': outOfStockCount > 0, 'kpi-card--on': stockFilter === 'out' }"
+              :aria-pressed="stockFilter === 'out'" :title="`${outOfStockCount} sizes with 0 in stock`" @click="pickStockFilter('out')">
+              <span class="kpi-icon" :class="outOfStockCount > 0 ? 'kpi-icon--red' : 'kpi-icon--green'">
+                <i class="fa-solid" :class="outOfStockCount > 0 ? 'fa-circle-xmark' : 'fa-circle-check'"></i>
+              </span>
+              <span class="kpi-body">
+                <span class="kpi-label">Out of stock</span>
+                <span class="kpi-value">{{ fmt(anim.out) }}</span>
+                <span class="kpi-hint">Show out of stock <i class="fa-solid fa-arrow-down"></i></span>
+              </span>
+            </button>
 
-            <!-- The badges below count SIZES (every size is its own item) -->
-            <div class="stock-filter-toggle" role="tablist" aria-label="Filter by stock status">
-              <button class="sf-btn" role="tab" :aria-selected="stockFilter === 'all'"
-                :title="`${products.length} products · ${totalSizes} sizes`"
-                :class="{ 'sf-btn--active': stockFilter === 'all' }" @click="stockFilter = 'all'">
-                All <span class="sf-count sf-count--neutral">{{ totalSizes }}</span>
-              </button>
-              <button class="sf-btn sf-btn--ok" role="tab" :aria-selected="stockFilter === 'active'"
-                :title="`${activeCount} sizes above their reorder level`"
-                :class="{ 'sf-btn--active': stockFilter === 'active' }" @click="stockFilter = 'active'">
-                <i class="fa-solid fa-circle-check"></i> Active
-                <span class="sf-count sf-count--ok">{{ activeCount }}</span>
-              </button>
-              <button class="sf-btn sf-btn--warn" role="tab" :aria-selected="stockFilter === 'low'"
-                :title="`${lowStockCount} sizes at or below their reorder level (still in stock)`"
-                :class="{ 'sf-btn--active': stockFilter === 'low' }" @click="stockFilter = 'low'">
-                <i class="fa-solid fa-triangle-exclamation"></i> Low stock
-                <span v-if="lowStockCount > 0" class="sf-count sf-count--warn">{{ lowStockCount }}</span>
-              </button>
-              <button class="sf-btn sf-btn--danger" role="tab" :aria-selected="stockFilter === 'out'"
-                :title="`${outOfStockCount} sizes with 0 in stock`"
-                :class="{ 'sf-btn--active': stockFilter === 'out' }" @click="stockFilter = 'out'">
-                <i class="fa-solid fa-circle-xmark"></i> Out of stock
-                <span v-if="outOfStockCount > 0" class="sf-count">{{ outOfStockCount }}</span>
-              </button>
-            </div>
-          </div>
+            <button type="button" class="kpi-card" :title="remnantHint" @click="openCuts()">
+              <span class="kpi-icon kpi-icon--blue"><i class="fa-solid fa-scissors"></i></span>
+              <span class="kpi-body">
+                <span class="kpi-label">Leftover pieces</span>
+                <span class="kpi-value">{{ fmt(anim.leftover) }}</span>
+                <span class="kpi-hint">View leftovers <i class="fa-solid fa-arrow-down"></i></span>
+              </span>
+            </button>
+          </section>
 
-          <div class="toolbar-row toolbar-row--secondary">
-            <div class="select-group">
-              <label class="select-label" for="cat-select">Category</label>
-              <div class="select-wrap">
-                <i class="fa-solid fa-layer-group input-icon"></i>
-                <select id="cat-select" v-model="selectedCategory" @change="handleCategoryChange" class="form-select">
-                  <option value="">All categories</option>
-                  <option v-for="cat in categories" :key="cat.CategoryID" :value="String(cat.CategoryID)">
-                    {{ cat.CategoryName }}
-                  </option>
-                </select>
-                <i class="fa-solid fa-chevron-down select-caret"></i>
+          <!-- Toolbar: search + category + size toggle on one row -->
+          <section class="toolbar" aria-label="Search and filters">
+            <div class="toolbar-row">
+              <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                <input
+                  v-model="searchInput"
+                  type="search"
+                  class="search-input"
+                  placeholder="Search name, SKU, category or size…"
+                  aria-label="Search products"
+                />
+                <button v-if="searchInput" class="search-clear" @click="searchInput = ''" aria-label="Clear search">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+
+              <div class="select-group">
+                <label class="sr-only" for="cat-select">Category</label>
+                <div class="select-wrap">
+                  <i class="fa-solid fa-layer-group input-icon"></i>
+                  <select id="cat-select" v-model="selectedCategory" @change="handleCategoryChange" class="form-select" title="Category">
+                    <option value="">All categories</option>
+                    <option v-for="cat in categories" :key="cat.CategoryID" :value="String(cat.CategoryID)">
+                      {{ cat.CategoryName }}
+                    </option>
+                  </select>
+                  <i class="fa-solid fa-chevron-down select-caret"></i>
+                </div>
+              </div>
+
+              <div class="toolbar-end">
+                <button v-if="expandableCount > 0" type="button" class="btn btn--ghost btn--sm tool-btn" @click="toggleAllSizes">
+                  <i class="fa-solid" :class="allSizesOpen ? 'fa-compress' : 'fa-expand'"></i>
+                  {{ allSizesOpen ? 'Hide all sizes' : 'Show all sizes' }}
+                </button>
+                <button v-if="hasActiveFilters" class="btn btn--ghost btn--sm tool-btn" @click="resetFilters">
+                  <i class="fa-solid fa-rotate-left"></i> Reset
+                </button>
+                <!-- Shows only after the page header has scrolled out of view -->
+                <RouterLink v-if="headerOut" to="/products/create" class="btn btn--primary btn--sm tool-btn toolbar-add">
+                  <i class="fa-solid fa-plus"></i> Add Product
+                </RouterLink>
               </div>
             </div>
-
-            <div class="select-group">
-              <label class="select-label" for="prod-sort">Sort products</label>
-              <div class="select-wrap">
-                <i class="fa-solid fa-arrow-down-wide-short input-icon"></i>
-                <select id="prod-sort" v-model="productSort" class="form-select">
-                  <option value="status">Healthy first, low stock last</option>
-                  <option value="attention">Needs restock first</option>
-                  <option value="name">Name (A–Z)</option>
-                  <option value="stock-desc">Most stock</option>
-                  <option value="stock-asc">Least stock</option>
-                </select>
-                <i class="fa-solid fa-chevron-down select-caret"></i>
-              </div>
-            </div>
-
-            <div class="select-group">
-              <label class="select-label" for="size-sort">Sort sizes</label>
-              <div class="select-wrap">
-                <i class="fa-solid fa-ruler input-icon"></i>
-                <select id="size-sort" v-model="variantSort" class="form-select">
-                  <option value="active">Healthy first, then by size</option>
-                  <option value="size">By size only</option>
-                  <option value="low">Low stock first, then by size</option>
-                </select>
-                <i class="fa-solid fa-chevron-down select-caret"></i>
-              </div>
-            </div>
-
-            <div class="toolbar-end">
-              <button v-if="expandableCount > 0" type="button" class="btn btn--ghost btn--sm tool-btn" @click="toggleAllSizes">
-                <i class="fa-solid" :class="allSizesOpen ? 'fa-compress' : 'fa-expand'"></i>
-                {{ allSizesOpen ? 'Hide all sizes' : 'Show all sizes' }}
-              </button>
-              <button v-if="hasActiveFilters" class="btn btn--ghost btn--sm tool-btn" @click="resetFilters">
-                <i class="fa-solid fa-rotate-left"></i> Reset
-              </button>
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
         <!-- Bulk action bar -->
         <transition name="alert-fade">
@@ -228,8 +186,8 @@
           </div>
         </transition>
 
-        <!-- Product table (the KPI cards scroll here) -->
-        <section class="table-card" ref="productsTableRef">
+        <!-- Product table (10 products per page). Flashes orange when a summary card is clicked. -->
+        <section class="table-card" :class="{ 'table-card--flash': flashTable }" ref="productsTableRef">
           <table class="data-table prod-table">
             <colgroup>
               <col style="width:52px" />
@@ -246,9 +204,9 @@
                     class="chk"
                     :checked="allVisibleSelected"
                     :indeterminate="someVisibleSelected"
-                    :disabled="filteredProducts.length === 0"
+                    :disabled="pagedProducts.length === 0"
                     @change="toggleSelectAll"
-                    aria-label="Select all products"
+                    aria-label="Select all products on this page"
                   />
                 </th>
                 <th>Product</th>
@@ -270,7 +228,7 @@
               </template>
 
               <template v-else>
-                <template v-for="product in filteredProducts" :key="product.ProductID">
+                <template v-for="product in pagedProducts" :key="product.ProductID">
                   <tr
                     class="prod-row"
                     :data-product-row="product.ProductID"
@@ -445,11 +403,36 @@
             </tbody>
           </table>
 
-          <div v-if="!loading && products.length > 0" class="table-footer">
-            Showing <strong>{{ filteredProducts.length }}</strong> of {{ products.length }} products
-            <template v-if="stockFilter === 'low'"> · <strong>{{ visibleSizeCount }}</strong> size{{ visibleSizeCount === 1 ? '' : 's' }} running low</template>
-            <template v-else-if="stockFilter === 'out'"> · <strong>{{ visibleSizeCount }}</strong> size{{ visibleSizeCount === 1 ? '' : 's' }} out of stock</template>
-            <template v-else-if="stockFilter === 'active'"> · <strong>{{ visibleSizeCount }}</strong> active size{{ visibleSizeCount === 1 ? '' : 's' }}</template>
+          <!-- Footer: how many are showing + pagination -->
+          <div v-if="!loading && products.length > 0" class="table-footer table-footer--pager">
+            <div class="footer-text">
+              Showing <strong>{{ rangeStart }}–{{ rangeEnd }}</strong> of {{ filteredProducts.length }} products
+              <template v-if="filteredProducts.length !== products.length"> (filtered from {{ products.length }})</template>
+              <template v-if="stockFilter === 'low'"> · <strong>{{ visibleSizeCount }}</strong> size{{ visibleSizeCount === 1 ? '' : 's' }} running low</template>
+              <template v-else-if="stockFilter === 'out'"> · <strong>{{ visibleSizeCount }}</strong> size{{ visibleSizeCount === 1 ? '' : 's' }} out of stock</template>
+              <template v-else-if="stockFilter === 'active'"> · <strong>{{ visibleSizeCount }}</strong> active size{{ visibleSizeCount === 1 ? '' : 's' }}</template>
+            </div>
+
+            <nav v-if="totalPages > 1" class="pager" aria-label="Product pages">
+              <button type="button" class="pager-btn pager-btn--wide" :disabled="page === 1" @click="goToPage(page - 1)">
+                <i class="fa-solid fa-chevron-left"></i> Previous
+              </button>
+              <template v-for="(it, i) in pageItems" :key="i">
+                <span v-if="it === '…'" class="pager-gap" aria-hidden="true">…</span>
+                <button
+                  v-else
+                  type="button"
+                  class="pager-btn"
+                  :class="{ 'pager-btn--on': it === page }"
+                  :aria-current="it === page ? 'page' : undefined"
+                  :aria-label="`Page ${it}`"
+                  @click="goToPage(it)"
+                >{{ it }}</button>
+              </template>
+              <button type="button" class="pager-btn pager-btn--wide" :disabled="page === totalPages" @click="goToPage(page + 1)">
+                Next <i class="fa-solid fa-chevron-right"></i>
+              </button>
+            </nav>
           </div>
         </section>
       </template>
@@ -459,65 +442,78 @@
       ═════════════════════════════════════════════════════════ -->
       <template v-else>
 
-        <!-- Stat cards double as filters and scroll down to the table -->
-        <section class="cut-stats" aria-label="Leftover summary">
-          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'available' }" @click="pickRemnantFilter('available')">
-            <span class="kpi-icon kpi-icon--blue"><i class="fa-solid fa-ruler-horizontal"></i></span>
-            <span class="kpi-body">
-              <span class="kpi-label">Available</span>
-              <span class="kpi-value">{{ availableCount }}</span>
-              <span class="kpi-hint">
-                <template v-if="remnantTotalsByUnit.length">{{ remnantTotalsByUnit.map(u => `${lenText(u.total)} ${u.unit}`).join(' · ') }} on hand</template>
-                <template v-else>None on hand</template>
+        <!-- STICKY BLOCK: same pinned block (and same card size) as the Products view.
+             The cards are the status filter; click the active card again to go back to "Available".
+             Clicking a card also scrolls down to the table. -->
+        <div class="sticky-controls" :class="{ 'is-stuck': isStuck }" ref="stickyRef">
+
+          <section class="kpi-strip kpi-strip--cuts" aria-label="Leftover summary. Select a card to filter the list.">
+            <button type="button" class="kpi-card kpi-card--featured" :class="{ 'kpi-card--on': remnantFilter === 'available' }"
+              :aria-pressed="remnantFilter === 'available'" :title="remnantHint" @click="pickRemnantFilter('available')">
+              <span class="kpi-icon kpi-icon--blue"><i class="fa-solid fa-ruler-horizontal"></i></span>
+              <span class="kpi-body">
+                <span class="kpi-label">Available</span>
+                <span class="kpi-value">{{ fmt(anim.leftover) }}</span>
+                <span class="kpi-hint">Show available <i class="fa-solid fa-arrow-down"></i></span>
               </span>
-            </span>
-          </button>
-          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'used' }" @click="pickRemnantFilter('used')">
-            <span class="kpi-icon kpi-icon--green"><i class="fa-solid fa-check"></i></span>
-            <span class="kpi-body">
-              <span class="kpi-label">Used</span>
-              <span class="kpi-value">{{ remnantCount('used') }}</span>
-              <span class="kpi-hint">Sold on the POS</span>
-            </span>
-          </button>
-          <button type="button" class="cut-stat" :class="{ 'cut-stat--on': remnantFilter === 'scrapped' }" @click="pickRemnantFilter('scrapped')">
-            <span class="kpi-icon kpi-icon--red"><i class="fa-solid fa-trash-can"></i></span>
-            <span class="kpi-body">
-              <span class="kpi-label">Scrapped</span>
-              <span class="kpi-value">{{ remnantCount('scrapped') }}</span>
-              <span class="kpi-hint">Thrown away</span>
-            </span>
-          </button>
-        </section>
+            </button>
+            <button type="button" class="kpi-card" :class="{ 'kpi-card--on': remnantFilter === 'used' }"
+              :aria-pressed="remnantFilter === 'used'" title="Leftover pieces sold on the POS" @click="pickRemnantFilter('used')">
+              <span class="kpi-icon kpi-icon--green"><i class="fa-solid fa-check"></i></span>
+              <span class="kpi-body">
+                <span class="kpi-label">Used</span>
+                <span class="kpi-value">{{ fmt(anim.used) }}</span>
+                <span class="kpi-hint">Show used <i class="fa-solid fa-arrow-down"></i></span>
+              </span>
+            </button>
+            <button type="button" class="kpi-card" :class="{ 'kpi-card--on': remnantFilter === 'scrapped' }"
+              :aria-pressed="remnantFilter === 'scrapped'" title="Leftover pieces thrown away" @click="pickRemnantFilter('scrapped')">
+              <span class="kpi-icon kpi-icon--red"><i class="fa-solid fa-trash-can"></i></span>
+              <span class="kpi-body">
+                <span class="kpi-label">Scrapped</span>
+                <span class="kpi-value">{{ fmt(anim.scrapped) }}</span>
+                <span class="kpi-hint">Show scrapped <i class="fa-solid fa-arrow-down"></i></span>
+              </span>
+            </button>
+            <button type="button" class="kpi-card" :class="{ 'kpi-card--on': remnantFilter === 'all' }"
+              :aria-pressed="remnantFilter === 'all'" title="Every leftover piece, whatever its status" @click="pickRemnantFilter('all')">
+              <span class="kpi-icon kpi-icon--accent"><i class="fa-solid fa-layer-group"></i></span>
+              <span class="kpi-body">
+                <span class="kpi-label">All</span>
+                <span class="kpi-value">{{ fmt(anim.all) }}</span>
+                <span class="kpi-hint">Show all <i class="fa-solid fa-arrow-down"></i></span>
+              </span>
+            </button>
+          </section>
 
-        <section class="toolbar" aria-label="Search and filter leftover pieces">
-          <div class="toolbar-row">
-            <div class="search-wrap">
-              <i class="fa-solid fa-magnifying-glass search-icon"></i>
-              <input
-                v-model="remnantSearch"
-                type="search"
-                class="search-input"
-                placeholder="Search product, SKU, size or receipt…"
-                aria-label="Search leftover pieces"
-              />
-              <button v-if="remnantSearch" class="search-clear" @click="remnantSearch = ''" aria-label="Clear search">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
+          <section class="toolbar" aria-label="Search leftover pieces">
+            <div class="toolbar-row">
+              <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                <input
+                  v-model="remnantSearch"
+                  type="search"
+                  class="search-input"
+                  placeholder="Search product, SKU, size or receipt…"
+                  aria-label="Search leftover pieces"
+                />
+                <button v-if="remnantSearch" class="search-clear" @click="remnantSearch = ''" aria-label="Clear search">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+
+              <div class="toolbar-end">
+                <!-- Shows only after the page header has scrolled out of view -->
+                <RouterLink v-if="headerOut" to="/products/create" class="btn btn--primary btn--sm tool-btn toolbar-add">
+                  <i class="fa-solid fa-plus"></i> Add Product
+                </RouterLink>
+              </div>
             </div>
+          </section>
+        </div>
 
-            <div class="stock-filter-toggle" role="group" aria-label="Filter leftover pieces">
-              <button v-for="f in REMNANT_FILTERS" :key="f.key" type="button" class="sf-btn"
-                :class="{ 'sf-btn--active': remnantFilter === f.key }" @click="remnantFilter = f.key">
-                {{ f.label }}
-                <span class="sf-count sf-count--neutral">{{ remnantCount(f.key) }}</span>
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <!-- Leftover table (the stat cards scroll here) -->
-        <section class="table-card" ref="cutsTableRef">
+        <!-- Leftover table (the stat cards scroll here). Flashes orange when a summary card is clicked. -->
+        <section class="table-card" :class="{ 'table-card--flash': flashTable }" ref="cutsTableRef">
           <table class="data-table rem-table">
             <colgroup>
               <col style="width:27%" />
@@ -784,12 +780,15 @@
    PRODUCT LIST — sections
      1. Imports & constants
      2. State
-     3. Small helpers (formatting, toasts, preferences, scrolling)
+     3. Small helpers (formatting, toasts, scrolling, table flash)
+     3b. Sticky block (pins to the very top of the scrolling area)
+     3c. Running numbers (count-up animation, same as the Home page)
+     3d. Header watcher (compact "Add Product" button in the sticky toolbar)
      4. Sizes, prices & stock rules
-     5. Size sorting & the per-size panel
+     5. Size order & the per-size panel
      6. Cut tracking (leftover pieces)
      7. Data loading
-     8. Filtering, sorting & summary numbers
+     8. Filtering, order, pagination & summary numbers
      9. Bulk selection
     10. Row dropdown
     11. Restock (one size at a time)
@@ -800,13 +799,14 @@
 /* ── 1. IMPORTS & CONSTANTS ───────────────────────────────────── */
 import Layout from '@/components/Layout.vue'
 import api from '@/api/axios'
-import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const route  = useRoute()
 const router = useRouter()
 
 const LOW_STOCK_DEFAULT = 5   // same fallback the server uses (StockService)
+const PAGE_SIZE = 10          // products per page
 
 /* ── 2. STATE ─────────────────────────────────────────────────── */
 // data
@@ -824,26 +824,30 @@ const successMessage = ref('')
 const errorMessage   = ref('')
 let messageTimer     = null
 
-// sections the summary cards scroll down to
+// sections the summary cards / pager scroll down to
+const pageRef          = ref(null)   // the page root (holds the --sticky-top variable)
+const headerRef        = ref(null)   // the page header (watched to show the compact Add Product button)
 const productsTableRef = ref(null)
 const cutsTableRef     = ref(null)
+const stickyRef        = ref(null)   // the sticky block (cards + search + filters)
+const isStuck          = ref(false)  // true while the sticky block is pinned (adds a soft shadow)
+const headerOut        = ref(false)  // true once the page header has scrolled out of view
+let   headerObserver   = null
+
+// orange flash on the table card when a summary card is clicked
+const flashTable = ref(false)
+let   flashTimer = null
 
 // search & filters. `searchInput` is what the box shows; `searchQuery` is the
 // lowercase term used for filtering. The header search (?search=) feeds the same box.
 const searchInput      = ref('')
 const searchQuery      = computed(() => searchInput.value.trim().toLowerCase())
 const selectedCategory = ref('')
-const stockFilter      = ref('all')   // 'all' | 'active' | 'low' | 'out'
+const stockFilter      = ref('all')   // 'all' | 'active' | 'low' | 'out'  (set by the summary cards)
 const STOCK_WORD       = { low: 'low', out: 'out of stock', active: 'active' }
 
-// remembered sort preferences
-const pref = (key, fallback) => {
-  try { return localStorage.getItem(`prodlist_${key}`) || fallback } catch { return fallback }
-}
-const savePref = (key, val) => { try { localStorage.setItem(`prodlist_${key}`, val) } catch { /* ignore */ } }
-
-const productSort = ref(pref('productSort', 'status'))  // 'status' | 'attention' | 'name' | 'stock-desc' | 'stock-asc'
-const variantSort = ref(pref('variantSort', 'active'))  // 'active' | 'size' | 'low'
+// pagination (products table)
+const page = ref(1)
 
 // notification highlight (?highlightId= or ?highlight=) — flashes a row for a few seconds
 const highlightedProductId = ref(null)
@@ -888,6 +892,8 @@ const formatPrice = v => Number(v || 0).toLocaleString(undefined, { minimumFract
 const numOf       = v => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 const lenText     = n => numOf(n).toLocaleString('en-US', { maximumFractionDigits: 3 })
 const receiptNo   = id => `SR-${String(id).padStart(5, '0')}`
+// whole number with thousands separators, used by the running numbers on the cards
+const fmt         = n => Math.round(numOf(n)).toLocaleString('en-US')
 
 function flashSuccess(msg) {
   errorMessage.value = ''
@@ -926,8 +932,158 @@ async function scrollToSection(targetRef) {
   await nextTick()   // a second tick: the section may only exist after a view switch
   const el = targetRef.value
   if (!el) return
+  // When the controls are sticky, the table stops just below them instead of sliding underneath.
+  const sticky = stickyRef.value
+  const stuck  = !!sticky && getComputedStyle(sticky).position === 'sticky'
+  el.style.scrollMarginTop = `${(stuck ? sticky.offsetHeight : 0) + 12}px`
   const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+
+// Same thing for the product table (used by the pager and the summary cards).
+const scrollToProductsTable = () => scrollToSection(productsTableRef)
+
+/* Brief orange highlight around the table card, so it is clear which data a summary card
+   just filtered. Skipped for people who prefer reduced motion. */
+async function flashTableCard() {
+  if (prefersReducedMotion()) return
+  flashTable.value = false
+  clearTimeout(flashTimer)
+  await nextTick()
+  await nextTick()   // after a view switch the table card is only rendered on the second tick
+  flashTable.value = true
+  flashTimer = setTimeout(() => { flashTable.value = false }, 1400)
+}
+
+/* ── 3b. STICKY BLOCK ─────────────────────────────────────────────
+   The cards + search + filters must pin to the VERY top of the scrolling area.
+   The app shell's scroll area has its own top padding, and a sticky element stops
+   that far below the top edge, which left a strip where table rows showed through.
+   To fix it we find the scrolling parent and pull `--sticky-top` up by exactly that
+   padding. After the first real scroll we also measure the leftover gap and correct
+   it, so it stays right even if the shell's padding changes. */
+let scrollEl      = null   // the shell's scrolling element (null = the window scrolls)
+let stickyTop     = 0      // current --sticky-top, in px
+let calibrations  = 0      // safety limit for the self-correction below
+let scrollTicking = false
+
+function findScrollParent(el) {
+  let node = el?.parentElement
+  while (node && node !== document.body && node !== document.documentElement) {
+    if (/(auto|scroll|overlay)/.test(getComputedStyle(node).overflowY)) return node
+    node = node.parentElement
+  }
+  return null
+}
+const scrollOffset = () => (scrollEl ? scrollEl.scrollTop : window.scrollY)
+const viewportTop  = () => (scrollEl ? scrollEl.getBoundingClientRect().top + scrollEl.clientTop : 0)
+
+function applyStickyTop(px) {
+  stickyTop = px
+  pageRef.value?.style.setProperty('--sticky-top', `${px}px`)
+}
+
+function syncSticky() {
+  const sticky = stickyRef.value
+  if (!sticky || getComputedStyle(sticky).position !== 'sticky') { isStuck.value = false; return }
+
+  const gap     = sticky.getBoundingClientRect().top - viewportTop()   // space left above the pinned block
+  const scrolled = scrollOffset()
+  isStuck.value = scrolled > 0 && gap <= 1
+
+  // Far enough down that the block is certainly pinned, yet a gap remains: close it.
+  if (scrolled > 250 && Math.abs(gap) > 1 && Math.abs(gap) < 160 && calibrations < 4) {
+    calibrations++
+    applyStickyTop(stickyTop - gap)
+    requestAnimationFrame(syncSticky)
+  }
+}
+
+function onScrollSticky() {
+  if (scrollTicking) return
+  scrollTicking = true
+  requestAnimationFrame(() => { scrollTicking = false; syncSticky() })
+}
+
+function initStickyTop() {
+  calibrations = 0
+  const padTop = scrollEl ? parseFloat(getComputedStyle(scrollEl).paddingTop) || 0 : 0
+  applyStickyTop(-padTop)
+}
+
+function onResizeSticky() { initStickyTop(); syncSticky() }
+
+function teardownSticky() {
+  (scrollEl || window).removeEventListener('scroll', onScrollSticky)
+  window.removeEventListener('resize', onResizeSticky)
+}
+
+function setupSticky() {
+  teardownSticky()
+  scrollEl = findScrollParent(pageRef.value)
+  ;(scrollEl || window).addEventListener('scroll', onScrollSticky, { passive: true })
+  window.addEventListener('resize', onResizeSticky)
+  initStickyTop()
+  syncSticky()
+}
+
+/* ── 3c. RUNNING NUMBERS ──────────────────────────────────────────
+   Same effect as the Home page: the numbers on the summary cards count up
+   from 0 to their real value with an ease-out curve. The cards show `anim.*`
+   instead of the real numbers; `kpiTargets` (section 8) holds the real ones.
+   Honors "reduce motion" (numbers jump straight to the final value). */
+const anim = reactive({
+  products: 0, sizes: 0, active: 0, low: 0, out: 0,
+  leftover: 0, used: 0, scrapped: 0, all: 0,
+})
+let animRaf = 0
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+// Counts every number in `targets` from where it is now to its target value.
+function animateTo(targets, duration = 800) {
+  cancelAnimationFrame(animRaf)
+
+  if (prefersReducedMotion()) {
+    Object.assign(anim, targets)
+    return
+  }
+
+  const from = {}
+  Object.keys(targets).forEach(k => { from[k] = anim[k] ?? 0 })
+  const start = performance.now()
+
+  const tick = now => {
+    const p = Math.min((now - start) / duration, 1)
+    if (p >= 1) {
+      Object.assign(anim, targets)
+      return
+    }
+    const e = 1 - Math.pow(1 - p, 3)   // ease-out cubic
+    Object.keys(targets).forEach(k => { anim[k] = from[k] + (targets[k] - from[k]) * e })
+    animRaf = requestAnimationFrame(tick)
+  }
+  animRaf = requestAnimationFrame(tick)
+}
+
+// Puts every number back to 0 so the next count-up starts from the beginning.
+function resetAnim() {
+  cancelAnimationFrame(animRaf)
+  Object.keys(anim).forEach(k => { anim[k] = 0 })
+}
+
+/* ── 3d. HEADER WATCHER ───────────────────────────────────────────
+   Once the page header has scrolled out of view, the sticky toolbar shows a compact
+   "Add Product" button (wide screens only, where the toolbar is sticky). */
+function setupHeaderObserver() {
+  headerObserver?.disconnect()
+  if (!headerRef.value || !('IntersectionObserver' in window)) return
+  headerObserver = new IntersectionObserver(
+    ([entry]) => { headerOut.value = !entry.isIntersecting },
+    { threshold: 0 }
+  )
+  headerObserver.observe(headerRef.value)
 }
 
 /* ── VIEW SWITCH (Products / Cut tracking) ── */
@@ -936,26 +1092,32 @@ function setView(next) {
   closeMenu()
   router.replace({ query: { ...route.query, view: next === 'cuts' ? 'cuts' : undefined } })
 }
-// "Leftover pieces" card on the Products view → open Cut tracking and scroll to its table
+// "Leftover pieces" card on the Products view → open Cut tracking, scroll to its table and flash it
 function openCuts() {
   remnantFilter.value = 'available'
   setView('cuts')
   scrollToSection(cutsTableRef)
+  flashTableCard()
 }
-// Cut tracking stat cards → apply the filter and scroll to the table
+/* Cut tracking cards → apply the filter (click the active card again to go back to "Available"),
+   then scroll down to the table and flash it, same as the Customers page. */
 function pickRemnantFilter(key) {
-  remnantFilter.value = key
+  remnantFilter.value = remnantFilter.value === key && key !== 'available' ? 'available' : key
   scrollToSection(cutsTableRef)
+  flashTableCard()
 }
-// Low stock / Out of stock cards → apply the filter and scroll to the product table
+/* Active / Low stock / Out of stock cards → apply the filter (click again to clear),
+   then scroll down to the table and flash it, same as the Customers page. */
 function pickStockFilter(key) {
-  stockFilter.value = key
-  scrollToSection(productsTableRef)
+  stockFilter.value = stockFilter.value === key ? 'all' : key
+  scrollToProductsTable()
+  flashTableCard()
 }
-// Products card → clear every filter and scroll to the full list
+// Products card → clear every filter, show the full list and scroll down to it
 function showAllProducts() {
   resetFilters()
-  scrollToSection(productsTableRef)
+  scrollToProductsTable()
+  flashTableCard()
 }
 
 /* ── 4. SIZES, PRICES & STOCK ─────────────────────────────────────
@@ -1050,9 +1212,6 @@ const stockLabel = p => {
 const unitRanks = p =>
   hasVariantStock(p) ? variantsOf(p).map(variantRank) : [productRank(p)]
 
-// Anything that needs attention (low OR out). Used for row colouring / sorting.
-const isLowStock = p => productRank(p) > 0
-
 // LOW tab → product has at least one size that is low (above 0, at/below reorder level)
 // OUT tab → product has at least one size at 0
 const hasLowSize = p => unitRanks(p).includes(1)
@@ -1063,9 +1222,10 @@ const hasOutSize = p => unitRanks(p).includes(2)
 const hasActiveStock = p =>
   hasVariantStock(p) ? variantsOf(p).some(v => variantRank(v) === 0) : productRank(p) === 0
 
-/* ── 5. SIZE SORTING & THE PER-SIZE PANEL ─────────────────────────
-   Reads numbers out of labels ("8 ft", "1/2 in", "2 1/2 in") and knows named
-   sizes (XS … XXXL), so "8" sorts before "10". */
+/* ── 5. SIZE ORDER & THE PER-SIZE PANEL ───────────────────────────
+   Sizes are always listed healthy first, then by size. The size parser reads numbers
+   out of labels ("8 ft", "1/2 in", "2 1/2 in") and knows named sizes (XS … XXXL),
+   so "8" sorts before "10". */
 const NAMED_SIZES = { xxs: 0, xs: 1, s: 2, small: 2, m: 3, medium: 3, l: 4, large: 4, xl: 5, xxl: 6, xxxl: 7 }
 
 function sizeKey(label) {
@@ -1085,16 +1245,16 @@ function compareSize(a, b) {
   return String(a.Label ?? '').localeCompare(String(b.Label ?? ''), undefined, { numeric: true, sensitivity: 'base' })
 }
 
+// healthy sizes first, then by size
 function compareVariants(a, b) {
-  if (variantSort.value === 'size') return compareSize(a, b)
   const ra = variantRank(a), rb = variantRank(b)
-  if (ra !== rb) return variantSort.value === 'low' ? rb - ra : ra - rb   // 'low' puts the worst first
+  if (ra !== rb) return ra - rb
   return compareSize(a, b)
 }
 
 const sortedVariants = p => [...variantsOf(p)].sort(compareVariants)
 
-// While a stock tab is on, only the matching sizes are listed in the panel.
+// While a stock filter is on, only the matching sizes are listed in the panel.
 const lowOnly    = p => stockFilter.value === 'low'    && hasVariantStock(p)
 const outOnly    = p => stockFilter.value === 'out'    && hasVariantStock(p)
 const activeOnly = p => stockFilter.value === 'active' && hasVariantStock(p)
@@ -1118,8 +1278,8 @@ function toggleExpand(id) {
   expandedIds.value = next
 }
 
-// "Show all sizes" / "Hide all sizes" acts on the products currently on screen.
-const expandableProducts = computed(() => filteredProducts.value.filter(p => sizeCount(p) > 1))
+// "Show all sizes" / "Hide all sizes" acts on the products currently on screen (this page).
+const expandableProducts = computed(() => pagedProducts.value.filter(p => sizeCount(p) > 1))
 const expandableCount    = computed(() => expandableProducts.value.length)
 const allSizesOpen       = computed(() =>
   expandableCount.value > 0 && expandableProducts.value.every(p => expandedIds.value.has(p.ProductID))
@@ -1141,12 +1301,6 @@ function toggleAllSizes() {
      scrapped  → available  manual "Put back" button
      available → used       NEVER manual. SaleController::sellRemnant() sets it
                             when the last pieces of a leftover are sold on the POS. */
-const REMNANT_FILTERS = [
-  { key: 'available', label: 'Available' },
-  { key: 'used',      label: 'Used' },
-  { key: 'scrapped',  label: 'Scrapped' },
-  { key: 'all',       label: 'All' },
-]
 const REM_UNIT_LABELS = { pc: 'pcs', pcs: 'pcs', piece: 'pcs', pieces: 'pcs', feet: 'ft', meter: 'm', meters: 'm' }
 function remUnitLabel(raw) {
   const key = String(raw ?? '').trim().toLowerCase()
@@ -1184,6 +1338,13 @@ const remnantTotalsByUnit = computed(() => {
   })
   return [...map.entries()].map(([unit, total]) => ({ unit, total }))
 })
+
+// One-line text for the "Leftover pieces" cards (shown as the tooltip), e.g. "18 in on hand"
+const remnantHint = computed(() =>
+  remnantTotalsByUnit.value.length
+    ? `${remnantTotalsByUnit.value.map(u => `${lenText(u.total)} ${u.unit}`).join(' · ')} on hand`
+    : 'None on hand'
+)
 
 async function loadRemnants() {
   try {
@@ -1252,7 +1413,7 @@ async function reload() {
 /* Called once products are loaded when the page was opened from a notification.
    product_created → ?highlightId=<ProductID>;
    low_stock / out_of_stock → ?highlight=<ProductName> (also accepts "Product (Size)").
-   Silently does nothing when nothing matches. */
+   Jumps to the page that holds the product. Silently does nothing when nothing matches. */
 function applyHighlightFromQuery() {
   const idParam   = route.query.highlightId
   const nameParam = route.query.highlight
@@ -1268,6 +1429,10 @@ function applyHighlightFromQuery() {
   }
   if (!match) return
 
+  // open the page of the table that contains this product
+  const idx = filteredProducts.value.findIndex(p => p.ProductID === match.ProductID)
+  if (idx >= 0) page.value = Math.floor(idx / PAGE_SIZE) + 1
+
   highlightedProductId.value = match.ProductID
   if (sizeCount(match) > 1) {
     expandedIds.value = new Set([...expandedIds.value, match.ProductID])
@@ -1282,22 +1447,13 @@ function applyHighlightFromQuery() {
   highlightTimer = setTimeout(() => { highlightedProductId.value = null }, 3000)
 }
 
-/* ── 8. FILTERING, SORTING & SUMMARY NUMBERS ──────────────────────
-   Product order — 'status': healthy → low → out · 'attention': out → low → healthy ·
-   others: name / total stock. Ties always fall back to name. */
+/* ── 8. FILTERING, ORDER, PAGINATION & SUMMARY NUMBERS ────────────
+   Products are always listed healthy → low → out, then by name. Use the summary
+   cards (Active / Low stock / Out of stock) to narrow the list instead. */
 const byName = (a, b) =>
   String(a.ProductName ?? '').localeCompare(String(b.ProductName ?? ''), undefined, { numeric: true, sensitivity: 'base' })
 
-function compareProducts(a, b) {
-  switch (productSort.value) {
-    case 'attention':  return (productRank(b) - productRank(a)) || byName(a, b)
-    case 'name':       return byName(a, b)
-    case 'stock-desc': return (totalStock(b) - totalStock(a)) || byName(a, b)
-    case 'stock-asc':  return (totalStock(a) - totalStock(b)) || byName(a, b)
-    case 'status':
-    default:           return (productRank(a) - productRank(b)) || byName(a, b)
-  }
-}
+const compareProducts = (a, b) => (productRank(a) - productRank(b)) || byName(a, b)
 
 // Search also matches size labels (e.g. "8 ft") so a product can be found by its size.
 const filteredProducts = computed(() =>
@@ -1319,10 +1475,42 @@ const filteredProducts = computed(() =>
     })
     .sort(compareProducts)
 )
+
+/* Pagination: PAGE_SIZE (10) products per page. */
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredProducts.value.length / PAGE_SIZE)))
+const pagedProducts = computed(() => {
+  const start = (page.value - 1) * PAGE_SIZE
+  return filteredProducts.value.slice(start, start + PAGE_SIZE)
+})
+const rangeStart = computed(() => (filteredProducts.value.length ? (page.value - 1) * PAGE_SIZE + 1 : 0))
+const rangeEnd   = computed(() => Math.min(page.value * PAGE_SIZE, filteredProducts.value.length))
+
+// Page buttons: 1 … 4 5 6 … 12  (with "…" gaps for long lists)
+const pageItems = computed(() => {
+  const total = totalPages.value, cur = page.value
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const items = [1]
+  const start = Math.max(2, cur - 1)
+  const end   = Math.min(total - 1, cur + 1)
+  if (start > 2) items.push('…')
+  for (let i = start; i <= end; i++) items.push(i)
+  if (end < total - 1) items.push('…')
+  items.push(total)
+  return items
+})
+
+function goToPage(n) {
+  const next = Math.min(Math.max(1, n), totalPages.value)
+  if (next === page.value) return
+  page.value = next
+  closeMenu()
+  scrollToProductsTable()
+}
+
 const currentProduct = computed(() => filteredProducts.value.find(p => p.ProductID === openMenuId.value))
 
 /* Summary numbers count SIZES, not products: every size is its own item.
-   Counts come off the full list so tab badges never shrink to themselves.
+   Counts come off the full list so the cards never shrink to themselves.
      lowStockCount   = sizes above 0 but at/below reorder level
      outOfStockCount = sizes at 0
      activeCount     = healthy sizes
@@ -1333,7 +1521,21 @@ const outOfStockCount = computed(() => allRanks.value.filter(r => r === 2).lengt
 const activeCount     = computed(() => allRanks.value.filter(r => r === 0).length)
 const totalSizes      = computed(() => allRanks.value.length)
 
-// Sizes inside the rows currently on screen that match the active stock tab (used in the table footer).
+/* The real numbers the cards count up to (see "3c. Running numbers").
+   Covers both views: Products cards and Cut tracking cards. */
+const kpiTargets = computed(() => ({
+  products: products.value.length,
+  sizes:    totalSizes.value,
+  active:   activeCount.value,
+  low:      lowStockCount.value,
+  out:      outOfStockCount.value,
+  leftover: availableCount.value,
+  used:     remnantCount('used'),
+  scrapped: remnantCount('scrapped'),
+  all:      remnantCount('all'),
+}))
+
+// Sizes inside the rows currently matching the active stock filter (used in the table footer).
 const visibleSizeCount = computed(() =>
   filteredProducts.value.reduce((sum, p) => {
     const ranks = unitRanks(p)
@@ -1371,16 +1573,17 @@ const emptyHint = computed(() =>
   : stockFilter.value === 'out' && noExtraFilters() ? 'Every size has at least 1 in stock.'
   : 'Try a different search or clear the filters.')
 
-/* ── 9. BULK SELECTION ────────────────────────────────────────── */
+/* ── 9. BULK SELECTION ────────────────────────────────────────────
+   "Select all" acts on the rows on the current page only. */
 const selectedCount = computed(() => selectedIds.value.size)
 
 const allVisibleSelected = computed(() =>
-  filteredProducts.value.length > 0 &&
-  filteredProducts.value.every(p => selectedIds.value.has(p.ProductID))
+  pagedProducts.value.length > 0 &&
+  pagedProducts.value.every(p => selectedIds.value.has(p.ProductID))
 )
 const someVisibleSelected = computed(() =>
   !allVisibleSelected.value &&
-  filteredProducts.value.some(p => selectedIds.value.has(p.ProductID))
+  pagedProducts.value.some(p => selectedIds.value.has(p.ProductID))
 )
 
 function toggleSelect(id) {
@@ -1392,8 +1595,8 @@ function toggleSelect(id) {
 // Only touches what is currently visible, so "select all" never grabs hidden rows.
 function toggleSelectAll() {
   const next = new Set(selectedIds.value)
-  if (allVisibleSelected.value) filteredProducts.value.forEach(p => next.delete(p.ProductID))
-  else                          filteredProducts.value.forEach(p => next.add(p.ProductID))
+  if (allVisibleSelected.value) pagedProducts.value.forEach(p => next.delete(p.ProductID))
+  else                          pagedProducts.value.forEach(p => next.add(p.ProductID))
   selectedIds.value = next
 }
 
@@ -1534,20 +1737,38 @@ async function confirmDelete() {
 }
 
 /* ── 13. LIFECYCLE & WATCHERS ─────────────────────────────────── */
-watch(productSort, v => savePref('productSort', v))
-watch(variantSort, v => savePref('variantSort', v))
 watch(() => route.query.search, v => { searchInput.value = v || '' }, { immediate: true })
 watch(() => route.query.view, v => { view.value = v === 'cuts' ? 'cuts' : 'products' }, { immediate: true })
 watch(selectedCategory, nc => { router.replace({ query: { ...route.query, category: nc || undefined } }) })
-// Changing a filter clears the selection so you can never delete rows that are no longer on screen.
-watch([stockFilter, selectedCategory, searchQuery], clearSelection)
+// Any change to the filters starts again from page 1.
+watch([stockFilter, selectedCategory, searchQuery], () => { page.value = 1 })
+// If rows disappear (delete, filter) and the current page no longer exists, step back.
+watch(totalPages, t => { if (page.value > t) page.value = t })
+// Changing a filter or page clears the selection so you can never delete rows that are no longer on screen.
+watch([stockFilter, selectedCategory, searchQuery, page], clearSelection)
+// The sticky block only exists on the Products view: re-measure whenever the view changes or the table height changes.
+watch(view, () => { calibrations = 0; nextTick(syncSticky) })
+watch(loading, () => nextTick(syncSticky))
+
+// Running numbers: count up from 0 when the data finishes loading and whenever the view switches…
+watch([loading, view], () => {
+  if (loading.value) return
+  resetAnim()
+  nextTick(() => animateTo(kpiTargets.value))
+})
+// …and count from the current value to the new one when the data changes later
+// (restock, delete, a leftover scrapped, a late leftover load). Ignored while loading.
+watch(kpiTargets, t => { if (!loading.value) animateTo(t) })
 
 onMounted(async () => {
-  if (['low', 'out'].includes(route.query.stockFilter)) stockFilter.value = route.query.stockFilter
+  if (['active', 'low', 'out'].includes(route.query.stockFilter)) stockFilter.value = route.query.stockFilter
   if (route.query.category) selectedCategory.value = String(route.query.category)
 
   document.addEventListener('click', onClickOutside)
   document.addEventListener('keydown', onKeydown)
+
+  nextTick(setupSticky)     // pin the cards / search / filters to the very top
+  nextTick(setupHeaderObserver)   // show the compact Add Product button once the header scrolls away
 
   loadCategories()
   loadRemnants()            // runs alongside the product load; it never blocks the table
@@ -1560,6 +1781,10 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearTimeout(highlightTimer)
   clearTimeout(messageTimer)
+  clearTimeout(flashTimer)
+  cancelAnimationFrame(animRaf)
+  teardownSticky()
+  headerObserver?.disconnect()
   document.removeEventListener('click', onClickOutside)
   document.removeEventListener('keydown', onKeydown)
 })
@@ -1568,9 +1793,9 @@ onBeforeUnmount(() => {
 <style scoped>
 /* ════════════════════════════════════════════════════════════════
    STYLE SECTIONS
-     A. Tokens & page shell      F. Product table
+     A. Tokens & page shell      F. Product table & pagination
      B. Header, tabs & KPIs      G. Size panel & tiles
-     C. Toolbar                  H. Cut tracking
+     C. Toolbar & sticky block   H. Cut tracking
      D. Buttons & alerts         I. Modals
      E. Bulk bar                 J. Responsive (no horizontal scroll) / motion
 ════════════════════════════════════════════════════════════════ */
@@ -1596,16 +1821,42 @@ onBeforeUnmount(() => {
   --pl-amber:          #f59e0b;
   --radius: 16px;
 
+  /* ── SPACE TUNING (same values as Home, Reports and Inventory Logs) ──
+     The app shell (Layout.vue) adds roughly 64px of its own padding around
+     every page. --bleed-* lets this page reclaim part of it on desktop,
+     on BOTH the left and the right side (same as the Home page).
+     Raise a value to push the content closer to the edge, lower it (or set
+     it to 0px) if content ever touches the sidebar or top bar. */
+  --bleed-x: 30px;
+  --bleed-y: 26px;
+  --pl-gap: 16px;
+
+  /* Distance from the top of the scrolling area where the sticky block stops.
+     This is set automatically by the script (it cancels the shell's top padding
+     so the block sits flush at the very top). Leave it alone unless you need to
+     nudge it: a negative value moves the block up, a positive value moves it down. */
+  --sticky-top: 0px;
+
+  /* same easing as the Home page */
+  --pl-ease: cubic-bezier(.16, 1, .3, 1);
+
   min-height: 100%;
-  max-width: 100%;
-  overflow-x: hidden;           /* the page itself never scrolls sideways */
+  /* No max-width here: a "max-width: 100%" cap stopped the negative right margin
+     from widening the page, which left the empty strip on the right. */
+  overflow-x: clip;             /* the page never scrolls sideways (clip, so sticky keeps working) */
   background: var(--pl-bg);
-  padding: 28px 28px 64px;
+  padding: 16px 24px 40px;
   font-family: 'Inter', system-ui, sans-serif;
-  display: flex; flex-direction: column; gap: 18px;
+  display: flex; flex-direction: column; gap: var(--pl-gap);
   transition: background-color .22s;
 }
 .prod-list-page > * { min-width: 0; }
+
+/* visually hidden, still read by screen readers */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 /* ── B. HEADER, TABS & KPIs ── */
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -1648,21 +1899,25 @@ onBeforeUnmount(() => {
 }
 .link-btn:hover { text-decoration: underline; }
 
-/* Products view has 4 cards (Products, Low, Out, Leftovers); cut view has 3 */
-.kpi-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.cut-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.kpi-card, .cut-stat {
+/* Products view: 5 compact cards in ONE row (Products, Active, Low, Out, Leftovers).
+   Cut tracking uses the SAME card style: 4 cards that share the full row. */
+.kpi-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+/* Cut tracking has 4 cards: they share the row equally, so the full width (right side included) is used */
+.kpi-strip--cuts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.kpi-card {
   display: flex; align-items: center; gap: 14px; text-align: left;
   padding: 16px 18px; cursor: pointer; font-family: inherit; min-width: 0;
   background: var(--pl-surface); border: 1px solid var(--pl-border);
   border-radius: var(--radius); box-shadow: var(--c-shadow-sm);
   transition: transform .18s, box-shadow .18s, border-color .18s, background-color .22s;
 }
-.kpi-card:hover, .cut-stat:hover { transform: translateY(-2px); border-color: var(--pl-accent-border); box-shadow: var(--c-shadow-md); }
-.kpi-card:focus-visible, .cut-stat:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--pl-ring); }
+.kpi-card:hover { transform: translateY(-2px); border-color: var(--pl-accent-border); box-shadow: var(--c-shadow-md); }
+.kpi-card:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--pl-ring); }
+/* first card of each view gets the soft accent tint (same as "Customers tracked") */
+.kpi-card--featured { background: var(--pl-accent-soft); border-color: var(--pl-accent-border); }
 .kpi-card--alert { background: rgba(244,63,94,.06); border-color: rgba(244,63,94,.28); }
 .kpi-card--warn  { background: rgba(245,158,11,.07); border-color: rgba(245,158,11,.35); }
-.cut-stat--on { border-color: var(--pl-accent); box-shadow: 0 0 0 3px var(--pl-ring); }
+.kpi-card--on { border-color: var(--pl-accent); box-shadow: 0 0 0 3px var(--pl-ring); }
 .kpi-icon {
   width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center; font-size: 16px;
@@ -1674,25 +1929,52 @@ onBeforeUnmount(() => {
 .kpi-icon--blue   { background: rgba(59,130,246,.14); color: var(--pl-blue); }
 .kpi-body  { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .kpi-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pl-text-muted); }
-.kpi-value { font-size: 24px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; color: var(--pl-text-primary); }
-.kpi-hint  { font-size: 12px; color: var(--pl-text-muted); overflow-wrap: anywhere; }
+/* tabular-nums keeps the digits the same width, so the running numbers don't jitter while counting */
+.kpi-value { font-size: 24px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; color: var(--pl-text-primary); font-variant-numeric: tabular-nums; }
+.kpi-hint  { font-size: 12px; color: var(--pl-text-muted); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 
-/* ── C. TOOLBAR ── */
+/* Compact version used by the one-row strip on the Products view.
+   Kept slim so the pinned block leaves as much room as possible for the table. */
+.kpi-strip .kpi-card { gap: 10px; padding: 8px 12px; border-radius: 14px; }
+.kpi-strip .kpi-card:hover { transform: none; }   /* no lift: the block is pinned, a lift would clip under its edge */
+.kpi-strip .kpi-icon { width: 34px; height: 34px; font-size: 14px; border-radius: 10px; }
+.kpi-strip .kpi-label { font-size: 10.5px; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-strip .kpi-value { font-size: 20px; }
+.kpi-strip .kpi-hint { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* "Show all ↓" hint line (same look as the Customers page cards).
+   It turns accent-coloured on hover / when the card is the active filter, and the arrow nudges down. */
+.kpi-strip .kpi-hint { font-weight: 600; color: var(--pl-text-faint); transition: color .16s ease; }
+.kpi-hint i { font-size: 9px; margin-left: 3px; transition: transform .2s var(--pl-ease); }
+.kpi-card:hover .kpi-hint, .kpi-card--on .kpi-hint { color: var(--pl-accent); }
+.kpi-card:hover .kpi-hint i { transform: translateY(2px); }
+
+/* Cards rise in one after another, like the Home page cards.
+   `backwards` fill keeps it from overriding hover / selected styles afterwards. */
+@keyframes kpi-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.kpi-strip .kpi-card { animation: kpi-rise .6s var(--pl-ease) backwards; }
+.kpi-strip .kpi-card:nth-child(2) { animation-delay: 60ms; }
+.kpi-strip .kpi-card:nth-child(3) { animation-delay: 120ms; }
+.kpi-strip .kpi-card:nth-child(4) { animation-delay: 180ms; }
+.kpi-strip .kpi-card:nth-child(5) { animation-delay: 240ms; }
+
+/* ── C. TOOLBAR & STICKY BLOCK ── */
+.sticky-controls { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
 .toolbar {
   display: flex; flex-direction: column; gap: 12px;
   background: var(--pl-surface); border: 1px solid var(--pl-border);
-  border-radius: var(--radius); padding: 14px 16px;
+  border-radius: var(--radius); padding: 8px 10px;
   box-shadow: var(--c-shadow-sm);
 }
-.toolbar-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.toolbar-row--secondary { padding-top: 12px; border-top: 1px solid var(--pl-border); align-items: flex-end; }
+.toolbar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .toolbar-end { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 .tool-btn { height: 38px; }
 
 .search-wrap { position: relative; flex: 1 1 260px; min-width: 0; display: flex; align-items: center; }
 .search-icon { position: absolute; left: 13px; font-size: 12px; color: var(--pl-text-faint); pointer-events: none; }
 .search-input {
-  width: 100%; height: 40px; padding: 0 36px;
+  width: 100%; height: 38px; padding: 0 36px;
   border: 1.5px solid var(--pl-border-strong); border-radius: 10px;
   background: var(--pl-surface-raised); color: var(--pl-text-primary);
   font-size: 13.5px; font-family: inherit; outline: none;
@@ -1709,47 +1991,13 @@ onBeforeUnmount(() => {
 }
 .search-clear:hover { background: var(--pl-border); color: var(--pl-text-primary); }
 
-.stock-filter-toggle {
-  display: flex; align-items: center; max-width: 100%;
-  border: 1.5px solid var(--pl-border-strong); border-radius: 10px;
-  overflow: hidden; height: 40px; flex-shrink: 0;
-}
-.sf-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 100%; padding: 0 14px;
-  border: none; background: var(--pl-surface); color: var(--pl-text-muted);
-  font-size: 12.5px; font-weight: 600; font-family: inherit; cursor: pointer;
-  transition: background-color .15s, color .15s; white-space: nowrap;
-}
-.sf-btn + .sf-btn { border-left: 1.5px solid var(--pl-border-strong); }
-.sf-btn:hover { background: var(--pl-surface-raised); color: var(--pl-text-primary); }
-.sf-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--pl-accent); }
-.sf-btn--active { background: var(--pl-accent-soft); color: var(--pl-accent); }
-.sf-btn--ok.sf-btn--active { background: rgba(16,185,129,.12); color: var(--pl-green); }
-.sf-btn--warn.sf-btn--active { background: rgba(245,158,11,.14); color: #b45309; }
-.sf-btn--danger.sf-btn--active { background: rgba(244,63,94,.12); color: var(--pl-red); }
-html[data-theme="dark"] .sf-btn--ok.sf-btn--active { background: rgba(16,185,129,.18); color: #4ADE80; }
-html[data-theme="dark"] .sf-btn--warn.sf-btn--active { background: rgba(245,158,11,.20); color: #FBBF24; }
-html[data-theme="dark"] .sf-btn--danger.sf-btn--active { background: rgba(244,63,94,.18); color: #F87171; }
-.sf-count {
-  min-width: 20px; height: 18px; padding: 0 6px;
-  border-radius: 20px; font-size: 10.5px; font-weight: 700;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--pl-red); color: #fff;
-}
-.sf-count--neutral { background: var(--pl-border); color: var(--pl-text-secondary); }
-.sf-count--ok { background: rgba(16,185,129,.18); color: var(--pl-green); }
-.sf-count--warn { background: rgba(245,158,11,.20); color: #b45309; }
-html[data-theme="dark"] .sf-count--ok { color: #4ADE80; }
-html[data-theme="dark"] .sf-count--warn { color: #FBBF24; }
 
 .select-group { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.select-label { font-size: 11.5px; font-weight: 600; color: var(--pl-text-muted); padding-left: 2px; }
 .select-wrap  { position: relative; display: flex; align-items: center; }
 .input-icon   { position: absolute; left: 11px; font-size: 11px; color: var(--pl-text-faint); pointer-events: none; z-index: 1; }
 .select-caret { position: absolute; right: 10px; font-size: 9px; color: var(--pl-text-faint); pointer-events: none; }
 .form-select {
-  height: 38px; padding: 0 28px 0 30px; width: 190px; max-width: 100%;
+  height: 38px; padding: 0 28px 0 30px; width: 188px; max-width: 100%;
   border: 1.5px solid var(--pl-border-strong); border-radius: 10px;
   background: var(--pl-surface); color: var(--pl-text-secondary);
   font-size: 13px; font-weight: 600; font-family: inherit;
@@ -1757,6 +2005,7 @@ html[data-theme="dark"] .sf-count--warn { color: #FBBF24; }
   text-overflow: ellipsis;
   transition: border-color .18s, background-color .22s, color .22s;
 }
+.form-select:hover { border-color: var(--pl-accent-border); }
 .form-select:focus { border-color: var(--pl-accent); box-shadow: 0 0 0 3px var(--pl-ring); }
 
 /* ── D. BUTTONS & ALERTS ── */
@@ -1812,20 +2061,48 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 .bulk-bar-left i { color: var(--pl-accent); font-size: 15px; }
 .bulk-bar-actions { display: flex; align-items: center; gap: 8px; }
 
-/* ── F. PRODUCT TABLE ──
+/* ── F. PRODUCT TABLE & PAGINATION ──
    Fixed layout + wrapping text: every column always fits, no horizontal scroll. */
 .table-card {
   background: var(--pl-surface); border: 1px solid var(--pl-border); border-radius: var(--radius);
   box-shadow: var(--c-shadow-sm); overflow: hidden;
   transition: background-color .22s, border-color .22s;
-  /* when a summary card scrolls here, stop below the sticky top bar instead of under it */
+  /* when a card scrolls here, stop below the top of the screen instead of under it
+     (the tables set their own value in JS so they clear the sticky block) */
   scroll-margin-top: 120px;
 }
+
+/* Orange flash: plays on the table card when a summary card is clicked */
+.table-card--flash { animation: table-flash 1.4s ease-out; }
+@keyframes table-flash {
+  0%   { box-shadow: 0 0 0 0 var(--pl-accent-border); border-color: var(--pl-accent); }
+  30%  { box-shadow: 0 0 0 5px var(--pl-accent-soft); border-color: var(--pl-accent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
 .table-footer {
   padding: 11px 18px; border-top: 1px solid var(--pl-border);
   font-size: 12px; color: var(--pl-text-muted); background: var(--pl-surface-raised);
 }
 .table-footer strong { color: var(--pl-text-primary); }
+.table-footer--pager { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; }
+
+.pager { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.pager-btn {
+  min-width: 32px; height: 32px; padding: 0 9px; border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1.5px solid var(--pl-border-strong); background: var(--pl-surface);
+  color: var(--pl-text-secondary); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: background-color .15s, border-color .15s, color .15s;
+}
+.pager-btn i { font-size: 10px; }
+.pager-btn--wide { padding: 0 12px; }
+.pager-btn:hover:not(:disabled):not(.pager-btn--on) { border-color: var(--pl-accent-border); color: var(--pl-accent); background: var(--pl-accent-soft); }
+.pager-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--pl-ring); }
+.pager-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pager-btn--on { background: var(--pl-accent); border-color: var(--pl-accent); color: #fff; cursor: default; }
+.pager-gap { min-width: 20px; text-align: center; color: var(--pl-text-faint); font-weight: 700; }
 
 .data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; table-layout: fixed; }
 .data-table thead th {
@@ -2274,19 +2551,48 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
 
 /* ── J. RESPONSIVE (no horizontal scroll at any width) & REDUCED MOTION ── */
 
+/* The compact Add Product button in the toolbar is hidden by default.
+   It is only turned on below, where the toolbar is sticky (wide screens). */
+.toolbar-add { display: none; white-space: nowrap; }
+
+/* Desktop only: pull the page outward into the shell's padding (top, left AND right),
+   exactly like the Home page, so the right side is used as well. */
+@media (min-width: 1001px) {
+  .prod-list-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+}
+
+/* Wide screens: the cards, search and filters stay pinned at the very top while the table scrolls.
+   (Smaller screens wrap these into several rows, so they scroll normally instead.)
+   The block reaches the page edges on both sides (negative margin + matching padding),
+   so no table row can peek out beside it, and a soft shadow shows when it is pinned. */
+@media (min-width: 1101px) {
+  .sticky-controls {
+    position: sticky; top: var(--sticky-top); z-index: 20;
+    background: var(--pl-bg);
+    padding: 10px 24px 10px; margin: -10px -24px -10px;
+    transition: box-shadow .2s ease;
+  }
+  .sticky-controls.is-stuck {
+    box-shadow: 0 1px 0 var(--pl-border), 0 14px 18px -16px rgba(0, 0, 0, .55);
+  }
+  .toolbar-add { display: inline-flex; }
+}
+
 /* Mid widths: tighten the actions so the three buttons never overflow */
 @media (max-width: 1500px) {
   .sizes-btn-text { display: none; }
   .sizes-btn { padding: 0 9px; }
+  .form-select { width: 172px; }
 }
 
-/* 4 stock cards: go 2 x 2 before they get cramped */
-@media (max-width: 1300px) {
-  .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* 5 cards no longer fit one row: 3 across, then 2 across on phones */
+@media (max-width: 1100px) {
+  .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kpi-strip--cuts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-@media (max-width: 1000px) {
-  .kpi-strip, .cut-stats { grid-template-columns: 1fr; }
+@media (max-width: 900px) {
+  .prod-list-page { padding: 12px 14px 32px; --pl-gap: 14px; }
 }
 
 /* Narrow screens: every table row becomes a labelled card */
@@ -2320,22 +2626,23 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
 }
 
 @media (max-width: 700px) {
-  .prod-list-page { padding: 16px 16px 48px; }
+  .prod-list-page { padding: 16px 16px 40px; }
+  .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .page-header .btn { width: 100%; justify-content: center; }
   .view-tab { flex: 1; justify-content: center; padding: 11px 8px 13px; }
   .toolbar-row { flex-direction: column; align-items: stretch; }
   .search-wrap { flex-basis: auto; }
-  .stock-filter-toggle { width: 100%; }
-  .sf-btn { flex: 1; justify-content: center; padding: 0 6px; }
   .select-group { width: 100%; }
   .form-select { width: 100%; }
   .toolbar-end { margin-left: 0; }
   .toolbar-end .btn { flex: 1; justify-content: center; }
+  .table-footer--pager { flex-direction: column; align-items: stretch; }
+  .pager { justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sk, .row-highlight td, .sizes-panel { animation: none; }
-  .kpi-card, .cut-stat, .size-tile, .btn, .restock-btn, .sizes-btn i { transition: none; }
-  .kpi-card:hover, .cut-stat:hover, .size-tile:hover { transform: none; }
+  .sk, .row-highlight td, .sizes-panel, .kpi-strip .kpi-card, .table-card--flash { animation: none; }
+  .kpi-card, .size-tile, .btn, .restock-btn, .sizes-btn i, .sticky-controls, .kpi-hint i { transition: none; }
+  .kpi-card:hover, .size-tile:hover, .kpi-card:hover .kpi-hint i { transform: none; }
   .modal-fade-enter-active, .modal-fade-leave-active,
   .alert-fade-enter-active, .alert-fade-leave-active { transition: none; }
 }

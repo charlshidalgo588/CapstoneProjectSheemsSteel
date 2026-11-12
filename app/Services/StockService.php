@@ -98,34 +98,61 @@ class StockService
 
         self::syncProductInventory($productId);
 
+        // Clears stale low/out alerts once the size is healthy again.
+        // (Needs a product() relation on ProductVariant — see note below the class.)
+        $name = $variant->product->ProductName ?? '';
+        self::notifyIfLow($variant, $name);
+
         return $variant;
     }
 
-    /** Low / out-of-stock alert for ONE size. Uses its ReorderLevel, or 5 when it is 0. */
+    /**
+     * Keeps ONE size's stock alerts in sync with its quantity.
+     * Call after ANY stock or reorder-level change.
+     *  - healthy        → marks unread low/out alerts for this size as read
+     *  - low            → one unread "Low stock" alert
+     *  - out of stock   → one unread "Out of stock" alert (replaces the low one)
+     */
     public static function notifyIfLow(ProductVariant $variant, string $productName): void
     {
         $qty       = (int) $variant->QuantityOnHand;
         $threshold = $variant->ReorderLevel > 0 ? (int) $variant->ReorderLevel : self::DEFAULT_LOW_STOCK;
 
-        if ($qty > $threshold) {
-            return; // healthy stock
-        }
-
-        $type  = $qty <= 0 ? 'out_of_stock' : 'low_stock';
-        $title = $qty <= 0 ? 'Out of stock' : 'Low stock';
-        $name  = "{$productName} ({$variant->Label})";
-        $desc  = $qty <= 0
-            ? "{$name} is now out of stock."
-            : "{$name} has only {$qty} unit(s) left.";
-
-        // Reuse an unread alert for the same size instead of adding a duplicate row.
-        $existing = Notification::where('type', $type)
+        $unread = fn (string $type) => Notification::where('type', $type)
             ->where('notifiable_type', ProductVariant::class)
             ->where('notifiable_id', $variant->VariantID)
-            ->whereNull('read_at')
-            ->first();
+            ->whereNull('read_at');
 
+        if ($qty > $threshold) {
+            // Back to healthy: retire any alert that is no longer true.
+            $unread('low_stock')->update(['read_at' => now()]);
+            $unread('out_of_stock')->update(['read_at' => now()]);
+            return;
+        }
+
+        $type = $qty <= 0 ? 'out_of_stock' : 'low_stock';
+
+        // Going from low to out: the low alert is superseded.
+        if ($type === 'out_of_stock') {
+            $unread('low_stock')->update(['read_at' => now()]);
+        }
+        // Restocked from out to low: the out alert is superseded.
+        if ($type === 'low_stock') {
+            $unread('out_of_stock')->update(['read_at' => now()]);
+        }
+
+        // Wording matters: Layout.vue's extractProductName() parses these
+        // patterns to highlight the product on the Product List.
+        $name  = "{$productName} ({$variant->Label})";
+        $title = $qty <= 0 ? 'Out of stock' : 'Low stock';
+        $desc  = $qty <= 0
+            ? "{$name} is out of stock."
+            : "{$name} has only {$qty} units left.";
+
+        $existing = $unread($type)->first();
         if ($existing) {
+            // Same alert type: keep it fresh with the current count.
+            $existing->update(['description' => $desc]);
             $existing->touch();
             return;
         }
@@ -140,3 +167,13 @@ class StockService
         ]);
     }
 }
+
+/*
+ * NOTE: add() reads $variant->product. If your ProductVariant model does not
+ * have this relation yet, add it there:
+ *
+ *   public function product()
+ *   {
+ *       return $this->belongsTo(Product::class, 'ProductID', 'ProductID');
+ *   }
+ */

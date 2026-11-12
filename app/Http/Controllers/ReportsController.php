@@ -51,6 +51,7 @@ class ReportsController extends Controller
     /**
      * UNIFIED REPORTS ENDPOINT
      *   ?mode=month&year=2026&month=6   (default)
+     *   ?mode=week&start=2026-11-08&end=2026-11-14   (Sunday -> Saturday)
      *   ?mode=day&date=2026-06-14
      *   ?mode=year&year=2026
      *   &totals_only=1   -> just the sales total (previous-period comparison)
@@ -59,9 +60,13 @@ class ReportsController extends Controller
     public function index(Request $request)
     {
         $mode = $request->query('mode', 'month');
-        $mode = in_array($mode, ['day', 'month', 'year'], true) ? $mode : 'month';
+        $mode = in_array($mode, ['day', 'week', 'month', 'year'], true) ? $mode : 'month';
 
-        $request->validate(['date' => ['nullable', 'date_format:Y-m-d']]);
+        $request->validate([
+            'date'  => ['nullable', 'date_format:Y-m-d'],
+            'start' => ['nullable', 'date_format:Y-m-d'],
+            'end'   => ['nullable', 'date_format:Y-m-d'],
+        ]);
 
         $p = $this->resolvePeriod($request, $mode);
 
@@ -136,12 +141,16 @@ class ReportsController extends Controller
             ->get()
             ->keyBy(fn ($r) => (string) $r->bucket);
 
-        // Only buckets that actually have a transaction, aligned index for index.
+        // Only buckets that actually have a transaction, in chronological order.
+        // Hour buckets are numeric ("9", "10") so they are sorted as numbers;
+        // day / month buckets ("2026-11-08", "2026-11") sort correctly as strings.
         $keys = $rawSales->keys()
             ->merge($rawItemProfit->keys())
             ->merge($rawServiceProfit->keys())
             ->unique()
-            ->sort()
+            ->sort(fn ($a, $b) => $mode === 'day'
+                ? ((int) $a <=> (int) $b)
+                : strcmp((string) $a, (string) $b))
             ->values();
 
         $monthlySales = [];
@@ -183,6 +192,18 @@ class ReportsController extends Controller
         return response()->json($payload, 200);
     }
 
+    /** "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" / "Dec 28, 2026 – Jan 3, 2027" */
+    private function formatWeekRange(Carbon $start, Carbon $end): string
+    {
+        if ($start->year !== $end->year) {
+            return $start->format('M j, Y') . ' – ' . $end->format('M j, Y');
+        }
+        if ($start->month !== $end->month) {
+            return $start->format('M j') . ' – ' . $end->format('M j, Y');
+        }
+        return $start->format('M j') . ' – ' . $end->format('j, Y');
+    }
+
     /** Date range, bucket SQL, labels and response meta for the selected period. */
     private function resolvePeriod(Request $request, string $mode): array
     {
@@ -204,6 +225,31 @@ class ReportsController extends Controller
                 'words'    => [
                     'sales' => 'Sales This Day', 'items' => 'Items Sold This Day',
                     'tx' => 'Transactions This Day', 'profit' => 'Profit This Day',
+                ],
+            ];
+        }
+
+        if ($mode === 'week') {
+            $anchor = Carbon::createFromFormat('Y-m-d', $request->query('start', now()->format('Y-m-d')))->startOfDay();
+
+            // Weeks run Sunday -> Saturday (Carbon: Sunday = 0). Snap to the Sunday
+            // so a stray date can never produce a shifted or partial week.
+            $start = $anchor->copy()->subDays($anchor->dayOfWeek)->startOfDay();
+            $end   = $start->copy()->addDays(6)->endOfDay();
+
+            return [
+                'start'    => $start,
+                'end'      => $end,
+                'bucket'   => 'DATE(sales.SaleDate)',
+                'selected' => [
+                    'start' => $start->format('Y-m-d'),
+                    'end'   => $end->format('Y-m-d'),
+                    'value' => $start->format('Y-m-d'),
+                    'label' => $this->formatWeekRange($start, $end),
+                ],
+                'words'    => [
+                    'sales' => "This Week's Sales", 'items' => 'Items Sold This Week',
+                    'tx' => 'Transactions This Week', 'profit' => 'Weekly Profit',
                 ],
             ];
         }
