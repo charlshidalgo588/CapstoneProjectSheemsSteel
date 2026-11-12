@@ -887,7 +887,14 @@ const remnantError  = ref('')
 
 /* ── 3. SMALL HELPERS ─────────────────────────────────────────── */
 const setMenuButtonRef = id => el => { if (el) menuButtonRefs.set(id, el); else menuButtonRefs.delete(id) }
-const imagePath   = path => `http://127.0.0.1:8000/storage/${path}`
+const imagePath = path => {
+  if (!path) return ''
+  const cleanPath = path.replace(/^\/+/, '')
+
+  return import.meta.env.DEV
+    ? `http://127.0.0.1:8000/storage/${cleanPath}`
+    : `/storage/${cleanPath}`
+}
 const formatPrice = v => Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })
 const numOf       = v => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 const lenText     = n => numOf(n).toLocaleString('en-US', { maximumFractionDigits: 3 })

@@ -8,8 +8,9 @@ const route  = useRoute()
 const router = useRouter()
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api',
-  withCredentials: true,
+  baseURL: import.meta.env.DEV
+  ? 'http://localhost:8000/api'
+  : '/api',  withCredentials: true,
   xsrfCookieName: 'XSRF-TOKEN',
   xsrfHeaderName: 'X-XSRF-TOKEN',
 })

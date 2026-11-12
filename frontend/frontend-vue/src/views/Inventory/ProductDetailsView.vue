@@ -305,8 +305,14 @@ const product = ref({})
 const loading = ref(true)
 
 const formatPrice = val => Number(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const imageUrl    = path => `http://localhost:8000/storage/${path}`
+const imageUrl = path => {
+  if (!path) return ''
+  const cleanPath = path.replace(/^\/+/, '')
 
+  return import.meta.env.DEV
+    ? `http://localhost:8000/storage/${cleanPath}`
+    : `/storage/${cleanPath}`
+}
 /* ── SIZES & PRICES ── */
 const variants = computed(() => product.value.variants ?? [])
 
