@@ -1,6 +1,6 @@
 <template>
   <Layout>
-    <div class="pos-root">
+    <div class="pos-root" ref="rootEl">
 
       <!-- ══ LEFT — PRODUCT BROWSER ══ -->
       <div class="pos-left">
@@ -1475,11 +1475,56 @@ const POS_MOBILE_BREAKPOINT = 768
 const isMobile = ref(window.innerWidth <= POS_MOBILE_BREAKPOINT)
 const cartOpen = ref(false)
 
+/* ────────────────────────────────────────────────────────────
+   FIXED PAGE (desktop / tablet)
+   The page itself must never scroll — only the product grid (and the
+   cart lines) scroll. The POS root is sized to exactly the space left
+   under the app header, and any scrolling parent from the Layout is
+   locked while this page is open. On mobile the normal page scroll is
+   restored.
+──────────────────────────────────────────────────────────── */
+const rootEl = ref(null)
+let lockedScrollEls = []
+
+function lockScrollParents() {
+  if (lockedScrollEls.length || !rootEl.value) return
+  const targets = [document.documentElement, document.body]
+  let el = rootEl.value.parentElement
+  while (el && el !== document.body && el !== document.documentElement) {
+    const oy = getComputedStyle(el).overflowY
+    if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') targets.push(el)
+    el = el.parentElement
+  }
+  targets.forEach(t => {
+    lockedScrollEls.push({ el: t, prev: t.style.overflow })
+    t.scrollTop = 0
+    t.style.overflow = 'hidden'
+  })
+}
+function unlockScrollParents() {
+  lockedScrollEls.forEach(({ el, prev }) => { el.style.overflow = prev })
+  lockedScrollEls = []
+}
+function fitPosHeight() {
+  const el = rootEl.value
+  if (!el) return
+  if (isMobile.value) {
+    el.style.height = ''
+    unlockScrollParents()
+    return
+  }
+  lockScrollParents()
+  const top = el.getBoundingClientRect().top
+  el.style.height = `${Math.max(window.innerHeight - top, 320)}px`
+}
+
 function onPosResize() {
   const mobile = window.innerWidth <= POS_MOBILE_BREAKPOINT
-  if (mobile === isMobile.value) return
-  isMobile.value = mobile
-  if (!mobile) cartOpen.value = false
+  if (mobile !== isMobile.value) {
+    isMobile.value = mobile
+    if (!mobile) cartOpen.value = false
+  }
+  nextTick(fitPosHeight)
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -1542,13 +1587,15 @@ watch(view, v => { if (v === 'leftovers') loadRemnants() })
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('resize', onPosResize)
+  nextTick(fitPosHeight)
   loadRepeatBuyers() // preload so the customer dropdown opens instantly
   await loadCatalog()
-  nextTick(() => searchInput.value?.focus())
+  nextTick(() => { fitPosHeight(); searchInput.value?.focus() })
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('resize', onPosResize)
+  unlockScrollParents()
   clearTimeout(barcodeTimer)
   clearTimeout(flashTimer)
   clearTimeout(scanFeedbackTimer)
@@ -2976,6 +3023,9 @@ async function completePayment() {
   box-sizing: border-box;
   margin: -28px;
   display: flex;
+  /* Fallback only — fitPosHeight() in the script sets the exact height
+     (window height minus whatever sits above this page), so the page
+     itself never gets a scrollbar. */
   height: calc(100vh - 65px);
   background: var(--p-bg);
   overflow: hidden;
@@ -3214,11 +3264,13 @@ async function completePayment() {
 }
 .load-retry-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); }
 
-/* Product grid */
+/* Product grid — the ONLY scrolling area on the left side.
+   Cards are compact so two full rows are visible at once. */
 .product-grid {
   flex: 1; min-height: 0; overflow-y: scroll;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(clamp(110px, 10vw, 132px), 1fr));
+  grid-auto-rows: min-content;
   gap: 10px; align-content: start; padding-right: 6px; padding-bottom: 8px;
   scrollbar-width: auto; scrollbar-color: var(--p-border-strong) var(--p-surface-sunken);
 }
@@ -3234,9 +3286,9 @@ async function completePayment() {
 .product-card {
   background: var(--p-surface);
   border: 1.5px solid var(--p-border); border-radius: 10px;
-  padding: 8px; cursor: pointer; position: relative;
+  padding: 7px; cursor: pointer; position: relative;
   overflow: visible;
-  min-height: 228px;
+  min-height: 176px;
   box-shadow: var(--p-shadow);
   display: flex; flex-direction: column;
   transition: transform .18s, box-shadow .18s, border-color .18s, background-color .22s;
@@ -3250,14 +3302,14 @@ async function completePayment() {
 .product-card--skeleton:hover { transform: none; border-color: var(--p-border); box-shadow: var(--p-shadow); }
 
 .sk { border-radius: 6px; background: var(--p-border); animation: sk-pulse 1.3s ease-in-out infinite; }
-.sk--img { height: 96px; border-radius: 7px; }
+.sk--img { height: 72px; border-radius: 7px; }
 .sk--line { height: 11px; width: 90%; }
 .sk--short { width: 55%; }
 @keyframes sk-pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
 .product-stock-badge {
-  position: absolute; top: 7px; right: 7px;
-  font-size: 8px; font-weight: 700; padding: 3px 6px;
+  position: absolute; top: 6px; right: 6px;
+  font-size: 8px; font-weight: 700; padding: 2px 6px;
   border-radius: 20px; letter-spacing: .02em; text-transform: uppercase;
   z-index: 1;
 }
@@ -3266,30 +3318,31 @@ async function completePayment() {
 .badge--oos { background: rgba(244,63,94,.14);  color: #f43f5e; }
 
 .product-img-wrap {
-  width: 100%; height: 96px; flex-shrink: 0; border-radius: 7px;
+  width: 100%; height: 72px; flex-shrink: 0; border-radius: 7px;
   background: var(--p-surface-sunken); overflow: hidden;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 6px; transition: background-color .22s;
+  margin-bottom: 5px; transition: background-color .22s;
 }
 .product-img { width: 100%; height: 100%; object-fit: contain; }
-.product-img-placeholder { color: var(--p-text-faint); font-size: 22px; }
+.product-img-placeholder { color: var(--p-text-faint); font-size: 20px; }
 
-.pcard-info    { flex: 1; min-height: 78px; display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; }
+.pcard-info    { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; }
 .pcard-name {
-  font-size: 12.5px; font-weight: 700; color: var(--p-text-primary);
-  margin: 0; line-height: 1.3;
+  font-size: 12px; font-weight: 700; color: var(--p-text-primary);
+  margin: 0; line-height: 1.25;
   display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; word-break: break-word;
-  min-height: 32.5px;
+  min-height: 30px;
 }
-.pcard-sku { font-size: 10px; color: var(--p-text-faint); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard-sku { font-size: 9.5px; color: var(--p-text-faint); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pcard-tag {
   font-size: 9px; font-weight: 700; color: var(--p-accent);
   background: var(--p-accent-soft); border: 1px solid var(--p-accent-border);
-  border-radius: 20px; padding: 1px 6px; margin: 2px 0 0; display: inline-block; width: fit-content;
+  border-radius: 20px; padding: 1px 6px; margin: 1px 0 0; display: inline-block; width: fit-content;
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.pcard-footer  { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
-.pcard-price       { font-size: 14px; font-weight: 800; color: var(--p-accent); }
+.pcard-footer  { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
+.pcard-price       { font-size: 13.5px; font-weight: 800; color: var(--p-accent); }
 .pcard-stock-count { font-size: 10px; font-weight: 600; color: var(--p-text-faint); }
 
 .product-add-overlay {
@@ -3315,6 +3368,7 @@ async function completePayment() {
   border-left: 1px solid var(--p-border);
   display: flex; flex-direction: column;
   overflow: hidden;
+  min-height: 0;
   transition: background-color .22s, border-color .22s;
 }
 
