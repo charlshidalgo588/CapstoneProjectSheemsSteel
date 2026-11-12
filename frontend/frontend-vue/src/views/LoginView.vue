@@ -879,10 +879,10 @@ function onLoginKeydown(e: KeyboardEvent) {
 
   if (e.shiftKey && (active === first || active === loginModalBackdrop.value)) {
     e.preventDefault()
-    last.focus()
+    last?.focus()
   } else if (!e.shiftKey && active === last) {
     e.preventDefault()
-    first.focus()
+    first?.focus()
   }
 }
 
