@@ -214,7 +214,7 @@
             v-for="product in filteredProducts"
             :key="product.id"
             class="product-card"
-            :class="{ 'product-card--oos': !canAddProduct(product), 'product-card--flash': flashProductId === product.id }"
+            :class="[`card--${stockStatus(product)}`, { 'product-card--oos': !canAddProduct(product), 'product-card--flash': flashProductId === product.id }]"
             :tabindex="canAddProduct(product) ? 0 : -1"
             role="button"
             :aria-disabled="!canAddProduct(product)"
@@ -237,7 +237,9 @@
               </p>
               <div class="pcard-footer">
                 <span class="pcard-price">{{ cardPrice(product) }}</span>
-                <span class="pcard-stock-count">{{ availableFor(product) }} left</span>
+                <span class="pcard-stock-count" :class="`stock--${stockStatus(product)}`">
+                  {{ availableFor(product) > 0 ? availableFor(product) + ' left' : 'Sold out' }}
+                </span>
               </div>
             </div>
             <div class="product-add-overlay"><i class="fa-solid fa-plus"></i></div>
@@ -274,7 +276,7 @@
               <p class="pcard-tag">{{ r.label ? r.label + ' · ' : '' }}{{ fmtLeft(r) }} piece</p>
               <div class="pcard-footer">
                 <span class="pcard-price">{{ r.price != null ? '₱' + r.price.toFixed(2) : 'Set price' }}</span>
-                <span class="pcard-stock-count">{{ remnantAvailable(r) }} left</span>
+                <span class="pcard-stock-count" :class="remnantAvailable(r) > 0 ? 'stock--low' : 'stock--oos'">{{ remnantAvailable(r) > 0 ? remnantAvailable(r) + ' left' : 'Sold out' }}</span>
               </div>
             </div>
             <div class="product-add-overlay"><i class="fa-solid fa-plus"></i></div>
@@ -3313,9 +3315,17 @@ async function completePayment() {
   border-radius: 20px; letter-spacing: .02em; text-transform: uppercase;
   z-index: 1;
 }
-.badge--ok  { background: rgba(16,185,129,.15); color: #10b981; }
-.badge--low { background: rgba(249,115,22,.15); color: #f97316; }
-.badge--oos { background: rgba(244,63,94,.14);  color: #f43f5e; }
+/* Solid, high-contrast badges so they stay readable on top of any product photo */
+.product-stock-badge { box-shadow: 0 1px 4px rgba(0,0,0,.45); font-size: 8.5px; padding: 3px 7px; }
+.badge--ok  { background: #10b981; color: #fff; }
+.badge--low { background: #f59e0b; color: #1a1200; }
+.badge--oos { background: #f43f5e; color: #fff; }
+
+/* Colour stripe along the top of each card = stock status at a glance */
+.card--ok  { border-top: 3px solid #10b981; }
+.card--low { border-top: 3px solid #f59e0b; }
+.card--oos { border-top: 3px solid #f43f5e; }
+.card--ok:hover, .card--low:hover { border-top-color: var(--p-accent); }
 
 .product-img-wrap {
   width: 100%; height: 72px; flex-shrink: 0; border-radius: 7px;
@@ -3343,7 +3353,14 @@ async function completePayment() {
 }
 .pcard-footer  { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
 .pcard-price       { font-size: 13.5px; font-weight: 800; color: var(--p-accent); }
-.pcard-stock-count { font-size: 10px; font-weight: 600; color: var(--p-text-faint); }
+.pcard-stock-count {
+  font-size: 11px; font-weight: 800; line-height: 1;
+  padding: 4px 8px; border-radius: 20px; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.stock--ok  { background: rgba(16,185,129,.18); color: #10b981; border: 1px solid rgba(16,185,129,.45); }
+.stock--low { background: rgba(245,158,11,.20); color: #f59e0b; border: 1px solid rgba(245,158,11,.50); }
+.stock--oos { background: rgba(244,63,94,.18);  color: #f43f5e; border: 1px solid rgba(244,63,94,.45); }
 
 .product-add-overlay {
   position: absolute; inset: 0;
