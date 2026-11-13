@@ -588,7 +588,15 @@ html[data-theme="dark"] .field-error { color: #F87171; }
 .preview-list { list-style: none; margin: 10px 0 0; padding: 10px 0 0; border-top: 1px solid var(--s-border); display: flex; flex-direction: column; gap: 7px; }
 .preview-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: var(--s-text-secondary); line-height: 1.4; }
 .preview-list li i { width: 14px; margin-top: 3px; font-size: 11.5px; text-align: center; color: var(--s-text-faint); flex-shrink: 0; }
-.preview-list li span { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.preview-list li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .preview-list li.is-empty { color: var(--s-text-faint); font-style: italic; }
 
 .change-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }

@@ -960,8 +960,15 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 .cell-icon { font-size: 11px; color: var(--s-text-faint); flex-shrink: 0; }
 .cell-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .td-address { color: var(--s-text-muted); transition: color .22s; }
-.cell-address-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45; overflow-wrap: anywhere; }
-.cell-empty { color: var(--s-text-faint); font-size: 13px; }
+.cell-address-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}.cell-empty { color: var(--s-text-faint); font-size: 13px; }
 
 /* ── ROW ACTIONS (direct buttons, no menu) ── */
 .td-actions { text-align: right; }

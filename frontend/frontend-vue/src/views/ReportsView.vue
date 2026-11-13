@@ -2,7 +2,7 @@
   <Layout title="Reports">
     <div id="reports-print-area" class="reports">
 
-      <!-- ── PAGE HEADER: title only (export actions live in the sticky bar below) ── -->
+      <!-- ── PAGE HEADER: title (+ export actions on phones, where the sticky bar stays compact) ── -->
       <header class="page-header">
         <div class="page-heading">
           <h1 class="page-title">Reports</h1>
@@ -10,6 +10,23 @@
             <span>{{ periodLabel || 'Loading…' }}</span>
             <span v-if="isCurrentPeriod" class="chip chip--live">In progress</span>
           </p>
+          <p v-if="lastUpdated && !loading" class="page-updated">Updated {{ lastUpdated }}</p>
+        </div>
+
+        <!-- Phone-only export row (the desktop one lives in the sticky bar) -->
+        <div class="report-toolbar report-toolbar--header" role="group" aria-label="Export this report">
+          <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying' || loading">
+            <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
+            {{ copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Failed' : 'Copy' }}
+          </button>
+          <button type="button" class="rt-btn" @click="exportCSV" :disabled="loading">
+            <i class="fa-solid" :class="csvState === 'done' ? 'fa-check' : 'fa-file-csv'"></i>
+            {{ csvState === 'done' ? 'Saved' : 'CSV' }}
+          </button>
+          <button type="button" class="rt-btn rt-btn--primary" @click="printReport" :disabled="loading || printing">
+            <i class="fa-solid" :class="printing ? 'fa-spinner fa-spin' : 'fa-print'"></i>
+            {{ printing ? 'Preparing…' : 'Print' }}
+          </button>
         </div>
       </header>
 
@@ -57,8 +74,13 @@
               <i class="fa-solid fa-chevron-down picker-caret"></i>
             </button>
 
+            <!-- Phones: dim the page behind the bottom-sheet picker -->
+            <div v-if="pickerOpen" class="picker-backdrop" aria-hidden="true" @click="closePicker(true)"></div>
+
             <Transition name="pop">
               <div v-if="pickerOpen" class="picker-pop" role="dialog" :aria-label="`Choose ${modeNoun}`">
+                <span class="pk-grab" aria-hidden="true"></span>
+
                 <!-- Header: ‹ title › -->
                 <div class="pk-head">
                   <button type="button" class="pk-nav" :disabled="!pkCanPrev" :class="{ 'pk-nav--hide': pickerView === 'years' }" aria-label="Previous" @click="pkShift(-1)">
@@ -140,9 +162,11 @@
           </button>
         </div>
 
-        <button v-if="!isCurrentPeriod" type="button" class="link-btn" @click="goCurrent">{{ currentLabel }}</button>
+        <button v-if="!isCurrentPeriod" type="button" class="link-btn link-btn--current" @click="goCurrent">
+          <i class="fa-solid fa-rotate-left"></i>{{ currentLabel }}
+        </button>
 
-        <!-- Right side: status text + Copy / CSV / Print -->
+        <!-- Right side: status text + Copy / CSV / Print (hidden on phones; see header) -->
         <div class="period-end">
           <div class="period-status" aria-live="polite">
             <span v-if="loading" class="period-status-text period-status-text--busy">
@@ -232,7 +256,11 @@
           <header class="card-head">
             <div>
               <h2 id="rp-trend" class="card-title">{{ seriesWord }} sales and profit</h2>
-              <p class="card-sub">Hover for exact values and margin. Click a legend item to hide it.</p>
+              <p class="card-sub">
+                <span class="hint-pointer">Hover for exact values and margin.</span>
+                <span class="hint-touch">Tap the chart for exact values.</span>
+                Use the buttons to hide a line.
+              </p>
             </div>
             <div class="legend-row">
               <button
@@ -399,7 +427,7 @@
                     <template v-else>
                       <strong>{{ topMetric === 'qty' ? formatNumber(mixBase) : '₱' + compact(mixBase) }}</strong>
                       <span class="dc-name">{{ topMetric === 'qty' ? 'Units sold' : 'Total sales' }}</span>
-                      <span class="dc-sub">Hover or select a slice</span>
+                      <span class="dc-sub">Tap a slice or product</span>
                     </template>
                   </div>
                 </div>
@@ -778,6 +806,9 @@ function parseDisplayNumber(v) {
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
+// Phones / small tablets in portrait. Used by the chart so axis labels stay short.
+const isNarrowViewport = () => typeof window !== 'undefined' && window.innerWidth < 700
+
 const formatStamp = (d = new Date()) => d.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
 
 // 'YYYY-MM-DD' shifted by n days -> 'YYYY-MM-DD'
@@ -972,6 +1003,7 @@ function updateStickyTop() {
    CALENDAR PICKER  (custom popover: days → months → years)
    Day mode picks a day. Week mode shows the same day grid, and
    clicking any day selects the whole week (Sun – Sat) it belongs to.
+   On phones it opens as a bottom sheet (CSS only).
 ════════════════════════════════════════════════════════════ */
 const PK_WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTH_NAMES = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'long' }))
@@ -2167,6 +2199,8 @@ function exportCSV() {
 ════════════════════════════════════════════════════════════ */
 let chartInstance = null
 let themeObserver = null
+let chartWasNarrow = false
+let resizeTimer = 0
 const legendState = ref({})
 
 const isDark = () => document.documentElement.getAttribute('data-theme') === 'dark'
@@ -2227,7 +2261,8 @@ function toggleDataset(datasetIndex) {
 //   print: static, no tooltip, light palette, fixed size (rendered off-screen)
 function makeChartConfig(ctx, { print = false } = {}) {
   const c = chartColors(print)
-  const gh = print ? 300 : 280
+  const narrow = !print && isNarrowViewport()
+  const gh = print ? 300 : narrow ? 230 : 280
   const salesGradient = ctx.createLinearGradient(0, 0, 0, gh)
   salesGradient.addColorStop(0, 'rgba(234,88,12,0.24)')
   salesGradient.addColorStop(1, 'rgba(234,88,12,0)')
@@ -2238,7 +2273,8 @@ function makeChartConfig(ctx, { print = false } = {}) {
   const rows  = chartRows.value
   const total = num(salesTotal.value)
   // With only a handful of points, visible markers read better than a bare line.
-  const dotRadius = rows.length <= 24 ? 3 : 0
+  // Phones get fewer markers so the lines don't turn into beads.
+  const dotRadius = rows.length <= (narrow ? 12 : 24) ? 3 : 0
 
   const tooltip = print
     ? { enabled: false }
@@ -2277,13 +2313,25 @@ function makeChartConfig(ctx, { print = false } = {}) {
     scales: {
       x: {
         grid: { display: false },
-        ticks: { color: c.tick, font: { size: 11, family: 'Inter' }, maxRotation: 0, autoSkipPadding: 12 },
+        ticks: {
+          color: c.tick,
+          font: { size: narrow ? 10 : 11, family: 'Inter' },
+          maxRotation: 0,
+          autoSkipPadding: narrow ? 8 : 12,
+          maxTicksLimit: narrow ? 6 : undefined,
+        },
         border: { display: false },
       },
       y: {
         beginAtZero: true,
         grid: { color: c.grid },
-        ticks: { color: c.tick, font: { size: 11, family: 'Inter' }, callback: (v) => '₱' + Number(v).toLocaleString('en-US') },
+        ticks: {
+          color: c.tick,
+          font: { size: narrow ? 10 : 11, family: 'Inter' },
+          maxTicksLimit: narrow ? 5 : undefined,
+          // Short labels on phones ("₱12K") so the axis doesn't eat the chart width.
+          callback: (v) => '₱' + (narrow ? compact(v) : Number(v).toLocaleString('en-US')),
+        },
         border: { display: false },
       },
     },
@@ -2298,7 +2346,7 @@ function makeChartConfig(ctx, { print = false } = {}) {
     backgroundColor: gradient,
     borderWidth: 2.5, tension: 0.4, fill: true,
     pointRadius: dotRadius, pointBackgroundColor: color,
-    pointHoverRadius: 6, pointHitRadius: 14,
+    pointHoverRadius: 6, pointHitRadius: narrow ? 22 : 14,
     pointHoverBackgroundColor: color,
     pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2,
   })
@@ -2327,10 +2375,24 @@ function buildChart() {
     if (orphan) orphan.destroy()
     legendState.value = {}
 
+    chartWasNarrow = isNarrowViewport()
     chartInstance = new Chart(el, makeChartConfig(el.getContext('2d')))
   } catch (err) {
     console.error('Chart render failed:', err)
   }
+}
+
+/* ════════════════════════════════════════════════════════════
+   VIEWPORT CHANGES  (rotate phone, resize window, fold / unfold)
+   Chart.js resizes the canvas itself; we only rebuild it when the layout
+   crosses the phone breakpoint so tick labels switch between long and short.
+════════════════════════════════════════════════════════════ */
+function onViewportResize() {
+  updateStickyTop()
+  clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(() => {
+    if (isNarrowViewport() !== chartWasNarrow && chartRows.value.length) buildChart()
+  }, 180)
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2389,7 +2451,8 @@ async function printReport() {
 onMounted(async () => {
   document.addEventListener('pointerdown', onDocPointer)
   document.addEventListener('keydown', onDocKey)
-  window.addEventListener('resize', updateStickyTop)
+  window.addEventListener('resize', onViewportResize)
+  window.addEventListener('orientationchange', onViewportResize)
   await nextTick()
   updateStickyTop()
   await loadReports()
@@ -2401,9 +2464,11 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   requestSeq++
   cancelAnimationFrame(animFrame)
+  clearTimeout(resizeTimer)
   document.removeEventListener('pointerdown', onDocPointer)
   document.removeEventListener('keydown', onDocKey)
-  window.removeEventListener('resize', updateStickyTop)
+  window.removeEventListener('resize', onViewportResize)
+  window.removeEventListener('orientationchange', onViewportResize)
   if (themeObserver) themeObserver.disconnect()
   if (chartInstance) chartInstance.destroy()
 })
@@ -2411,6 +2476,13 @@ onBeforeUnmount(() => {
 
 <!-- ══════════════════════════════════════════════════════
      SCOPED styles — component layout only.
+
+     Breakpoints used below:
+       ≥1101px  desktop (full layout, bleeds into the shell padding)
+       ≤1100px  tablet landscape (summary → 2 cols, inventory under the mix)
+       ≤860px   tablet portrait (heatmap detail goes under the heatmap)
+       ≤700px   phone (compact sticky bar, bottom-sheet picker, stacked cards)
+       ≤480px   small phone (hero stacks, heat strip becomes a list)
 ══════════════════════════════════════════════════════ -->
 <style scoped>
 .reports {
@@ -2459,11 +2531,16 @@ onBeforeUnmount(() => {
   --rp-gap: 16px;
 
   min-height: 100%;
+  max-width: 100%;
   background: var(--rp-bg);
   padding: 16px 24px 40px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--rp-gap);
   transition: background-color 0.22s ease;
+  /* `clip` (not `hidden`) so nothing can cause sideways scroll on phones
+     WITHOUT breaking the sticky period bar. */
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
 }
 
 html[data-theme="dark"] .reports {
@@ -2483,19 +2560,25 @@ html[data-theme="dark"] .reports {
 .reports a:focus-visible,
 .reports input:focus-visible { outline: 2px solid var(--rp-accent); outline-offset: 2px; }
 
+/* Snappier taps on touch screens (no 300ms delay / double-tap zoom on controls) */
+.reports button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
 /* Print sheet — hidden on screen */
 .print-sheet { display: none; }
 
 /* ── PAGE HEADER ── */
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.page-heading { min-width: 0; }
 .page-title  { font-size: 26px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.03em; margin: 0; }
-.page-sub    { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--rp-text-secondary); }
-.chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 20px; }
+.page-sub    { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--rp-text-secondary); }
+.page-updated { display: none; margin: 4px 0 0; font-size: 11.5px; font-weight: 600; color: var(--rp-text-muted); }
+.chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 20px; white-space: nowrap; }
 .chip--live { color: var(--rp-green); background: var(--rp-green-soft); }
 .chip--accent { color: var(--rp-accent); background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border); font-size: 10.5px; padding: 2px 10px; }
 
-/* ── EXPORT BUTTONS (inside the period bar) ── */
+/* ── EXPORT BUTTONS ── */
 .report-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.report-toolbar--header { display: none; } /* phones only */
 .rt-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   height: 36px;
@@ -2548,7 +2631,7 @@ html[data-theme="dark"] .reports {
 .seg--sm .seg-btn { padding: 5px 12px; font-size: 12px; }
 
 .icon-btn {
-  width: 36px; height: 36px; border-radius: 10px; cursor: pointer;
+  width: 36px; height: 36px; border-radius: 10px; cursor: pointer; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--rp-border-strong);
   background: var(--rp-surface-sunken);
@@ -2561,6 +2644,8 @@ html[data-theme="dark"] .reports {
 
 /* ── CALENDAR PICKER ── */
 .picker { position: relative; }
+.picker-backdrop { display: none; }
+.pk-grab { display: none; }
 .picker-trigger {
   display: inline-flex; align-items: center; gap: 10px;
   height: 36px; min-width: 200px; padding: 0 12px 0 13px;
@@ -2572,7 +2657,7 @@ html[data-theme="dark"] .reports {
   cursor: pointer;
   transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
 }
-.picker-trigger > span { flex: 1; text-align: left; white-space: nowrap; }
+.picker-trigger > span { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .picker-ico { font-size: 13px; color: var(--rp-accent); }
 .picker-caret { font-size: 10px; color: var(--rp-text-muted); transition: transform .22s var(--rp-ease); }
 .picker-trigger:hover { border-color: var(--rp-accent-border); background: var(--rp-surface-raised); }
@@ -2665,6 +2750,7 @@ html[data-theme="dark"] .reports {
 }
 .link-btn:hover { background: var(--rp-accent-soft); }
 .link-btn--block { display: block; width: 100%; margin-top: 12px; text-align: center; }
+.link-btn--current i { margin-right: 6px; font-size: 11px; }
 
 /* ── NOTICE ── */
 .notice {
@@ -2677,10 +2763,10 @@ html[data-theme="dark"] .reports {
 .notice span { flex: 1; min-width: 200px; }
 
 /* ── BODY ── */
-.report-body { display: flex; flex-direction: column; gap: var(--rp-gap); transition: opacity .15s ease; }
+.report-body { display: flex; flex-direction: column; gap: var(--rp-gap); transition: opacity .15s ease; min-width: 0; }
 .report-body.is-loading { opacity: .55; pointer-events: none; }
 
-.section { display: flex; flex-direction: column; gap: 12px; }
+.section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .section-title { font-size: 17px; font-weight: 700; color: var(--rp-text-primary); margin: 0; letter-spacing: -.01em; }
 
 /* ── SUMMARY ──
@@ -2763,8 +2849,16 @@ html[data-theme="dark"] .reports {
   min-width: 0;
 }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.card-head > div:first-child { min-width: 0; flex: 1 1 220px; }
 .card-title { font-size: 16px; font-weight: 700; color: var(--rp-text-primary); margin: 0; letter-spacing: -.01em; }
 .card-sub   { margin: 4px 0 0; font-size: 12.5px; color: var(--rp-text-muted); line-height: 1.45; }
+
+/* Show the right interaction hint for the device */
+.hint-touch { display: none; }
+@media (hover: none) {
+  .hint-pointer { display: none; }
+  .hint-touch { display: inline; }
+}
 
 /* ── TREND CHART ── */
 .legend-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -2838,14 +2932,14 @@ html[data-theme="dark"] .reports {
 .heat-day-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 28px; }
 .heat-day-title { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--rp-text-primary); }
 .heat-day-head .link-btn { margin-left: auto; font-size: 12.5px; }
-.heat-day-value { margin: 8px 0 14px; font-size: 30px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.heat-day-value { margin: 8px 0 14px; font-size: 30px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.035em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .heat-muted { margin: 0; font-size: 12.5px; color: var(--rp-text-muted); }
 
 .split-bar { display: flex; gap: 3px; height: 10px; border-radius: 10px; overflow: hidden; }
 .split-seg { display: block; height: 100%; cursor: help; transition: width 1s var(--rp-ease); }
 .split-seg--profit { background: linear-gradient(90deg, #059669, var(--rp-green)); border-radius: 10px 3px 3px 10px; }
 .split-seg--cost { background: linear-gradient(90deg, var(--rp-accent), #FB923C); border-radius: 3px 10px 10px 3px; }
-.split-legend { display: flex; gap: 16px; margin-top: 9px; font-size: 11.5px; color: var(--rp-text-muted); }
+.split-legend { display: flex; gap: 16px; margin-top: 9px; font-size: 11.5px; color: var(--rp-text-muted); flex-wrap: wrap; }
 .split-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sl { width: 8px; height: 8px; border-radius: 50%; display: block; }
 .sl--profit { background: var(--rp-green); }
@@ -2855,7 +2949,7 @@ html[data-theme="dark"] .reports {
 .facts > div { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--rp-border); }
 .facts > div:last-child { border-bottom: none; padding-bottom: 0; }
 .facts dt { font-size: 12.5px; color: var(--rp-text-muted); }
-.facts dd { margin: 0; font-size: 13px; font-weight: 700; color: var(--rp-text-primary); font-variant-numeric: tabular-nums; }
+.facts dd { margin: 0; font-size: 13px; font-weight: 700; color: var(--rp-text-primary); font-variant-numeric: tabular-nums; text-align: right; }
 .facts dd.pos { color: var(--rp-green); }
 .facts dd.neg { color: var(--rp-red); }
 
@@ -2869,7 +2963,7 @@ html[data-theme="dark"] .reports {
 .mix-insight { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border); font-size: 12.5px; line-height: 1.55; color: var(--rp-text-secondary); }
 .mix-insight i { margin-top: 2px; font-size: 12px; color: var(--rp-accent); }
 .mix-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
-@container (max-width: 520px) { .mix-body { grid-template-columns: minmax(0, 1fr); } .donut { margin: 0 auto; } }
+@container (max-width: 520px) { .mix-body { grid-template-columns: minmax(0, 1fr); } .donut { margin: 0 auto; position: relative; top: auto; } }
 
 .donut { position: sticky; top: 16px; width: 200px; max-width: 100%; aspect-ratio: 1; }
 .donut svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 6px 14px rgba(16,24,40,.12)); }
@@ -2884,7 +2978,7 @@ html[data-theme="dark"] .reports {
 .dc-sub { font-size: 11px; color: var(--rp-text-muted); line-height: 1.3; }
 
 .mix-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.mix-list--all { max-height: 460px; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; }
+.mix-list--all { max-height: 460px; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .mix-list li { border: 1px solid transparent; border-radius: 12px; transition: background-color .2s ease, border-color .2s ease; }
 .mix-list li.mix-item--sel { background: var(--rp-accent-soft); border-color: var(--rp-accent-border); }
 .mix-row { display: flex; flex-direction: column; gap: 9px; width: 100%; padding: 11px 13px; border: none; border-radius: 12px; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; transition: background-color .2s ease; }
@@ -2894,7 +2988,7 @@ html[data-theme="dark"] .reports {
 .mix-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px var(--rp-surface); }
 .mix-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--rp-text-primary); overflow-wrap: anywhere; }
 .mix-amt { font-size: 12.5px; color: var(--rp-text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.mix-pct { width: 48px; text-align: right; font-size: 12.5px; font-weight: 700; color: var(--rp-text-secondary); font-variant-numeric: tabular-nums; }
+.mix-pct { width: 48px; text-align: right; font-size: 12.5px; font-weight: 700; color: var(--rp-text-secondary); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .mix-bar { display: block; height: 6px; border-radius: 6px; background: var(--rp-surface-sunken); overflow: hidden; }
 .mix-bar-fill { display: block; height: 100%; width: 0; border-radius: 6px; transition: width 1s var(--rp-ease); }
 .mix-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; margin: 0; padding: 2px 13px 13px 33px; }
@@ -2945,55 +3039,201 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
 .coverage-track { height: 6px; border-radius: 6px; background: var(--rp-surface-sunken); overflow: hidden; }
 .coverage-fill { height: 100%; border-radius: 6px; background: var(--rp-green); transition: width .6s ease; }
 
-/* ── RESPONSIVE ── */
+/* ══════════════════════════════════════════════════════════
+   RESPONSIVE
+══════════════════════════════════════════════════════════ */
+
 /* Desktop only: pull the page outward into the shell's padding (top, left, right) */
 @media (min-width: 1001px) {
   .reports { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
 }
+
+/* ── Tablet landscape ── */
 @media (max-width: 1100px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat--hero { grid-column: 1 / -1; grid-row: auto; }
   .content-grid { grid-template-columns: minmax(0, 1fr); }
-  .heat-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  /* Inventory is a short list: lay it out in two columns when it sits under the mix card */
+  .inv-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+  .inv-row:nth-last-child(2):nth-child(odd) { border-bottom: none; }
+  .heat-layout { gap: 22px; }
 }
+
+/* ── Tablet portrait ── */
 @media (max-width: 900px) {
   .reports { padding: 12px 14px 32px; --rp-gap: 14px; }
+  .period-bar { gap: 10px; }
+  .period-end { margin-left: 0; width: 100%; justify-content: space-between; }
+  .picker-trigger { min-width: 180px; }
 }
+@media (max-width: 860px) {
+  .heat-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  /* Stacked, the calendar would otherwise get huge cells */
+  .heat--month .heat-cell { aspect-ratio: auto; min-height: 52px; }
+  .heat--day .heat-cell { min-height: 100px; }
+  .heat--year .heat-cell { min-height: 76px; }
+}
+
+/* ── Phone ──
+   Goals: a slim sticky bar (period only), big touch targets (≥ 40px),
+   export actions in the page header, and single-column cards. */
 @media (max-width: 700px) {
-  .reports { padding: 16px 16px 40px; }
-  .page-header { flex-direction: column; align-items: stretch; }
+  .reports {
+    padding: 14px 14px calc(32px + env(safe-area-inset-bottom, 0px));
+    --rp-gap: 14px;
+  }
 
-  /* Sticky bar stays compact on phones: the "Updated" text is hidden and the
-     three export buttons share one row. */
-  .period-bar { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px; }
+  /* Header: title on the left, export row full width underneath */
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-title { font-size: 23px; }
+  .page-updated { display: block; }
+  .report-toolbar--header { display: flex; width: 100%; }
+  .report-toolbar--header .rt-btn { flex: 1; height: 42px; padding: 0 8px; font-size: 13px; }
+
+  /* Sticky bar: group-by + navigation only (≈ 100px tall) */
+  .period-bar {
+    flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px;
+    border-radius: 14px; box-shadow: 0 0 0 6px var(--rp-bg), var(--rp-shadow);
+  }
   .seg { width: 100%; }
-  .seg-btn { flex: 1; text-align: center; }
-  .period-nav { width: 100%; }
+  .seg-btn { flex: 1; text-align: center; padding: 9px 6px; font-size: 13px; }
+  .period-nav { width: 100%; gap: 8px; }
+  .icon-btn { width: 42px; height: 42px; border-radius: 11px; font-size: 13px; }
   .picker { flex: 1; min-width: 0; }
-  .picker-trigger { width: 100%; min-width: 0; }
-  .picker-pop { width: auto; right: 0; }
-  .period-end { margin-left: 0; width: 100%; }
-  .period-status { display: none; }
-  .report-toolbar { width: 100%; }
-  .rt-btn { flex: 1; padding: 0 8px; }
+  .picker-trigger { width: 100%; min-width: 0; height: 42px; font-size: 14px; }
+  .link-btn--current {
+    align-self: stretch; text-align: center; padding: 9px 10px; font-size: 13px;
+    background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border);
+  }
+  .period-end { display: none; }
 
-  .stat--hero { padding: 18px 16px; }
+  /* Calendar picker becomes a bottom sheet with a dimmed backdrop */
+  .picker-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 50;
+    background: rgba(8, 10, 16, .5);
+  }
+  .picker-pop {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60;
+    width: auto; max-width: none; max-height: 88vh; overflow-y: auto;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    border-radius: 22px 22px 0 0; border-bottom: none;
+    box-shadow: 0 -18px 50px -12px rgba(0,0,0,.45);
+    transform-origin: bottom center;
+  }
+  .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(32px); }
+  .pk-grab { display: block; width: 38px; height: 4px; margin: 0 auto 12px; border-radius: 4px; background: var(--rp-border-strong); }
+  .pk-nav { width: 40px; height: 40px; font-size: 12px; }
+  .pk-title { height: 40px; font-size: 15px; }
+  .pk-days { gap: 4px; }
+  .pk-day { font-size: 14px; }
+  .pk-cell { height: 52px; font-size: 14.5px; }
+  .pk-link { padding: 10px 12px; font-size: 13.5px; }
+
+  /* Summary: hero on top, KPI cards 2 × 2 with the icon above the text */
+  .stat--hero { padding: 18px 16px; gap: 16px; }
   .hero-cols { gap: 14px; }
   .hero-col--profit { padding-left: 14px; }
-  /* KPI cards: icon above the text so the numbers get the full width */
-  .stat:not(.stat--hero) { flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px; }
+  .stat:not(.stat--hero) { flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px; }
   .stat:not(.stat--hero) .stat-body { width: 100%; flex: none; }
+  
+  /* Names (best seller / peak) may wrap to two lines instead of being cut off */
+
+ .stat-body .stat-value--text {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  font-size: 15px;
+}
+
+.stat-sub {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+}
+
+  /* Cards */
   .card { padding: 18px 16px 16px; }
+  .card-head { margin-bottom: 14px; }
+  .card-head > div:first-child { flex-basis: 100%; }
+  .card-head .seg, .card-head .legend-row { width: 100%; }
+  .card-head .seg .seg-btn { padding: 8px 6px; }
+  .legend-chip { flex: 1; justify-content: center; padding: 8px 12px; font-size: 12.5px; }
+
+  /* Chart */
   .chart-area { height: 240px; }
+
+  /* Heatmap */
   .heat { gap: 5px; }
+  .heat-cell { border-radius: 9px; }
   .heat--day .heat-cell { min-height: 92px; }
   .hc-num { font-size: 18px; }
   .hc-amt { font-size: 10px; }
-  .heat--year { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .heat--year { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .heat-day { padding: 16px; }
-  .mix-amt { display: none; }
-  .donut { position: static; }
+  .heat-day-value { font-size: 26px; }
+  .heat-day-head .link-btn { padding: 8px 10px; }
+
+  /* Mix + inventory */
+  .mix-row { padding: 12px 10px; }
+  .mix-detail { padding-left: 10px; padding-right: 10px; }
+  .mix-list--all { max-height: 380px; }
+  .donut { position: relative; top: auto; margin: 0 auto; }
+  .inv-list { display: flex; }
+  .inv-row:nth-last-child(2):nth-child(odd) { border-bottom: 1px solid var(--rp-border); }
+  .inv-row:last-child { border-bottom: none; }
+  .inv-link { padding: 14px 6px; }
 }
+
+/* ── Small phone (≤ 480px) ── */
+@media (max-width: 480px) {
+  .reports { padding-left: 12px; padding-right: 12px; }
+
+  /* Sales and profit stack so each number gets the full card width */
+  .hero-cols { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .hero-col--profit { padding-left: 0; border-left: none; padding-top: 14px; border-top: 1px solid var(--rp-accent-border); }
+  .hero-col .stat-value--xl { font-size: clamp(24px, 11cqw, 34px); }
+
+  /* Week strip → easy-to-tap list: day on the left, amount on the right */
+  .heat--day { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .heat--day .heat-cell {
+    flex-direction: row; justify-content: flex-start; gap: 12px;
+    min-height: 52px; padding: 8px 14px;
+  }
+  .heat--day .hc-dow { width: 36px; text-align: left; font-size: 12px; }
+  .heat--day .hc-num { font-size: 18px; min-width: 26px; }
+  .heat--day .hc-amt { margin-left: auto; font-size: 13px; }
+  .heat--year .heat-cell { min-height: 70px; }
+  .mix-amt { font-size: 11.5px; }
+}
+
+/* ── Very narrow phones (≤ 380px) ── */
+@media (max-width: 380px) {
+  .mix-amt { display: none; }
+  .summary-grid { gap: 10px; }
+  .stat:not(.stat--hero) { padding: 12px; }
+  .seg-btn { font-size: 12.5px; }
+  .picker-trigger { font-size: 13px; }
+  .heat-day-value { font-size: 23px; }
+}
+
+/* ── Landscape phones: keep the sticky bar short so content still fits ── */
+@media (max-height: 480px) and (orientation: landscape) and (max-width: 1000px) {
+  .period-bar { flex-direction: row; flex-wrap: nowrap; align-items: center; }
+  .seg { width: auto; flex-shrink: 0; }
+  .period-nav { flex: 1; min-width: 0; width: auto; }
+  .link-btn--current { display: none; }
+  .picker-pop { max-height: 92vh; }
+  .chart-area { height: 200px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reports * { transition: none !important; }
 }

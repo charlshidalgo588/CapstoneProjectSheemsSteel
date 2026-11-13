@@ -623,7 +623,7 @@
             <!-- Card header -->
             <div class="lw-card-head">
               <div class="lw-card-brand">
-                <img src="@/assets/cutout_logo.png" alt="" class="lw-card-logo-img" aria-hidden="true" />
+                <img src="@/assets/sheems_logo.png" alt="" class="lw-card-logo-img" aria-hidden="true" />
                 <div>
                   <div class="lw-card-title" id="lw-login-title">Shem Steel</div>
                   <div class="lw-card-title-sub">Management Portal</div>
@@ -2251,7 +2251,7 @@ html[data-theme="dark"] .lw-visit-icon { background: linear-gradient(145deg, rgb
   transition: background-color 0.22s ease, border-color 0.22s ease;
 }
 .lw-card-brand { display: flex; align-items: center; gap: 10px; }
-.lw-card-logo-img { width: 38px; height: 38px; object-fit: contain; flex-shrink: 0; }
+.lw-card-logo-img { width: 38px; height: 38px; object-fit: contain; flex-shrink: 0; border: solid white 1px; border-radius: 100px;}
 .lw-card-title { font-size: 14px; font-weight: 700; color: var(--lw-text-primary); letter-spacing: -0.01em; line-height: 1.25; }
 .lw-card-title-sub { font-size: 10.5px; color: var(--lw-text-faint); margin-top: 2px; }
 .lw-card-divider { display: flex; align-items: center; padding: 0 22px; margin-top: 18px; }

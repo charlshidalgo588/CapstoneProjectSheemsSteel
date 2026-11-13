@@ -35,7 +35,7 @@
 
       <!-- ══════════════ SCREEN HEADER ══════════════
            .page-top uses display: contents, so its children sit directly inside
-           .inv-logs. -->
+           .inv-logs. On phones the export buttons live here (the sticky bar stays slim). -->
       <div class="page-top">
         <header class="page-header">
           <div class="page-heading">
@@ -44,21 +44,39 @@
               <span>{{ filterLabel || 'Loading…' }}</span>
               <span v-if="isCurrentPeriod" class="chip chip--live">In progress</span>
             </p>
+            <p v-if="lastUpdated && !isFiltering" class="page-updated">Updated {{ lastUpdated }}</p>
+          </div>
+
+          <!-- Phone-only export row (the desktop one lives in the period bar) -->
+          <div class="report-toolbar report-toolbar--header" role="group" aria-label="Export this report">
+            <button type="button" class="rt-btn" @click="copyReport" :disabled="copyState === 'copying' || isFiltering">
+              <i class="fa-solid" :class="copyState === 'copied' ? 'fa-check' : copyState === 'error' ? 'fa-triangle-exclamation' : 'fa-copy'"></i>
+              {{ copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Failed' : 'Copy' }}
+            </button>
+            <button type="button" class="rt-btn" @click="exportCSV" :disabled="isFiltering">
+              <i class="fa-solid" :class="csvState === 'done' ? 'fa-check' : 'fa-file-csv'"></i>
+              {{ csvState === 'done' ? 'Saved' : 'CSV' }}
+            </button>
+            <button type="button" class="rt-btn rt-btn--primary" @click="printReport" :disabled="isFiltering || printing">
+              <i class="fa-solid" :class="printing ? 'fa-spinner fa-spin' : 'fa-print'"></i>
+              {{ printing ? 'Preparing…' : 'Print' }}
+            </button>
           </div>
         </header>
       </div>
 
       <!-- ══════════════ STICKY STACK ══════════════
-           Period bar (group by / navigate / export) AND the summary cards
-           stay together at the top while scrolling. Sticky only works while the
-           parent (.inv-logs) is tall, so this sits directly inside it. -->
-      <div class="sticky-stack" ref="stickyStack" :style="{ top: stickyTop + 'px' }">
+           Desktop: period bar AND summary cards stay together at the top while scrolling.
+           Tablet / phone: the stack dissolves (display: contents) and only the slim
+           period bar stays pinned; the cards scroll away with the page.
+           Sticky only works while the parent (.inv-logs) is tall, so this sits directly inside it. -->
+      <div class="sticky-stack" ref="stickyStack" :style="{ top: stickyTop + 'px', '--stack-top': stickyTop + 'px' }">
 
         <!-- Print-only heading for the summary tiles -->
         <h2 class="section-title print-only print-sec-title">Inventory Activity Summary</h2>
 
         <!-- PERIOD BAR -->
-        <div class="period-bar" role="group" aria-label="Report period">
+        <div class="period-bar" ref="periodBar" role="group" aria-label="Report period">
           <div class="seg" role="group" aria-label="Group logs by">
             <button
               v-for="m in MODES"
@@ -101,8 +119,13 @@
                 <i class="fa-solid fa-chevron-down picker-caret"></i>
               </button>
 
+              <!-- Phones: dim the page behind the bottom-sheet picker -->
+              <div v-if="pickerOpen" class="picker-backdrop" aria-hidden="true" @click="closePicker(true)"></div>
+
               <Transition name="pop">
                 <div v-if="pickerOpen" class="picker-pop" role="dialog" :aria-label="`Choose ${periodNoun}`">
+                  <span class="pk-grab" aria-hidden="true"></span>
+
                   <div class="pk-head">
                     <button type="button" class="pk-nav" :class="{ 'pk-nav--hide': pickerView === 'years' }" :disabled="!pkCanPrev" aria-label="Previous" @click="pkShift(-1)">
                       <i class="fa-solid fa-chevron-left"></i>
@@ -183,9 +206,11 @@
             </button>
           </div>
 
-          <button v-if="!isCurrentPeriod" type="button" class="link-btn" :disabled="isFiltering" @click="goCurrent">{{ currentLabel }}</button>
+          <button v-if="!isCurrentPeriod" type="button" class="link-btn link-btn--current" :disabled="isFiltering" @click="goCurrent">
+            <i class="fa-solid fa-rotate-left"></i>{{ currentLabel }}
+          </button>
 
-          <!-- Right side: status text + Copy / CSV / Print -->
+          <!-- Right side: status text + Copy / CSV / Print (hidden on phones; see header) -->
           <div class="period-end">
             <div class="period-status" aria-live="polite">
               <span v-if="isFiltering" class="period-status-text period-status-text--busy">
@@ -482,9 +507,10 @@
         </div>
       </div>
 
-      <!-- Breakdown modal (product total + one line per size) -->
+      <!-- Breakdown modal (product total + one line per size). A bottom sheet on phones. -->
       <div v-if="breakdown.open" class="il-modal-backdrop" @click.self="closeBreakdown">
         <div class="il-modal" role="dialog" aria-modal="true" :aria-label="breakdownTitle">
+          <span class="il-modal-grab" aria-hidden="true"></span>
           <div class="il-modal-head">
             <div>
               <p class="card-eyebrow">{{ filterLabel }}</p>
@@ -734,7 +760,8 @@ function syncPickers(from) {
 
 /* ── calendar popover (days → months → years) ──
    Day mode picks a day. Week mode shows the same day grid, and clicking
-   any day selects the whole week (Sun – Sat) it belongs to. */
+   any day selects the whole week (Sun – Sat) it belongs to.
+   On phones it opens as a bottom sheet (CSS only). */
 const PK_WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTH_NAMES = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'long' }))
 const MONTH_SHORT = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'short' }))
@@ -938,10 +965,13 @@ async function goCurrent() {
    element stops *inside* that padding, which leaves a strip of page content
    visible above the stack. We measure that padding and offset the stack by the
    same amount (a negative `top`) so it sits flush against the top edge.
-   We also publish the stack's height as --sticky-h so that "jump to section"
-   scrolling stops just below the stack instead of hiding under it. */
+   The same offset is published as --stack-top for the tablet / phone layout,
+   where the stack dissolves (display: contents) and only the period bar sticks.
+   We also publish the pinned height as --sticky-h so that "jump to section"
+   scrolling stops just below it instead of hiding under it. */
 const rootEl      = ref(null)
 const stickyStack = ref(null)
+const periodBar   = ref(null)
 const stickyTop   = ref(0)
 let stackObserver = null
 
@@ -963,11 +993,19 @@ function updateStickyTop() {
 }
 
 function updateStickyHeight() {
-  const el = stickyStack.value
+  const stack = stickyStack.value
   const root = rootEl.value
-  if (!el || !root) return
-  const isSticky = getComputedStyle(el).position === 'sticky'
-  root.style.setProperty('--sticky-h', isSticky ? `${el.offsetHeight}px` : '0px')
+  if (!stack || !root) return
+  const cs = getComputedStyle(stack)
+  let h = 0
+  if (cs.display === 'contents') {
+    // Tablet / phone: only the period bar is pinned.
+    const bar = periodBar.value
+    if (bar && getComputedStyle(bar).position === 'sticky') h = bar.offsetHeight
+  } else if (cs.position === 'sticky') {
+    h = stack.offsetHeight
+  }
+  root.style.setProperty('--sticky-h', `${h}px`)
 }
 
 function onResize() {
@@ -1720,9 +1758,13 @@ function restoreAfterPrint() {
 
    Page sizes: Recent Activity and Top Adjusted show at most 10
    rows per page. Full History shows at most 15.
+
+   searchPlaceholder: on phones the "Search:" label is hidden by CSS
+   and the placeholder tells people what the box is for.
 ──────────────────────────────────────────────────────────── */
 const SMALL_MENU = [[5, 10], [5, 10]]
 const LOGS_MENU  = [[10, 15], [10, 15]]
+const DT_LANGUAGE = { searchPlaceholder: 'Search…' }
 
 function initRecentTable() {
   dtRecent = $('#recentActivityTable').DataTable({
@@ -1731,6 +1773,7 @@ function initRecentTable() {
     pageLength: PAGE_SMALL,
     lengthMenu: SMALL_MENU,
     autoWidth: false,
+    language: DT_LANGUAGE,
   })
 }
 
@@ -1741,6 +1784,7 @@ function initTopTable() {
     pageLength: PAGE_SMALL,
     lengthMenu: SMALL_MENU,
     autoWidth: false,
+    language: DT_LANGUAGE,
   })
 
   dtTop.on('length.dt', async (e, settings, len) => {
@@ -1764,6 +1808,7 @@ function initLogsTable() {
     lengthMenu: LOGS_MENU,
     order: [],
     autoWidth: false,
+    language: DT_LANGUAGE,
   })
 }
 
@@ -1815,12 +1860,14 @@ onMounted(async () => {
   window.addEventListener('afterprint', restoreAfterPrint)
   document.addEventListener('pointerdown', onDocPointer)
   window.addEventListener('resize', onResize)
+  window.addEventListener('orientationchange', onResize)
   await nextTick()
   updateStickyTop()
   updateStickyHeight()
-  if (window.ResizeObserver && stickyStack.value) {
+  if (window.ResizeObserver) {
     stackObserver = new ResizeObserver(updateStickyHeight)
-    stackObserver.observe(stickyStack.value)
+    if (stickyStack.value) stackObserver.observe(stickyStack.value)
+    if (periodBar.value) stackObserver.observe(periodBar.value)
   }
   const { from, to } = computeRange()
   await loadInventoryLogs({ dateFromVal: from, dateToVal: to })
@@ -1836,6 +1883,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('afterprint', restoreAfterPrint)
   document.removeEventListener('pointerdown', onDocPointer)
   window.removeEventListener('resize', onResize)
+  window.removeEventListener('orientationchange', onResize)
   if (stackObserver) { stackObserver.disconnect(); stackObserver = null }
   clearTimeout(flashTimer)
   destroyAllTables()
@@ -1843,7 +1891,16 @@ onBeforeUnmount(() => {
 })
 </script>
 
-<!-- ─── SCOPED: page layout & component styles ──────────── -->
+<!-- ─── SCOPED: page layout & component styles ────────────
+     Breakpoints used below:
+       ≥1101px  desktop (period bar + summary cards pinned together)
+       ≤1100px  summary cards scroll sideways in one short row
+       ≤900px   tablet / phone: only the slim period bar is pinned,
+                tables turn into labelled cards
+       ≤700px   phone: export row moves to the header, picker + breakdown
+                become bottom sheets, summary cards go 2 × 3
+       ≤480px   small phone: tighter cards, one-column table cards
+──────────────────────────────────────────────────────────── -->
 <style scoped>
 @import url('https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css');
 
@@ -1880,8 +1937,8 @@ onBeforeUnmount(() => {
   --radius: 16px;
   --il-ease: cubic-bezier(.16, 1, .3, 1);
 
-  /* Height of the sticky stack (set from script). "Jump to section" uses it
-     so the target stops just below the stack. */
+  /* Height of the pinned bar / stack (set from script). "Jump to section" uses it
+     so the target stops just below it. */
   --sticky-h: 0px;
 
   /* ── SPACE TUNING (same values as Home and Reports) ────────
@@ -1894,6 +1951,7 @@ onBeforeUnmount(() => {
   --il-gap: 16px;
 
   min-height: 100%;
+  max-width: 100%;
   background: var(--il-bg);
   padding: 16px 24px 40px;
   font-family: 'Inter', system-ui, sans-serif;
@@ -1901,6 +1959,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--il-gap);
   transition: background-color 0.22s ease;
+  /* `clip` (not `hidden`) so nothing can cause sideways scroll on phones
+     WITHOUT breaking the sticky bar. */
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
 }
 
 html[data-theme="dark"] .inv-logs {
@@ -1916,6 +1978,9 @@ html[data-theme="dark"] .inv-logs {
 .inv-logs button:focus-visible,
 .inv-logs a:focus-visible { outline: 2px solid var(--il-accent); outline-offset: 2px; }
 
+/* Snappier taps on touch screens (no 300ms delay / double-tap zoom on controls) */
+.inv-logs button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
 /* ── TOP BLOCK ──
    display: contents removes this wrapper from the layout, so the header
    becomes a direct child of .inv-logs. */
@@ -1923,9 +1988,11 @@ html[data-theme="dark"] .inv-logs {
 
 /* ── PAGE HEADER ── */
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.page-heading { min-width: 0; }
 .page-title  { font-size: 26px; font-weight: 800; color: var(--il-text-primary); letter-spacing: -.03em; margin: 0; }
-.page-sub    { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--il-text-secondary); }
-.chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 20px; }
+.page-sub    { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--il-text-secondary); }
+.page-updated { display: none; margin: 4px 0 0; font-size: 11.5px; font-weight: 600; color: var(--il-text-muted); }
+.chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 20px; white-space: nowrap; }
 .chip--live { color: var(--il-green); background: var(--il-green-soft); }
 
 /* ── STICKY STACK: period bar + summary cards stay together ──
@@ -1939,11 +2006,12 @@ html[data-theme="dark"] .inv-logs {
   transition: background-color 0.22s ease, box-shadow 0.22s ease;
 }
 
-/* Jump-to-section targets stop just below the sticky stack */
+/* Jump-to-section targets stop just below the pinned bar */
 .sec-anchor { scroll-margin-top: calc(var(--sticky-h, 0px) + 16px); }
 
-/* ── EXPORT BUTTONS (inside the period bar) ── */
+/* ── EXPORT BUTTONS ── */
 .report-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.report-toolbar--header { display: none; } /* phones only */
 .rt-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   height: 36px;
@@ -1992,7 +2060,7 @@ html[data-theme="dark"] .inv-logs {
 .seg-btn--active { background: var(--il-accent); color: #fff; }
 
 .icon-btn {
-  width: 36px; height: 36px; border-radius: 10px; cursor: pointer;
+  width: 36px; height: 36px; border-radius: 10px; cursor: pointer; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--il-border-strong);
   background: var(--il-surface-sunken);
@@ -2010,6 +2078,7 @@ html[data-theme="dark"] .inv-logs {
 }
 .link-btn:hover:not(:disabled) { background: var(--il-accent-soft); }
 .link-btn:disabled { opacity: .5; cursor: default; }
+.link-btn--current i { margin-right: 6px; font-size: 11px; }
 
 /* ── NOTICE ── */
 .notice {
@@ -2023,6 +2092,8 @@ html[data-theme="dark"] .inv-logs {
 
 /* ── CALENDAR PICKER ── */
 .picker { position: relative; }
+.picker-backdrop { display: none; }
+.pk-grab { display: none; }
 .picker-trigger {
   display: inline-flex; align-items: center; gap: 10px;
   height: 36px; min-width: 200px; padding: 0 12px 0 13px;
@@ -2034,7 +2105,7 @@ html[data-theme="dark"] .inv-logs {
   cursor: pointer;
   transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
 }
-.picker-trigger > span { flex: 1; text-align: left; white-space: nowrap; }
+.picker-trigger > span { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .picker-ico { font-size: 13px; color: var(--il-accent); }
 .picker-caret { font-size: 10px; color: var(--il-text-muted); transition: transform .22s var(--il-ease); }
 .picker-trigger:hover { border-color: var(--il-accent-border); background: var(--il-surface-raised); }
@@ -2119,7 +2190,7 @@ html[data-theme="dark"] .inv-logs {
 .pk-link--muted:hover:not(:disabled) { background: var(--il-surface-raised); color: var(--il-text-primary); }
 
 /* ── SECTION ── */
-.section        { display: flex; flex-direction: column; gap: 12px; }
+.section        { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .section-title  {
   font-size: 17px; font-weight: 700; color: var(--il-text-primary);
   margin: 0; letter-spacing: -.01em; transition: color 0.22s ease;
@@ -2132,7 +2203,8 @@ html[data-theme="dark"] .inv-logs {
 /* ── KPI STRIP (compact, clickable) ──
    All six cards sit on ONE row, each with the icon beside the text so the
    cards stay short. minmax(0, 1fr) lets every column shrink evenly. When the
-   screen gets narrow the row scrolls sideways instead of growing taller. */
+   screen gets narrow the row scrolls sideways instead of growing taller;
+   on phones it becomes a 2 × 3 grid so nothing is hidden. */
 .kpi-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
 
 .kpi-card {
@@ -2230,13 +2302,14 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
   box-shadow: var(--il-shadow-lg);
   padding: 22px 24px 18px;
 }
+.il-modal-grab { display: none; }
 .il-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .il-modal-title { margin: 0; font-size: 17px; font-weight: 700; color: var(--il-text-primary); letter-spacing: -.01em; }
 .il-modal-close {
   border: 1px solid var(--il-border-strong);
   background: var(--il-surface-sunken);
   color: var(--il-text-secondary);
-  width: 32px; height: 32px; border-radius: 9px; cursor: pointer;
+  width: 32px; height: 32px; border-radius: 9px; cursor: pointer; flex-shrink: 0;
 }
 .il-modal-close:hover { color: var(--il-text-primary); border-color: var(--il-accent-border); }
 
@@ -2245,7 +2318,7 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
 .il-unit-chip--in  { background: var(--il-green-icon); color: var(--il-green); }
 .il-unit-chip--out { background: var(--il-red-icon);   color: var(--il-red); }
 
-.il-modal-body { overflow-y: auto; min-height: 0; }
+.il-modal-body { overflow-y: auto; min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .il-break-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .il-break-table th {
   text-align: left; padding: 8px 12px;
@@ -2268,7 +2341,7 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
   border-bottom: 1px solid var(--il-border);
 }
 .il-var-name {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
   font-weight: 600; color: var(--il-text-secondary);
 }
 .il-var-dot {
@@ -2311,7 +2384,7 @@ html[data-theme="dark"] .kpi-card--alert { background: rgba(244,63,94,0.10); bor
 /* ── TABLE ──
    Tables use a fixed layout with percentage column widths and wrapping
    text, so every column is visible without sideways scrolling. */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 .data-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
 .data-table--fixed { table-layout: fixed; }
@@ -2436,39 +2509,63 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 /* Print-only blocks are hidden on screen */
 .print-only { display: none; }
 
-/* ── RESPONSIVE (same breakpoints as Home and Reports) ──
-   Desktop only: pull the page outward into the shell's padding (top, left, right).
+/* ══════════════════════════════════════════════════════════
+   RESPONSIVE
+   Screen-only breakpoints (kept off the print media so the report
+   never collapses into mobile cards on paper).
+══════════════════════════════════════════════════════════ */
+
+/* Desktop only: pull the page outward into the shell's padding (top, left, right).
    Screen only, so the printed report is never shifted. */
 @media screen and (min-width: 1001px) {
   .inv-logs { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
 }
 
-/* Screen-only breakpoints (kept off the print media so the report never collapses into mobile cards).
-   Below 1100px the six cards no longer fit evenly, so they scroll sideways in one short row
-   (the sticky stack never gets taller). */
+/* Below 1100px the six cards no longer fit evenly, so they scroll sideways in one short row
+   (the pinned area never gets taller). Cards snap into place as you swipe. */
 @media screen and (max-width: 1100px) {
-  .kpi-strip { display: flex; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
-  .kpi-card { flex: 0 0 172px; }
+  .kpi-strip {
+    display: flex; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin;
+    scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+  }
+  .kpi-card { flex: 0 0 172px; scroll-snap-align: start; }
+}
+
+/* ── Tablet / phone, and landscape phones ──
+   The sticky stack dissolves (display: contents): only the slim period bar is
+   pinned, and the summary cards scroll away with the page. */
+@media screen and (max-width: 900px), screen and (max-height: 520px) and (orientation: landscape) {
+  .sticky-stack { display: contents; }
+  .period-bar {
+    position: sticky; top: var(--stack-top, 0px); z-index: 30;
+    box-shadow: 0 0 0 6px var(--il-bg), var(--il-shadow);
+  }
 }
 
 @media screen and (max-width: 900px) {
   .inv-logs { padding: 12px 14px 32px; --il-gap: 14px; }
-}
+  .period-bar { gap: 10px; }
+  .period-end { margin-left: 0; width: 100%; justify-content: space-between; }
+  .picker-trigger { min-width: 180px; }
 
-/* ── NARROW SCREENS: each table row becomes a labelled card ── */
-@media screen and (max-width: 900px) {
+  /* ── Each table row becomes a labelled card ──
+     Product (and Quantity / Notes / Service) take the full width; the short
+     fields (Type, Date, Category, Fee…) sit two per line. */
   .data-table--stack,
   .data-table--stack tbody,
-  .data-table--stack tfoot,
-  .data-table--stack tr,
-  .data-table--stack td { display: block; width: 100%; }
+  .data-table--stack tfoot { display: block; width: 100%; }
   .data-table--stack { table-layout: auto; }
   .data-table--stack thead { display: none; }
+
   .data-table--stack tbody tr {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 8px;
+    width: 100%;
     border: 1px solid var(--il-border); border-radius: 12px;
     padding: 6px 4px; margin-bottom: 12px;
+    background: var(--il-surface);
   }
   .data-table--stack tbody td {
+    display: block; width: auto; min-width: 0;
     border-bottom: none; padding: 8px 12px;
   }
   .data-table--stack tbody td[data-label]::before {
@@ -2477,32 +2574,143 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
     font-size: 10.5px; font-weight: 700; letter-spacing: .07em;
     text-transform: uppercase; color: var(--il-text-faint);
   }
+  .data-table--stack tbody td[data-label="Product"],
+  .data-table--stack tbody td[data-label="Quantity"],
+  .data-table--stack tbody td[data-label="Notes"],
+  .data-table--stack tbody td[data-label="Service"],
+  .data-table--stack tbody td[colspan] { grid-column: 1 / -1; }
+  /* The product is the card's title: no tiny label, a divider underneath */
+  .data-table--stack tbody td[data-label="Product"]::before,
+  .data-table--stack tbody td[data-label="Service"]::before { display: none; }
+  .data-table--stack tbody td[data-label="Product"],
+  .data-table--stack tbody td[data-label="Service"] {
+    padding-bottom: 10px; margin-bottom: 4px; border-bottom: 1px solid var(--il-border);
+  }
+  /* Empty notes would only leave a blank label behind */
+  .data-table--stack tbody td.cell-notes:empty { display: none; }
   .data-table--stack tbody tr:hover td { background: transparent; }
-  .data-table--stack tfoot tr { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 12px; }
-  .data-table--stack tfoot td { width: auto; padding: 0; }
+
+  .data-table--stack tfoot tr { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 12px; width: 100%; }
+  .data-table--stack tfoot td { display: block; width: auto; padding: 0; }
+  .data-table--stack tfoot td:empty { display: none; }
 }
 
-@media screen and (max-width: 700px)  {
-  .inv-logs  { padding: 16px 16px 40px; }
-  .card { padding: 18px 16px 16px; }
-  .page-header { flex-direction: column; align-items: stretch; }
+/* ── Phone ──
+   Goals: a slim pinned bar (period only), big touch targets (≥ 40px),
+   export actions in the page header, bottom sheets instead of popovers. */
+@media screen and (max-width: 700px) {
+  .inv-logs {
+    padding: 14px 14px calc(32px + env(safe-area-inset-bottom, 0px));
+    --il-gap: 14px;
+  }
 
-  /* On phones the period bar alone is already tall, so the stack scrolls
-     with the page instead of covering the screen. */
-  .sticky-stack { position: static; box-shadow: none; }
-  .sec-anchor { scroll-margin-top: 16px; }
+  /* Header: title on top, export row full width underneath */
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-title { font-size: 23px; }
+  .page-updated { display: block; }
+  .report-toolbar--header { display: flex; width: 100%; }
+  .report-toolbar--header .rt-btn { flex: 1; height: 42px; padding: 0 8px; }
 
-  .period-bar { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px; }
+  /* Pinned bar: group-by + navigation only (≈ 100px tall) */
+  .period-bar {
+    flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px;
+  }
   .seg { width: 100%; }
-  .seg-btn { flex: 1; text-align: center; }
-  .period-nav { width: 100%; }
+  .seg-btn { flex: 1; text-align: center; padding: 9px 6px; font-size: 13px; }
+  .period-nav { width: 100%; gap: 8px; }
+  .icon-btn { width: 42px; height: 42px; border-radius: 11px; font-size: 13px; }
   .picker { flex: 1; min-width: 0; }
-  .picker-trigger { width: 100%; min-width: 0; }
-  .picker-pop { width: auto; right: 0; }
-  .period-end { margin-left: 0; width: 100%; }
-  .period-status { display: none; }
-  .report-toolbar { width: 100%; }
-  .rt-btn { flex: 1; padding: 0 8px; }
+  .picker-trigger { width: 100%; min-width: 0; height: 42px; font-size: 14px; }
+  .link-btn--current {
+    align-self: stretch; text-align: center; padding: 9px 10px; font-size: 13px;
+    background: var(--il-accent-soft); border: 1px solid var(--il-accent-border);
+  }
+  .period-end { display: none; }
+
+  /* Calendar picker becomes a bottom sheet with a dimmed backdrop */
+  .picker-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 50;
+    background: rgba(8, 10, 16, .5);
+  }
+  .picker-pop {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60;
+    width: auto; max-width: none; max-height: 88vh; overflow-y: auto;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    border-radius: 22px 22px 0 0; border-bottom: none;
+    box-shadow: 0 -18px 50px -12px rgba(0,0,0,.45);
+    transform-origin: bottom center;
+  }
+  .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(32px); }
+  .pk-grab { display: block; width: 38px; height: 4px; margin: 0 auto 12px; border-radius: 4px; background: var(--il-border-strong); }
+  .pk-nav { width: 40px; height: 40px; font-size: 12px; }
+  .pk-title { height: 40px; font-size: 15px; }
+  .pk-days { gap: 4px; }
+  .pk-day { font-size: 14px; }
+  .pk-cell { height: 52px; font-size: 14.5px; }
+  .pk-link { padding: 10px 12px; font-size: 13.5px; }
+
+  /* Summary cards: a 2 × 3 grid (nothing hidden off-screen), icon above the text */
+  .kpi-strip {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+    overflow: visible; padding-bottom: 0;
+  }
+  .kpi-card { flex: none; padding: 12px 12px 14px; }
+  .kpi-card-inner { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .kpi-icon-wrap { width: 32px; height: 32px; font-size: 13px; }
+  .kpi-body { width: 100%; flex: none; }
+  .kpi-label { font-size: 10px; }
+  .kpi-value { font-size: 18px; }
+
+  /* Cards */
+  .card { padding: 18px 16px 16px; }
+  .card-header { margin-bottom: 14px; }
+  .card-sub { font-size: 12px; }
+
+  /* Filter chip row */
+  .filter-bar { margin: 0 0 12px; }
+  .filter-bar .link-btn { padding: 8px 10px; }
+
+  /* Extra Services pager: big, full-width buttons */
+  .svc-pager { flex-direction: column; align-items: stretch; gap: 10px; }
+  .svc-pager-info { text-align: center; }
+  .svc-pager-btns { justify-content: space-between; }
+  .svc-pg-btn { min-height: 40px; padding: 0 16px; font-size: 13px; }
+
+  /* Breakdown modal becomes a bottom sheet */
+  .il-modal-backdrop { align-items: flex-end; padding: 0; }
+  .il-modal {
+    width: 100%; max-height: 88vh;
+    border-radius: 22px 22px 0 0; border-bottom: none;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .il-modal-grab { display: block; width: 38px; height: 4px; margin: 0 auto 2px; border-radius: 4px; background: var(--il-border-strong); }
+  .il-modal-close { width: 38px; height: 38px; }
+  .il-break-table { font-size: 13px; }
+  .il-break-table th, .il-break-table td { padding: 9px 8px; }
+  .il-var-row td { padding-left: 16px; }
+}
+
+/* ── Small phone (≤ 480px) ── */
+@media screen and (max-width: 480px) {
+  .inv-logs { padding-left: 12px; padding-right: 12px; }
+  .kpi-value { font-size: 17px; }
+  .qty-details { padding: 6px 8px; }
+  .qty-row { gap: 8px; }
+}
+
+/* ── Very narrow phones (≤ 380px): one field per line inside the row cards ── */
+@media screen and (max-width: 380px) {
+  .data-table--stack tbody tr { grid-template-columns: minmax(0, 1fr); }
+  .kpi-strip { gap: 8px; }
+  .kpi-card { padding: 10px 10px 12px; }
+  .seg-btn { font-size: 12.5px; }
+  .picker-trigger { font-size: 13px; }
+}
+
+/* ── Landscape phones: keep the pinned bar short so content still fits ── */
+@media screen and (max-height: 520px) and (orientation: landscape) and (max-width: 1000px) {
+  .period-bar { padding: 6px 10px; }
+  .picker-pop { max-height: 92vh; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2857,7 +3065,40 @@ html[data-theme="dark"] .inv-logs .dataTables_paginate .paginate_button.current 
 /* Narrow screens: DataTables controls stack and the sort header row is hidden */
 @media screen and (max-width: 900px) {
   .inv-logs .inv-dt-toolbar--right { justify-content: space-between; }
-  .inv-logs .dataTables_paginate { justify-content: center; }
+  .inv-logs .dataTables_info { float: none !important; text-align: center; }
+  .inv-logs .dataTables_paginate { float: none !important; justify-content: center; }
+}
+
+/* Phones: one compact toolbar row (small "show" box + wide search box),
+   a centred "Showing …" line, and a short pager with big Previous / Next
+   buttons (the numbered buttons are hidden, only the current page stays). */
+@media screen and (max-width: 700px) {
+  .inv-logs .inv-dt-toolbar { flex-wrap: nowrap; gap: 8px; margin-bottom: 12px; }
+
+  /* "Show [10] entries" → just the box */
+  .inv-logs .dataTables_length { flex: 0 0 auto; }
+  .inv-logs .dataTables_length label { font-size: 0; gap: 0; }
+  .inv-logs .dataTables_length select { font-size: 13px !important; height: 40px; padding: 0 10px !important; }
+
+  /* "Search:" → full-width box with a placeholder */
+  .inv-logs .dataTables_filter { flex: 1; min-width: 0; }
+  .inv-logs .dataTables_filter label { width: 100%; font-size: 0; gap: 0; }
+  .inv-logs .dataTables_filter input {
+    flex: 1; width: 100% !important; min-width: 0; height: 40px;
+    font-size: 14px !important; padding: 0 12px !important;
+  }
+
+  .inv-logs .dataTables_info { padding-top: 6px !important; font-size: 12px !important; }
+  .inv-logs .dataTables_paginate { gap: 6px; padding-top: 10px !important; flex-wrap: nowrap; }
+  .inv-logs .dataTables_paginate span { display: flex; gap: 6px; }
+  .inv-logs .dataTables_paginate .paginate_button {
+    min-width: 40px; min-height: 40px; display: inline-flex !important;
+    align-items: center; justify-content: center; font-size: 13px !important;
+  }
+  .inv-logs .dataTables_paginate .paginate_button.previous,
+  .inv-logs .dataTables_paginate .paginate_button.next { padding: 0 16px !important; }
+  .inv-logs .dataTables_paginate span .paginate_button:not(.current),
+  .inv-logs .dataTables_paginate .ellipsis { display: none !important; }
 }
 
 /* ══════════════════════════════════════════════════════
