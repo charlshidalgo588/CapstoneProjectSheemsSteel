@@ -123,6 +123,9 @@
               <button type="button" class="lw-cta lw-cta--primary" @click="scrollToId('lw-catalog')">
                 <i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i> Browse products
               </button>
+              <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-cta lw-cta--ghost">
+                <i class="fa-solid fa-phone" aria-hidden="true"></i> Call to order
+              </a>
             </div>
           </div>
         </div>
@@ -140,6 +143,10 @@
             <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
             Butuan City, Agusan del Norte
           </span>
+          <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-strip-item lw-strip-link">
+            <i class="fa-solid fa-phone" aria-hidden="true"></i>
+            {{ SHOP_PHONE }}
+          </a>
           <span v-if="shopProducts.length" class="lw-strip-item">
             <i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i>
             {{ shopProducts.length }} products in stock list
@@ -306,7 +313,7 @@
               <i class="fa-solid fa-xmark" aria-hidden="true"></i> Clear
             </button>
           </div>
-          <p class="lw-shop-count">
+          <p class="lw-shop-count" aria-live="polite">
             {{ filteredProducts.length }} product{{ filteredProducts.length === 1 ? '' : 's' }} found
           </p>
         </div>
@@ -369,15 +376,17 @@
           <div class="lw-step">
             <span class="lw-step-num">1</span>
             <div>
-              <p class="lw-step-title">Browse &amp; note your items</p>
-              <p class="lw-step-text">Pick the materials, sizes and quantities you need from the list.</p>
+              <p class="lw-step-title">Browse &amp; check stock</p>
+              <p class="lw-step-text">See live prices and available sizes, then note the materials and quantities you need.</p>
             </div>
           </div>
           <div class="lw-step">
             <span class="lw-step-num">2</span>
             <div>
-              <p class="lw-step-title">Confirm price &amp; stock</p>
-              <p class="lw-step-text">Call or email us to confirm availability before you come.</p>
+              <p class="lw-step-title">Reserve or ask for a quote</p>
+              <p class="lw-step-text">
+                Need bulk, delivery or custom cuts? Call <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-inline-link">{{ SHOP_PHONE }}</a> to reserve your items.
+              </p>
             </div>
           </div>
           <div class="lw-step">
@@ -393,14 +402,19 @@
       <!-- VISIT US / MAP -->
       <section id="lw-visit" class="lw-visit">
         <div class="lw-visit-head">
-          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-          <div>
+          <span class="lw-visit-badge"><i class="fa-solid fa-store" aria-hidden="true"></i></span>
+          <div class="lw-visit-head-text">
             <h3 class="lw-visit-title">Visit Shem Steel Construction Company</h3>
             <p class="lw-visit-sub">We're here to support your projects with quality materials and reliable service.</p>
           </div>
+          <span v-if="openNow !== null" class="lw-visit-status" :class="openNow ? 'lw-visit-status--open' : 'lw-visit-status--closed'">
+            <span class="lw-open-dot" :class="openNow ? 'lw-open-dot--open' : 'lw-open-dot--closed'"></span>
+            {{ openNow ? 'Open now' : 'Closed now' }}
+          </span>
         </div>
 
         <div class="lw-visit-grid">
+          <!-- Map -->
           <div class="lw-visit-map">
             <iframe
               :src="mapEmbedSrc"
@@ -408,8 +422,19 @@
               referrerpolicy="no-referrer-when-downgrade"
               title="Shem Steel Construction Company location"
             ></iframe>
+            <div class="lw-map-chip">
+              <span class="lw-map-chip-pin"><i class="fa-solid fa-location-dot" aria-hidden="true"></i></span>
+              <span class="lw-map-chip-text">
+                <strong>Shem Steel</strong>
+                <small>Ochoa Ave, Butuan City</small>
+              </span>
+            </div>
+            <a :href="mapsUrl" target="_blank" rel="noopener" class="lw-map-open">
+              Open in Maps <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+            </a>
           </div>
 
+          <!-- Contact details -->
           <div class="lw-visit-info">
             <div class="lw-visit-row">
               <span class="lw-visit-icon"><i class="fa-solid fa-location-dot" aria-hidden="true"></i></span>
@@ -422,53 +447,82 @@
               <span class="lw-visit-icon"><i class="fa-solid fa-phone" aria-hidden="true"></i></span>
               <div>
                 <p class="lw-visit-label">Phone</p>
-                <p class="lw-visit-value">{{ SHOP_PHONE }}</p>
+                <p class="lw-visit-value"><a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-visit-link">{{ SHOP_PHONE }}</a></p>
               </div>
             </div>
             <div class="lw-visit-row">
               <span class="lw-visit-icon"><i class="fa-solid fa-envelope" aria-hidden="true"></i></span>
               <div>
                 <p class="lw-visit-label">Email</p>
-                <p class="lw-visit-value">support@sheems.example</p>
+                <p class="lw-visit-value"><a :href="`mailto:${SHOP_EMAIL}`" class="lw-visit-link">{{ SHOP_EMAIL }}</a></p>
               </div>
             </div>
             <div class="lw-visit-row">
               <span class="lw-visit-icon"><i class="fa-regular fa-clock" aria-hidden="true"></i></span>
               <div>
                 <p class="lw-visit-label">Business Hours</p>
-                <p class="lw-visit-value">Mon – Sat, 7:00 AM – 5:00 PM<br />Sunday: Closed</p>
+                <p class="lw-visit-value">Mon – Sat, 7:00 AM – 5:00 PM<br /><span class="lw-visit-closed">Sunday: Closed</span></p>
               </div>
             </div>
 
-            <a :href="directionsUrl" target="_blank" rel="noopener" class="lw-visit-directions">
-              <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
-              Get Directions
-            </a>
+            <div class="lw-visit-actions">
+              <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-visit-btn lw-visit-btn--ghost">
+                <i class="fa-solid fa-phone" aria-hidden="true"></i>
+                Call
+              </a>
+              <a :href="directionsUrl" target="_blank" rel="noopener" class="lw-visit-btn lw-visit-btn--primary">
+                <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
+                Get Directions
+              </a>
+            </div>
           </div>
 
-          <div class="lw-visit-photo">
-            <img
-              src="@/assets/store-front.png"
-              alt="Shem Steel Construction Supply storefront"
-              class="lw-visit-photo-img"
-            />
-            <div class="lw-visit-photo-brand">
-              <span class="lw-visit-photo-name">SHEM STEEL</span>
-              <span class="lw-visit-photo-sub">Construction Supply</span>
-            </div>
+          <!-- Why choose us -->
+          <div class="lw-trust">
+            <p class="lw-trust-head">Why choose Shem Steel</p>
+            <ul class="lw-trust-list">
+              <li class="lw-trust-item">
+                <span class="lw-trust-icon"><i class="fa-solid fa-award" aria-hidden="true"></i></span>
+                <div>
+                  <p class="lw-trust-title">Trusted since 2024</p>
+                  <p class="lw-trust-text">Serving contractors and homeowners in Butuan City.</p>
+                </div>
+              </li>
+              <li class="lw-trust-item">
+                <span class="lw-trust-icon"><i class="fa-solid fa-truck-fast" aria-hidden="true"></i></span>
+                <div>
+                  <p class="lw-trust-title">Delivery available</p>
+                  <p class="lw-trust-text">Ask us about delivery for bulk orders.</p>
+                </div>
+              </li>
+              <li class="lw-trust-item">
+                <span class="lw-trust-icon"><i class="fa-solid fa-ruler-combined" aria-hidden="true"></i></span>
+                <div>
+                  <p class="lw-trust-title">Custom cuts &amp; sizes</p>
+                  <p class="lw-trust-text">From standard stock to made-to-order pieces.</p>
+                </div>
+              </li>
+              <li class="lw-trust-item">
+                <span class="lw-trust-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
+                <div>
+                  <p class="lw-trust-title">Built for durability</p>
+                  <p class="lw-trust-text">Quality materials, checked before they leave the shop.</p>
+                </div>
+              </li>
+            </ul>
           </div>
         </div>
       </section>
 
       <!-- FOOTER (scrolls with the page so it never covers products on phones) -->
-    <footer class="lw-footer">
-      <span>© {{ year }} Shem Steel Construction Company. All rights reserved.</span>
-      <div class="lw-footer-right">
-        <span>support@sheems.example</span>
-        <span class="lw-sep" aria-hidden="true">·</span>
-        <span>{{ SHOP_PHONE }}</span>
-      </div>
-    </footer>
+      <footer class="lw-footer">
+        <span>© {{ year }} Shem Steel Construction Company. All rights reserved.</span>
+        <div class="lw-footer-right">
+          <a :href="`mailto:${SHOP_EMAIL}`">{{ SHOP_EMAIL }}</a>
+          <span class="lw-sep" aria-hidden="true">·</span>
+          <a :href="`tel:${SHOP_PHONE_TEL}`">{{ SHOP_PHONE }}</a>
+        </div>
+      </footer>
 
     </main>
 
@@ -675,11 +729,9 @@
                 </div>
 
                 <!--
-                  UX FIX: the "Forgot password?" button now comes AFTER the password
-                  input in the DOM (it is positioned visually in the top-right of the
-                  field with CSS). Previously it sat before the input, so pressing Tab
-                  from the email field landed on "Forgot password?" instead of the
-                  password field.
+                  UX FIX: the "Forgot password?" button comes AFTER the password
+                  input in the DOM (positioned visually top-right with CSS) so Tab
+                  from the email field lands on the password field first.
                 -->
                 <div class="lw-field lw-field--pass">
                   <label for="lw-pass" class="lw-lbl">Password</label>
@@ -698,7 +750,7 @@
                       @blur="validatePassword"
                       @input="fieldErrors.password = ''"
                     />
-                    <!-- UX FIX: tabindex="-1" so Tab goes straight past the eye icon. Still clickable. -->
+                    <!-- tabindex="-1" so Tab goes straight past the eye icon. Still clickable. -->
                     <button
                       type="button"
                       class="lw-eye"
@@ -754,9 +806,9 @@
             This system doesn't have a self-service reset yet. Reach out and they'll get you back in.
           </p>
           <div class="lw-modal-contact">
-            <a href="mailto:support@sheems.example" class="lw-modal-contact-row">
+            <a :href="`mailto:${SHOP_EMAIL}`" class="lw-modal-contact-row">
               <i class="fa-solid fa-envelope" aria-hidden="true"></i>
-              support@sheems.example
+              {{ SHOP_EMAIL }}
             </a>
             <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-modal-contact-row">
               <i class="fa-solid fa-phone" aria-hidden="true"></i>
@@ -845,7 +897,7 @@ function openLoginModal() {
   error.value = ''
   fieldErrors.value = { email: '', password: '' }
   showLoginModal.value = true
-  // UX FIX: focus the email field right away so the user can start typing.
+  // Focus the email field right away so the user can start typing.
   // Escape still works because the keydown bubbles up to the backdrop.
   nextTick(() => {
     if (emailInputEl.value) emailInputEl.value.focus()
@@ -855,12 +907,12 @@ function openLoginModal() {
 function closeLoginModal() {
   if (loading.value) return // don't let people dismiss mid-submit
   showLoginModal.value = false
-  // UX FIX: hand focus back to the Login button that opened the modal.
+  // Hand focus back to the Login button that opened the modal.
   nextTick(() => loginBtnEl.value?.focus())
 }
 
 /*
- * UX FIX: keep Tab / Shift+Tab inside the login card while it is open,
+ * Keep Tab / Shift+Tab inside the login card while it is open,
  * so focus never escapes to the page behind the modal.
  */
 function onLoginKeydown(e: KeyboardEvent) {
@@ -1023,6 +1075,7 @@ function applyLoginError(err: any) {
 /* ─── SHOP CONTACT / HOURS ───────────────────────────────── */
 const SHOP_PHONE     = '+63 912 345 6789'
 const SHOP_PHONE_TEL = '+639123456789'
+const SHOP_EMAIL     = 'support@sheems.example'
 
 // "Open now" is computed in the shop's own timezone (Philippines), not the
 // visitor's. Mon–Sat, 7:00 AM – 5:00 PM; Sunday closed.
@@ -1033,7 +1086,13 @@ function computeOpenNow() {
   const mins = manila.getHours() * 60 + manila.getMinutes()
   openNow.value = day !== 0 && mins >= 7 * 60 && mins < 17 * 60
 }
-onMounted(computeOpenNow)
+let openNowTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  computeOpenNow()
+  // keep the badge accurate if the page stays open across opening/closing time
+  openNowTimer = setInterval(computeOpenNow, 60_000)
+})
+onBeforeUnmount(() => { if (openNowTimer) clearInterval(openNowTimer) })
 
 /* ─── PUBLIC PRODUCT CATALOG ─────────────────────────────────
  * Loaded from the PUBLIC routes (/api/public/product-list and
@@ -1158,7 +1217,7 @@ const shopStockShort  = (p: ShopProduct) => {
   return st === 'oos' ? 'Out of Stock' : st === 'low' ? 'Low Stock' : 'In Stock'
 }
 
-// True when the product's sizes have different prices (shows "From ₱…").
+// True when the product's sizes have different prices (shows "Starts at ₱…").
 function hasPriceRange(p: ShopProduct) {
   return new Set(p.variants.map(v => v.price)).size > 1
 }
@@ -1390,6 +1449,7 @@ const SHOP_ADDRESS = '849 Ochoa Ave, Butuan City, Agusan del Norte'
 const SHOP_LAT = 8.9565024
 const SHOP_LNG = 125.5325086
 const mapEmbedSrc = `https://www.google.com/maps?q=SHEM+STEEL+CONSTRUCTION+SUPPLY@${SHOP_LAT},${SHOP_LNG}&output=embed`
+const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${SHOP_LAT},${SHOP_LNG}`
 const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${SHOP_LAT},${SHOP_LNG}`
 </script>
 
@@ -1712,6 +1772,7 @@ html[data-theme="dark"] .lw {
 }
 .lw-signin-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(240, 112, 32, 0.4); }
 .lw-signin-btn:active { transform: translateY(0); }
+.lw-signin-btn:focus-visible { outline: 3px solid rgba(240, 112, 32, 0.4); outline-offset: 2px; }
 .lw-signin-btn i { font-size: 11px; }
 
 /* ─── PAGE (scrollable body) ─────────────── */
@@ -2128,6 +2189,8 @@ html[data-theme="dark"] .lw-shop-nav:hover:not(:disabled) {
 }
 .lw-step-title { font-size: 13px; font-weight: 700; color: var(--lw-text-strong); margin-bottom: 3px; }
 .lw-step-text  { font-size: 12px; line-height: 1.55; color: var(--lw-text-secondary); }
+.lw-inline-link { color: var(--lw-accent); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.lw-inline-link:hover { text-decoration: underline; }
 
 /* ─── VISIT US ───────────────────────────── */
 .lw-visit {
@@ -2135,14 +2198,34 @@ html[data-theme="dark"] .lw-shop-nav:hover:not(:disabled) {
   margin: 0 auto;
   padding: 30px 32px 44px;
 }
-.lw-visit-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
-.lw-visit-head > i { font-size: 16px; color: var(--lw-accent); margin-top: 3px; }
+.lw-visit-head {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 16px;
+}
+.lw-visit-badge {
+  width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #F58330 0%, #F07020 50%, #D9640F 100%);
+  color: #fff; font-size: 15px;
+  box-shadow: 0 4px 12px rgba(240, 112, 32, 0.30);
+}
+.lw-visit-head-text { flex: 1; min-width: 0; }
 .lw-visit-title {
   font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
   font-size: 18px; font-weight: 700; color: var(--lw-text-primary);
-  letter-spacing: -0.01em; margin-bottom: 3px;
+  letter-spacing: -0.01em; margin-bottom: 2px;
 }
 .lw-visit-sub { font-size: 12px; color: var(--lw-text-secondary); }
+.lw-visit-status {
+  display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+  height: 30px; padding: 0 13px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 700; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.lw-visit-status--open   { color: #047857; background: rgba(16, 185, 129, 0.10); border-color: rgba(16, 185, 129, 0.30); }
+.lw-visit-status--closed { color: #BE123C; background: rgba(244, 63, 94, 0.09);  border-color: rgba(244, 63, 94, 0.28); }
+html[data-theme="dark"] .lw-visit-status--open   { color: #34D399; }
+html[data-theme="dark"] .lw-visit-status--closed { color: #FB7185; }
 
 .lw-visit-grid {
   display: grid;
@@ -2150,22 +2233,67 @@ html[data-theme="dark"] .lw-shop-nav:hover:not(:disabled) {
   gap: 18px;
   align-items: stretch;
 }
+
+/* Map */
 .lw-visit-map {
-  border-radius: 14px; overflow: hidden;
+  position: relative;
+  border-radius: 16px; overflow: hidden;
   border: 1px solid var(--lw-card-border);
   min-height: 260px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 22px rgba(15, 23, 42, 0.07);
+  background: var(--lw-input-bg);
 }
 .lw-visit-map iframe { width: 100%; height: 100%; border: 0; display: block; }
+.lw-map-chip {
+  position: absolute; top: 10px; left: 10px; z-index: 2;
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 12px 6px 6px; border-radius: 12px;
+  background: var(--lw-glass-bg);
+  border: 1px solid var(--lw-glass-border);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px var(--lw-glass-shadow);
+  pointer-events: none;
+}
+.lw-map-chip-pin {
+  width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--lw-accent); color: #fff; font-size: 11px;
+}
+.lw-map-chip-text { display: flex; flex-direction: column; line-height: 1.25; }
+.lw-map-chip-text strong { font-size: 12px; font-weight: 700; color: var(--lw-text-strong); }
+.lw-map-chip-text small  { font-size: 10px; color: var(--lw-text-secondary); }
+.lw-map-open {
+  position: absolute; bottom: 10px; left: 10px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 30px; padding: 0 12px; border-radius: 999px;
+  background: var(--lw-glass-bg); color: var(--lw-text-primary);
+  border: 1px solid var(--lw-glass-border);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px var(--lw-glass-shadow);
+  font-size: 11px; font-weight: 700; text-decoration: none;
+  transition: color 0.15s, transform 0.15s;
+}
+.lw-map-open i { font-size: 9px; color: var(--lw-accent); }
+.lw-map-open:hover { color: var(--lw-accent); transform: translateY(-1px); }
+.lw-map-open:focus-visible { outline: 2px solid rgba(240, 112, 32, 0.5); outline-offset: 2px; }
 
+/* Contact card */
 .lw-visit-info {
   background: var(--lw-card-bg);
   border: 1px solid var(--lw-card-border);
-  border-radius: 14px;
-  padding: 18px 18px 16px;
-  display: flex; flex-direction: column; gap: 14px;
+  border-radius: 16px;
+  padding: 16px 18px 16px;
+  display: flex; flex-direction: column; gap: 0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 22px rgba(15, 23, 42, 0.05);
   transition: background-color 0.22s ease, border-color 0.22s ease;
 }
-.lw-visit-row { display: flex; align-items: flex-start; gap: 11px; }
+.lw-visit-row {
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--lw-border-soft);
+}
+.lw-visit-row:first-child { padding-top: 0; }
+.lw-visit-row:nth-last-child(2) { border-bottom: 0; }   /* last row before the buttons */
 .lw-visit-icon {
   width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -2174,47 +2302,72 @@ html[data-theme="dark"] .lw-shop-nav:hover:not(:disabled) {
   color: var(--lw-accent); font-size: 12px;
 }
 html[data-theme="dark"] .lw-visit-icon { background: linear-gradient(145deg, rgba(240,112,32,0.20), rgba(240,112,32,0.10)); border-color: rgba(240,112,32,0.35); }
-.lw-visit-label { font-size: 9.5px; font-weight: 700; color: var(--lw-text-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
-.lw-visit-value { font-size: 12.5px; font-weight: 600; color: var(--lw-text-strong); line-height: 1.5; }
-.lw-visit-directions {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  margin-top: auto;
-  height: 40px; border-radius: 10px;
-  background: var(--lw-input-bg); border: 1.5px solid var(--lw-input-border);
-  color: var(--lw-text-primary); font-size: 12.5px; font-weight: 700; text-decoration: none;
-  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
-}
-.lw-visit-directions:hover { border-color: var(--lw-accent); color: var(--lw-accent); background: var(--lw-input-bg-focus); }
-.lw-visit-directions i { color: var(--lw-accent); }
+.lw-visit-label { font-size: 9.5px; font-weight: 700; color: var(--lw-text-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px; }
+.lw-visit-value { font-size: 12.5px; font-weight: 600; color: var(--lw-text-strong); line-height: 1.45; }
+.lw-visit-link { color: inherit; text-decoration: none; transition: color 0.15s; overflow-wrap: anywhere; }
+.lw-visit-link:hover { color: var(--lw-accent); text-decoration: underline; }
+.lw-visit-closed { color: var(--lw-text-faint); font-weight: 500; }
 
-.lw-visit-photo {
-  position: relative;
+.lw-visit-actions {
+  display: grid; grid-template-columns: auto 1fr; gap: 8px;
+  margin-top: auto; padding-top: 12px;
+}
+.lw-visit-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 40px; padding: 0 16px; border-radius: 10px;
+  font-size: 12.5px; font-weight: 700; text-decoration: none; white-space: nowrap;
+  transition: transform 0.13s, box-shadow 0.13s, border-color 0.15s, color 0.15s, background-color 0.15s;
+}
+.lw-visit-btn:focus-visible { outline: 3px solid rgba(240, 112, 32, 0.4); outline-offset: 2px; }
+.lw-visit-btn--ghost {
+  background: var(--lw-input-bg); border: 1.5px solid var(--lw-input-border); color: var(--lw-text-primary);
+}
+.lw-visit-btn--ghost i { color: var(--lw-accent); font-size: 11px; }
+.lw-visit-btn--ghost:hover { border-color: var(--lw-accent); color: var(--lw-accent); background: var(--lw-input-bg-focus); }
+.lw-visit-btn--primary {
+  border: none; color: #fff;
+  background: linear-gradient(135deg, #F58330 0%, #F07020 45%, #D9640F 100%);
+  box-shadow: 0 3px 10px rgba(240, 112, 32, 0.30);
+}
+.lw-visit-btn--primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(240, 112, 32, 0.40); }
+
+/* Why choose us */
+.lw-trust {
   height: 100%; min-height: 260px;
-  border-radius: 14px; overflow: hidden;
+  border-radius: 16px;
   border: 1px solid var(--lw-card-border);
-  background: #0F172A;
+  background: var(--lw-card-bg);
+  padding: 16px 18px 12px;
+  display: flex; flex-direction: column;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 22px rgba(15, 23, 42, 0.05);
+  transition: background-color 0.22s ease, border-color 0.22s ease;
 }
-.lw-visit-photo-img {
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  object-fit: cover; object-position: center;
-  display: block;
+.lw-trust-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; font-weight: 700; color: var(--lw-text-faint);
+  text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;
 }
-.lw-visit-photo-brand {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
-  padding: 16px 18px;
-  background: linear-gradient(0deg, rgba(10,8,6,0.90) 0%, rgba(10,8,6,0.45) 65%, transparent 100%);
-  display: flex; flex-direction: column; gap: 2px;
+.lw-trust-head::after { content: ''; flex: 1; height: 1px; background: var(--lw-border-soft); }
+.lw-trust-list { list-style: none; display: flex; flex-direction: column; flex: 1; justify-content: space-between; }
+.lw-trust-item {
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 9px 0; border-bottom: 1px solid var(--lw-border-soft);
 }
-.lw-visit-photo-name {
-  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
-  font-size: 18px; font-weight: 700; color: var(--lw-accent-light); letter-spacing: -0.01em;
+.lw-trust-item:last-child { border-bottom: 0; }
+.lw-trust-icon {
+  width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(145deg, #FFF3E8, #FDE6D0);
+  border: 1px solid #FAD8B4;
+  color: var(--lw-accent); font-size: 12px;
 }
-.lw-visit-photo-sub { font-size: 10.5px; font-weight: 600; color: #F1F5F9; text-transform: uppercase; letter-spacing: 0.1em; }
+html[data-theme="dark"] .lw-trust-icon { background: linear-gradient(145deg, rgba(240,112,32,0.20), rgba(240,112,32,0.10)); border-color: rgba(240,112,32,0.35); }
+.lw-trust-title { font-size: 12.5px; font-weight: 700; color: var(--lw-text-strong); line-height: 1.35; margin-bottom: 2px; }
+.lw-trust-text { font-size: 11px; line-height: 1.45; color: var(--lw-text-secondary); }
 
 @media (max-width: 980px) {
   .lw-visit-grid { grid-template-columns: 1fr 1fr; }
-  .lw-visit-photo { grid-column: 1 / -1; }
+  .lw-trust { grid-column: 1 / -1; min-height: 0; }
   .lw-steps { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
@@ -2275,7 +2428,7 @@ html[data-theme="dark"] .lw-visit-icon { background: linear-gradient(145deg, rgb
 .lw-lbl { font-size: 9px; font-weight: 700; color: var(--lw-text-label); text-transform: uppercase; letter-spacing: 0.12em; }
 
 /*
- * UX FIX: "Forgot password?" lives after the password input in the DOM (so Tab
+ * "Forgot password?" lives after the password input in the DOM (so Tab
  * goes email → password first), but is pinned visually to the top-right of the
  * password field so the layout looks exactly as before.
  */
@@ -2343,6 +2496,8 @@ html[data-theme="dark"] .lw-visit-icon { background: linear-gradient(145deg, rgb
   transition: background-color 0.22s ease, border-color 0.22s ease, color 0.22s ease;
 }
 .lw-footer-right { display: flex; align-items: center; gap: 8px; }
+.lw-footer a { color: inherit; text-decoration: none; transition: color 0.15s; }
+.lw-footer a:hover { color: var(--lw-accent); }
 .lw-sep { opacity: 0.35; }
 
 /* ─── MODALS ─────────────────────────────── */
@@ -2395,7 +2550,7 @@ html[data-theme="dark"] .lw-modal-icon { background: linear-gradient(145deg, rgb
 /* ─── PRODUCT DETAIL MODAL (wide, two panels) ───────────────
  * NOTE: this block must come AFTER the generic `.lw-modal` rule and uses the
  * doubled selector `.lw-modal.lw-product-modal` so its width can never be
- * overridden by the 360px `.lw-modal` default (that was the original bug).
+ * overridden by the 360px `.lw-modal` default.
  * ────────────────────────────────────────────────────────── */
 .lw-modal.lw-product-modal {
   position: relative;
@@ -2631,6 +2786,7 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
   border: 1.5px solid var(--lw-input-border); color: var(--lw-text-primary);
   background: var(--lw-glass-bg); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
 }
+.lw-cta--ghost i { color: var(--lw-accent); }
 .lw-cta--ghost:hover { border-color: var(--lw-accent); color: var(--lw-accent); }
 .lw-cta:focus-visible { outline: 3px solid rgba(240, 112, 32, 0.4); outline-offset: 2px; }
 
@@ -2820,11 +2976,11 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
   .lw-eyebrow { margin-bottom: 8px; font-size: 9px; letter-spacing: 0.12em; }
   .lw-h1 { font-size: clamp(24px, 7vw, 30px); line-height: 1.1; margin-bottom: 8px; }
   .lw-tagline { font-size: 12.5px; line-height: 1.55; max-width: 100%; }
-  .lw-hero-actions { margin-top: 12px; }
-  .lw-cta { width: 100%; justify-content: center; height: 42px; }
+  .lw-hero-actions { margin-top: 12px; gap: 8px; }
+  .lw-cta { flex: 1 1 0; justify-content: center; height: 42px; padding: 0 12px; white-space: nowrap; }
   .lw-hero-roof-img { object-position: 65% 45%; }
 
-  /* Info strip wraps into a tidy 2-line block */
+  /* Info strip wraps into a tidy block */
   .lw-strip-inner { flex-wrap: wrap; gap: 4px 16px; padding: 8px 16px; font-size: 11.5px; overflow: visible; }
   .lw-strip-item { white-space: normal; }
 
@@ -2883,9 +3039,12 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
 
   /* Visit */
   .lw-visit { padding-top: 20px; padding-bottom: 20px; }
+  .lw-visit-head { flex-wrap: wrap; row-gap: 8px; }
+  .lw-visit-status { order: 3; margin-left: 50px; height: 26px; font-size: 11px; }
+  .lw-visit-title { font-size: 16px; }
   .lw-visit-map { min-height: 220px; }
-  .lw-visit-photo { min-height: 200px; }
-  .lw-visit-directions { height: 44px; }
+  .lw-trust { min-height: 0; }
+  .lw-visit-btn { height: 44px; }
 
   /* Footer (scrolls with content) */
   .lw-footer { flex-direction: column; justify-content: center; text-align: center; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
@@ -2943,6 +3102,7 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
   .lw-signin-btn { padding: 0 12px; }
   .lw-shop-grid--groups .lw-shop-card:not(.lw-skel) .lw-shop-card-img { flex-basis: 80px; width: 80px; min-height: 80px; }
   .lw-shop-grid--groups .lw-shop-card:not(.lw-skel) { min-height: 80px; }
+  .lw-visit-status { margin-left: 0; }
 }
 
 /* ─── 8. LARGE SCREENS (≥ 1440px) ────────── */
@@ -2957,7 +3117,7 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
   .lw-h1 { font-size: 24px; margin-bottom: 6px; }
   .lw-tagline { display: none; }
   .lw-hero-actions { margin-top: 8px; }
-  .lw-cta { width: auto; height: 38px; }
+  .lw-cta { width: auto; flex: 0 0 auto; height: 38px; }
   .lw-modal.lw-product-modal { max-height: calc(100dvh - 12px); }
 }
 

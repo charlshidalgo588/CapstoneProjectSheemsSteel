@@ -10,11 +10,12 @@ use App\Services\StockService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\SalesItem;
 
 class HomeController extends Controller
 {
     /** Item profit = (price at sale - cost at sale) * quantity. */
-    private const PROFIT_SQL = 'SUM((sales_items.PriceAtSale - COALESCE(sales_items.CostAtSale, 0)) * sales_items.Quantity)';
+    private const PROFIT_SQL = SalesItem::PROFIT_SQL;
 
     /**
      * Shop sales = what the customer paid MINUS the worker's pass-through share

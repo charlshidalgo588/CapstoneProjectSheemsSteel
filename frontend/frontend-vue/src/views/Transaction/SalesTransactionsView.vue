@@ -5,7 +5,6 @@
       <!-- ── PAGE HEADER ── -->
       <div class="page-header">
         <div>
-          <p class="page-eyebrow">Sales</p>
           <h1 class="page-title">Sales Receipts</h1>
         </div>
         <div class="header-actions">
@@ -20,7 +19,9 @@
       </div>
 
       <!-- ═════════ STICKY BLOCK: summary cards + search + period ═════════
-           Stays pinned to the very top while the table scrolls. -->
+           Desktop: the whole block stays pinned to the very top.
+           Tablet / phone: the block dissolves (display: contents) and only the
+           slim search + period toolbar stays pinned; the cards scroll away. -->
       <div class="sticky-controls" :class="{ 'is-stuck': isStuck }" ref="stickyRef">
 
         <!-- Summary cards -->
@@ -123,6 +124,35 @@
       <!-- ── TABLE CARD ── -->
       <div class="table-card">
 
+        <!-- Phone-only tools: select all + sort (the table header is hidden on phones) -->
+        <div v-if="!loading && !loadError && pagedSales.length" class="mobile-tools">
+          <label class="mobile-selectall">
+            <span class="checkbox-wrap" :class="{ 'checkbox-wrap--partial': somePageSelected }">
+              <input
+                type="checkbox"
+                :checked="allPageSelected"
+                aria-label="Select all receipts on this page"
+                @change="toggleSelectAll"
+              />
+              <span class="checkbox-box">
+                <i class="fa-solid" :class="somePageSelected ? 'fa-minus' : 'fa-check'"></i>
+              </span>
+            </span>
+            <span>Select all</span>
+          </label>
+          <label class="mobile-sort">
+            <span>Sort</span>
+            <select v-model="sortChoice" aria-label="Sort receipts">
+              <option value="date-desc">Newest first</option>
+              <option value="date-asc">Oldest first</option>
+              <option value="amount-desc">Amount: high to low</option>
+              <option value="amount-asc">Amount: low to high</option>
+              <option value="customer-asc">Customer: A to Z</option>
+              <option value="customer-desc">Customer: Z to A</option>
+            </select>
+          </label>
+        </div>
+
         <!-- Loading -->
         <div v-if="loading" class="state-block" aria-busy="true">
           <div class="skel-row" v-for="n in 6" :key="n"></div>
@@ -135,7 +165,7 @@
           <button class="btn btn--ghost" @click="loadSales">Try again</button>
         </div>
 
-        <!-- Table -->
+        <!-- Table (turns into receipt cards on phones) -->
         <div v-else class="table-wrap">
           <table class="data-table">
             <thead>
@@ -173,7 +203,7 @@
                 :class="{ 'row--selected': selectedSales.includes(sale.SaleID), 'row-highlight': highlightedSaleId === sale.SaleID }"
                 @click="onRowClick($event, sale)"
               >
-                <td class="th-checkbox">
+                <td class="th-checkbox td-chk" data-label="Select">
                   <label class="checkbox-wrap">
                     <input
                       type="checkbox"
@@ -184,26 +214,26 @@
                     <span class="checkbox-box"><i class="fa-solid fa-check"></i></span>
                   </label>
                 </td>
-                <td class="cell-muted">{{ sale.formatted_date }}</td>
-                <td>
+                <td class="cell-muted td-date" data-label="Date">{{ sale.formatted_date }}</td>
+                <td class="td-rec" data-label="Receipt">
                   <RouterLink :to="`/sales/${sale.SaleID}`" class="receipt-link">
                     <template v-for="(s, i) in segments(receiptNo(sale))" :key="i"><mark v-if="s.m">{{ s.t }}</mark><template v-else>{{ s.t }}</template></template>
                   </RouterLink>
                 </td>
-                <td class="cell-secondary">
+                <td class="cell-secondary td-cust" data-label="Customer">
                   <template v-for="(s, i) in segments(sale.CustomerName)" :key="i"><mark v-if="s.m">{{ s.t }}</mark><template v-else>{{ s.t }}</template></template>
                 </td>
-                <td class="cell-amount">₱{{ formatAmount(sale.TotalAmount) }}</td>
-                <td class="cell-muted">{{ sale.PaymentMethod }}</td>
-                <td>
+                <td class="cell-amount td-amt" data-label="Amount">₱{{ formatAmount(sale.TotalAmount) }}</td>
+                <td class="cell-muted td-pay" data-label="Payment">{{ sale.PaymentMethod }}</td>
+                <td class="td-stat" data-label="Status">
                   <span class="status-pill" :class="sale.Status === 'Paid' ? 'status-pill--paid' : 'status-pill--void'">
                     {{ sale.Status }}
                   </span>
                 </td>
-                <td class="cell-muted">
+                <td class="cell-muted td-clerk" data-label="Clerk">
                   <template v-for="(s, i) in segments(sale.ClerkName)" :key="i"><mark v-if="s.m">{{ s.t }}</mark><template v-else>{{ s.t }}</template></template>
                 </td>
-                <td class="th-go"><i class="fa-solid fa-chevron-right row-go" aria-hidden="true"></i></td>
+                <td class="th-go td-go"><i class="fa-solid fa-chevron-right row-go" aria-hidden="true"></i></td>
               </tr>
 
               <tr v-if="filteredSales.length === 0">
@@ -249,6 +279,18 @@
           </div>
         </div>
       </div>
+
+      <!-- BACK TO TOP (phones and tablets only) -->
+      <button
+        type="button"
+        class="back-top"
+        :class="{ 'back-top--on': showTop }"
+        :inert="showTop ? null : ''"
+        aria-label="Back to top"
+        @click="scrollToTop"
+      >
+        <i class="fa-solid fa-arrow-up"></i>
+      </button>
 
     </div>
 
@@ -392,9 +434,9 @@ const formatAmount = v =>
 const receiptNo = s => `SR-${String(s.SaleID).padStart(5, '0')}`
 
 /* ────────────────────────────────────────────────────────────
-   STICKY BLOCK
-   The summary cards + search + period pin to the VERY top of the
-   scrolling area (same technique as the Product List page).
+   STICKY BLOCK + BACK TO TOP
+   Desktop: the summary cards + search + period pin to the VERY top of
+   the scrolling area. Tablet / phone: only the toolbar pins (CSS).
    The app shell's scroll area has its own top padding; a sticky element
    would stop that far below the top edge, leaving a strip where rows
    show through. We find the scrolling parent and pull --sticky-top up by
@@ -403,6 +445,7 @@ const receiptNo = s => `SR-${String(s.SaleID).padStart(5, '0')}`
 const pageRef   = ref(null)
 const stickyRef = ref(null)
 const isStuck   = ref(false)
+const showTop   = ref(false)
 
 let scrollEl      = null   // the shell's scrolling element (null = the window scrolls)
 let stickyTop     = 0
@@ -427,7 +470,9 @@ function applyStickyTop(px) {
 
 function syncSticky() {
   const sticky = stickyRef.value
-  if (!sticky || getComputedStyle(sticky).position !== 'sticky') { isStuck.value = false; return }
+  const cs = sticky ? getComputedStyle(sticky) : null
+  // On tablet / phone the block dissolves (display: contents), so there is nothing to measure.
+  if (!sticky || cs.display === 'contents' || cs.position !== 'sticky') { isStuck.value = false; return }
 
   const gap      = sticky.getBoundingClientRect().top - viewportTop()
   const scrolled = scrollOffset()
@@ -444,7 +489,20 @@ function syncSticky() {
 function onScrollSticky() {
   if (scrollTicking) return
   scrollTicking = true
-  requestAnimationFrame(() => { scrollTicking = false; syncSticky() })
+  requestAnimationFrame(() => {
+    scrollTicking = false
+    syncSticky()
+    showTop.value = scrollOffset() > 400
+  })
+}
+
+function scrollToTop(e) {
+  // Let go of focus first: the button hides itself once the page is back at the top.
+  e?.currentTarget?.blur?.()
+  const smooth = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const opts = { top: 0, behavior: smooth ? 'smooth' : 'auto' }
+  if (scrollEl) scrollEl.scrollTo(opts)
+  else window.scrollTo(opts)
 }
 
 function initStickyTop() {
@@ -458,6 +516,7 @@ function onResizeSticky() { initStickyTop(); syncSticky() }
 function teardownSticky() {
   (scrollEl || window).removeEventListener('scroll', onScrollSticky)
   window.removeEventListener('resize', onResizeSticky)
+  window.removeEventListener('orientationchange', onResizeSticky)
 }
 
 function setupSticky() {
@@ -465,8 +524,10 @@ function setupSticky() {
   scrollEl = findScrollParent(pageRef.value)
   ;(scrollEl || window).addEventListener('scroll', onScrollSticky, { passive: true })
   window.addEventListener('resize', onResizeSticky)
+  window.addEventListener('orientationchange', onResizeSticky)
   initStickyTop()
   syncSticky()
+  showTop.value = scrollOffset() > 400
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -630,6 +691,16 @@ function sortIcon(key) {
   if (sortKey.value !== key) return 'fa-solid fa-sort sort-icon'
   return sortDir.value === 'asc' ? 'fa-solid fa-sort-up sort-icon sort-icon--on' : 'fa-solid fa-sort-down sort-icon sort-icon--on'
 }
+
+// Phone sort dropdown: one value that maps onto sortKey + sortDir.
+const sortChoice = computed({
+  get: () => `${sortKey.value}-${sortDir.value}`,
+  set: (v) => {
+    const [k, d] = String(v).split('-')
+    sortKey.value = k
+    sortDir.value = d
+  },
+})
 
 const sortedSales = computed(() => {
   const dir = sortDir.value === 'asc' ? 1 : -1
@@ -812,6 +883,13 @@ async function confirmDelete() {
 }
 </script>
 
+<!-- Breakpoints (same as Inventory Logs / Reports):
+       ≥1500px  large screens (roomier)
+       ≤1100px  tablet landscape (smaller bleed, 2 × 2 cards)
+       ≤900px   tablet / phone: only the slim toolbar is pinned, cards scroll away
+       ≤700px   phone: edge-to-edge, receipt cards instead of a table
+       ≤480px   small phone
+       ≤380px   very narrow phones -->
 <style scoped>
 /* ── TOKEN BRIDGE ── */
 .sales-page {
@@ -835,16 +913,23 @@ async function confirmDelete() {
   --sp-amber:          #f59e0b;
   --sp-violet:         #6366f1;
   --radius: 16px;
+  --sp-ease: cubic-bezier(.16, 1, .3, 1);
 
-  /* ── SPACE TUNING (same values as Product List, Home, Reports) ──
-     The app shell (Layout.vue) adds roughly 64px of its own padding around
-     every page. --bleed-* lets this page reclaim part of it on desktop,
-     on the top and on BOTH sides. Raise a value to push the content closer
-     to the edge, lower it (or set it to 0px) if content ever touches the
-     sidebar or top bar. */
+  /* ── SPACE TUNING (same values as Inventory Logs, Home, Reports) ──
+     The app shell (Layout.vue) adds its own padding around every page.
+     --bleed-x / --bleed-y let this page reclaim part of that padding
+     (left, right and top) on EVERY screen size; each breakpoint below sets
+     its own values. --sp-pad-x is the page's own inner side padding.
+     Raise a bleed value to push content closer to the edge; lower it (or set
+     it to 0px) if content ever touches the sidebar, top bar or screen edge.
+
+     IMPORTANT: do NOT add `max-width: 100%` to .sales-page. It caps the width
+     at the shell's content box, so the negative right margin below can no
+     longer stretch the page and a strip on the right is left empty. */
   --bleed-x: 30px;
   --bleed-y: 26px;
   --sp-gap: 16px;
+  --sp-pad-x: 24px;
 
   /* Where the sticky block stops. Set automatically by the script (it
      cancels the shell's top padding so the block sits flush at the top). */
@@ -853,25 +938,29 @@ async function confirmDelete() {
   min-height: 100%;
   overflow-x: clip;            /* never scrolls sideways (clip keeps sticky working) */
   background: var(--sp-bg);
-  padding: 16px 24px 40px;
+  padding: 16px max(var(--sp-pad-x), env(safe-area-inset-right)) 40px max(var(--sp-pad-x), env(safe-area-inset-left));
+  margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--sp-gap);
   transition: background-color .22s, padding-bottom .22s;
+  -webkit-text-size-adjust: 100%;
 }
 .sales-page > * { min-width: 0; }
 /* Extra room at the bottom so the floating bar never covers the pager / last row. */
 .sales-page--has-bar { padding-bottom: 120px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+/* Snappier taps on touch screens */
+.sales-page button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
 /* PAGE HEADER */
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.page-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--sp-accent); text-transform: uppercase; margin: 0 0 5px; }
 .page-title   { font-size: 26px; font-weight: 800; color: var(--sp-text-primary); letter-spacing: -.03em; margin: 0; transition: color .22s; }
 .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 /* BUTTONS */
 .btn {
-  display: inline-flex; align-items: center; gap: 7px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   font-size: 13px; font-weight: 600; font-family: inherit;
   border-radius: 10px; padding: 10px 18px; cursor: pointer;
   border: 1.5px solid transparent; text-decoration: none;
@@ -1009,7 +1098,7 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 
 /* TABLE CARD */
 .table-card { background: var(--sp-surface); border: 1px solid var(--sp-border); border-radius: var(--radius); box-shadow: var(--c-shadow-sm); overflow: hidden; transition: background-color .22s, border-color .22s; }
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .data-table thead th {
   background: var(--sp-surface-raised); color: var(--sp-text-faint);
@@ -1083,6 +1172,9 @@ html[data-theme="dark"] .row-highlight td { background: rgba(16,185,129,.14) !im
 html[data-theme="dark"] .status-pill--paid { background: rgba(16,185,129,.18); color: #4ADE80; }
 html[data-theme="dark"] .status-pill--void { background: rgba(244,63,94,.18);  color: #F87171; }
 
+/* PHONE-ONLY TOOLS (select all + sort) */
+.mobile-tools { display: none; }
+
 /* EMPTY / LOADING / ERROR */
 .td-empty { padding: 56px 24px !important; text-align: center; border-bottom: none !important; }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--sp-text-faint); white-space: normal; }
@@ -1125,6 +1217,9 @@ html[data-theme="dark"] .status-pill--void { background: rgba(244,63,94,.18);  c
 .pager-btn:hover:not(:disabled) { border-color: var(--sp-accent-border); color: var(--sp-accent); background: var(--sp-accent-soft); }
 .pager-btn:disabled { opacity: .4; cursor: not-allowed; }
 .pager-btn:focus-visible, .pager-size select:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+
+/* BACK TO TOP: floating arrow, phones and tablets only */
+.back-top { display: none; }
 
 /* FLOATING SELECTION BAR
    Rendered through <Teleport to="body">, so it can't see the .sales-page
@@ -1302,22 +1397,26 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
 .del-modal-btn--confirm { background: linear-gradient(135deg, #f43f5e, #e11d48); border: none; color: #fff; box-shadow: 0 2px 12px rgba(244,63,94,.35); }
 .del-modal-btn--confirm:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 4px 20px rgba(244,63,94,.50); transform: translateY(-1px); }
 
-/* ── RESPONSIVE ── */
+/* ══════════════════════════════════════════════════════════
+   RESPONSIVE
+   --bleed-x / --bleed-y reclaim the shell's padding at every size,
+   --sp-pad-x is the page's own inner side padding (same values as
+   Inventory Logs and Reports).
+══════════════════════════════════════════════════════════ */
 
-/* Desktop only: pull the page outward into the shell's padding (top, left AND right),
-   exactly like the Product List / Home pages, so the space is fully used. */
-@media (min-width: 1001px) {
-  .sales-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+/* ── Large screens: more breathing room ── */
+@media (min-width: 1500px) {
+  .sales-page { --sp-gap: 20px; --sp-pad-x: 32px; padding-bottom: 48px; }
 }
 
-/* Wide screens: cards + search + period stay pinned at the very top while the table scrolls.
+/* ── Desktop: cards + search + period stay pinned at the very top while the table scrolls.
    The block reaches the page edges on both sides (negative margin + matching padding),
-   so no table row can peek out beside it, and a soft shadow shows when it is pinned. */
+   so no table row can peek out beside it, and a soft shadow shows when it is pinned. ── */
 @media (min-width: 901px) {
   .sticky-controls {
     position: sticky; top: var(--sticky-top); z-index: 20;
     background: var(--sp-bg);
-    padding: 10px 24px 10px; margin: -10px -24px -10px;
+    padding: 10px var(--sp-pad-x); margin: -10px calc(-1 * var(--sp-pad-x));
     transition: box-shadow .2s ease;
   }
   .sticky-controls.is-stuck {
@@ -1325,37 +1424,224 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
   }
 }
 
+/* ── Tablet landscape ── */
 @media (max-width: 1100px) {
+  .sales-page { --bleed-x: 22px; --bleed-y: 20px; }
   .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* ── Tablet / phone, and landscape phones ──
+   The sticky block dissolves (display: contents): only the slim search + period
+   toolbar is pinned, and the summary cards scroll away with the page. ── */
+@media (max-width: 900px), (max-height: 520px) and (orientation: landscape) {
+  .sticky-controls { display: contents; }
+  .toolbar {
+    position: sticky; top: var(--sticky-top); z-index: 30;
+    box-shadow: 0 0 0 6px var(--sp-bg), var(--c-shadow-sm);
+  }
+  /* keep the open period menu above the table rows */
+  .period-dropdown-wrap { position: relative; }
+}
+
+/* ── Back-to-top button (tablet portrait and phones) ── */
 @media (max-width: 900px) {
-  .sales-page { padding: 12px 14px 32px; --sp-gap: 14px; }
+  .back-top {
+    position: fixed; z-index: 45;
+    --back-top-bottom: 24px;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(var(--back-top-bottom) + env(safe-area-inset-bottom, 0px));
+    width: 42px; height: 42px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1.5px solid #CBD5E1;
+    background: var(--sp-surface);
+    color: #475569;
+    font-size: 13px; cursor: pointer;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+    opacity: 0; transform: translateY(14px) scale(.9); pointer-events: none; visibility: hidden;
+    transition: opacity .2s ease, transform .22s var(--sp-ease), visibility 0s linear .22s;
+  }
+  html[data-theme="dark"] .back-top { border-color: #334155; color: #CBD5E1; }
+  .sales-page .back-top:focus,
+  .sales-page .back-top:focus-visible,
+  .sales-page .back-top:active { outline: none; border-color: #CBD5E1; }
+  html[data-theme="dark"] .sales-page .back-top:focus,
+  html[data-theme="dark"] .sales-page .back-top:focus-visible,
+  html[data-theme="dark"] .sales-page .back-top:active { border-color: #334155; }
+  .back-top--on {
+    opacity: 1; transform: none; pointer-events: auto; visibility: visible;
+    transition: opacity .2s ease, transform .22s var(--sp-ease), visibility 0s;
+  }
+  .back-top:active { transform: scale(.94); }
+  /* sit above the floating selection bar while receipts are selected */
+  .sales-page--has-bar .back-top { --back-top-bottom: 84px; }
+}
+
+/* ── Tablet portrait ── */
+@media (max-width: 900px) {
+  .sales-page { --sp-pad-x: 16px; --sp-gap: 14px; padding-top: 12px; padding-bottom: 32px; }
   .sales-page--has-bar { padding-bottom: 110px; }
 }
 
+/* ── Phone ──
+   Goals: edge-to-edge layout that uses the shell's top and side padding, a slim
+   pinned toolbar, big touch targets (≥ 40px), and receipt cards instead of a table. */
 @media (max-width: 700px) {
-  .sales-page { padding: 16px 16px 48px; }
-  .sales-page--has-bar { padding-bottom: 110px; }
+  .sales-page {
+    --bleed-x: 16px; --bleed-y: 16px; --sp-pad-x: 12px; --sp-gap: 12px;
+    padding-top: 10px;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  }
+  .sales-page--has-bar { padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Header: title on top, actions full width underneath */
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-title { font-size: 23px; }
   .header-actions { flex-direction: column; align-items: stretch; }
-  .toolbar { flex-direction: column; align-items: stretch; }
+  .header-actions .btn { height: 44px; }
+
+  /* Summary cards: 2 × 2 grid, icon above the text */
+  .kpi-strip { gap: 10px; }
+  .kpi-card { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 12px 12px; }
+  .kpi-icon { width: 32px; height: 32px; font-size: 13px; }
+  .kpi-body { width: 100%; }
+  .kpi-label { font-size: 10px; }
+  .kpi-value { font-size: 18px; }
+  .kpi-value--text { font-size: 15px; }
+  .kpi-hint { font-size: 11px; }
+
+  /* Pinned toolbar: search on top, period underneath, 44px touch targets */
+  .toolbar { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px; border-radius: 14px; }
   .search-field { flex-basis: auto; }
+  .search-input { height: 44px; font-size: 14px; }
+  .search-kbd { display: none; }
   .period-dropdown-wrap { width: 100%; }
-  .period-trigger { width: 100%; }
+  .period-trigger { width: 100%; height: 44px; font-size: 14px; }
   .period-trigger .period-caret { margin-left: auto; }
   .period-menu { left: 0; right: 0; width: auto; }
-  .kpi-value { font-size: 18px; }
-  .pager { justify-content: center; }
+  .period-menu-item { padding: 12px 12px; font-size: 14px; }
+  .search-note { border-radius: 12px; }
+
+  /* Table card: flat list of receipt cards */
+  .table-card { border-radius: 16px; }
+  .table-wrap { overflow-x: visible; }
+
+  /* Select all + sort row */
+  .mobile-tools {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--sp-border);
+    background: var(--sp-surface-raised);
+  }
+  .mobile-selectall { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--sp-text-secondary); cursor: pointer; min-height: 40px; }
+  .mobile-sort { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--sp-text-faint); min-width: 0; }
+  .mobile-sort select {
+    height: 40px; max-width: 190px; padding: 0 10px; min-width: 0;
+    border: 1.5px solid var(--sp-border-strong); border-radius: 10px;
+    background: var(--sp-surface); color: var(--sp-text-primary);
+    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .mobile-sort select:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+
+  /* Table rows → receipt cards */
+  .data-table, .data-table tbody { display: block; width: 100%; }
+  .data-table thead { display: none; }
+
+  .data-table tbody tr.row-click {
+    display: grid; width: 100%;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "chk rec  stat"
+      "chk cust amt"
+      "chk date pay"
+      "chk clerk clerk";
+    column-gap: 12px; row-gap: 3px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--sp-border);
+    align-items: center;
+  }
+  .data-table tbody tr.row-click:last-of-type { border-bottom: none; }
+  .data-table tbody tr.row-click td {
+    display: block; min-width: 0; padding: 0; border-bottom: none;
+    white-space: normal; overflow-wrap: anywhere;
+  }
+  .data-table tbody tr.row-click:hover td { background: transparent; }
+  .data-table tbody tr.row--selected { background: var(--sp-accent-soft); }
+  .data-table tbody tr.row--selected td { background: transparent; }
+  .data-table tbody tr.row-highlight { background: var(--sp-accent-soft); }
+
+  .td-chk   { grid-area: chk; width: auto; align-self: center; padding: 6px 2px 6px 0 !important; }
+  .td-rec   { grid-area: rec; font-size: 14.5px; }
+  .td-stat  { grid-area: stat; justify-self: end; }
+  .td-cust  { grid-area: cust; font-size: 13px; font-weight: 600; }
+  .td-amt   { grid-area: amt; justify-self: end; text-align: right; font-size: 15px; }
+  .td-date  { grid-area: date; font-size: 12px; }
+  .td-pay   { grid-area: pay; justify-self: end; font-size: 12px; }
+  .td-clerk { grid-area: clerk; font-size: 12px; }
+  .td-clerk::before { content: attr(data-label) ' · '; color: var(--sp-text-faint); font-weight: 600; }
+  .td-go    { display: none !important; }
+
+  /* Bigger tap target for the checkbox on touch screens */
+  .td-chk .checkbox-wrap { padding: 8px; margin: -8px; }
+  .td-chk .checkbox-box, .mobile-selectall .checkbox-box { width: 22px; height: 22px; font-size: 12px; }
+  .td-chk .checkbox-wrap input, .mobile-selectall .checkbox-wrap input { width: 22px; height: 22px; }
+
+  /* Empty-state row stays a plain block */
+  .data-table tbody tr:not(.row-click) { display: block; }
+  .data-table tbody tr:not(.row-click) td { display: block; padding: 40px 16px !important; }
+
+  /* Pager: centred, big buttons */
+  .pager { justify-content: center; padding: 12px 14px; }
+  .pager-info { width: 100%; text-align: center; }
+  .pager-controls { justify-content: center; }
+  .pager-size { width: 100%; justify-content: center; margin-right: 0; }
+  .pager-size select { height: 40px; padding: 0 12px; }
+  .pager-btn { width: 40px; height: 40px; font-size: 12px; }
 
   /* Floating bar: full-width strip at the bottom on phones */
-  .float-bar { left: 12px; right: 12px; bottom: 12px; transform: none; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 14px; }
+  .float-bar {
+    left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    transform: none; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 14px;
+  }
   .float-bar-enter-from, .float-bar-leave-to { transform: translateY(22px); }
-  .float-btn { padding: 0 13px; }
+  .float-btn { height: 42px; padding: 0 14px; }
+
+  /* Modals: a bit more compact so they fit short screens */
+  .modal-backdrop { padding: 14px; }
+  .del-modal-body, .success-modal-body { padding-left: 20px; padding-right: 20px; }
+  .del-modal-footer { padding: 14px 20px 20px; }
+  .success-modal-footer { padding: 0 20px 20px; }
+  .pw-input { height: 46px; font-size: 16px; } /* 16px stops iOS from zooming in on focus */
+  .search-input { font-size: 16px; }
+}
+
+/* ── Small phone ── */
+@media (max-width: 480px) {
+  .kpi-value { font-size: 17px; }
+  .mobile-sort select { max-width: 150px; }
+}
+
+/* ── Very narrow phones ── */
+@media (max-width: 380px) {
+  .sales-page { --sp-pad-x: 10px; }
+  .kpi-strip { gap: 8px; }
+  .kpi-card { padding: 10px; }
+  .data-table tbody tr.row-click { padding: 12px 10px; column-gap: 10px; }
+  .mobile-tools { padding: 8px 10px; }
+  .period-trigger-label { display: none; }
+}
+
+/* ── Landscape phones: keep the pinned toolbar short ── */
+@media (max-height: 520px) and (orientation: landscape) and (max-width: 1000px) {
+  .toolbar { flex-direction: row; align-items: center; padding: 6px 10px; }
+  .search-field { flex: 1 1 200px; }
+  .search-input, .period-trigger { height: 38px; }
+  .period-dropdown-wrap { width: auto; }
+  .period-trigger { width: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .skel-row, .row-highlight td, .success-modal-icon, .kpi-card { animation: none; }
   .sticky-controls { transition: none; }
   .float-bar-enter-active, .float-bar-leave-active { transition: opacity .01s; }
+  .back-top { transition: none; }
 }
 </style>

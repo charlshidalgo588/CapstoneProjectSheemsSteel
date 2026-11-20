@@ -9,6 +9,7 @@ use App\Services\StockService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\SalesItem;
 
 class ReportsController extends Controller
 {
@@ -18,8 +19,8 @@ class ReportsController extends Controller
      *    the cut and its leftover add up to the piece's full profit, counted once)
      *  - every other line (and all older sales): (price at sale - cost at sale) * quantity
      */
-    private const PROFIT_SQL = 'SUM(COALESCE(sales_items.AllocatedProfit, (sales_items.PriceAtSale - COALESCE(sales_items.CostAtSale, 0)) * sales_items.Quantity))';
-
+    private const PROFIT_SQL = SalesItem::PROFIT_SQL;
+    
     /** Shop sales = customer paid minus the worker's pass-through share of services. */
     private const NET_SALES_SQL = 'SUM(sales.TotalAmount - COALESCE(svc.worker_total, 0))';
 

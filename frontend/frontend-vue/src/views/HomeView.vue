@@ -4,7 +4,7 @@
 
       <!-- HEADER -->
       <div class="page-header">
-        <div>
+        <div class="page-header-l">
           <h1 class="page-title">Dashboard</h1>
           <p class="page-sub">
             <span>{{ todayLabel }}</span>
@@ -71,13 +71,14 @@
               <div class="hero-main">
                 <p class="big-value">₱{{ price(anim.today) }}</p>
                 <p v-if="todayTrend.available" class="trend-line">
-                  <span class="kpi-trend" :class="todayTrend.direction" :title="`Yesterday: ₱${price(yesterdayTotal)}`"><i :class="trendIcon(todayTrend)"></i>{{ todayTrend.text }}</span>
+                  <span class="kpi-trend" :class="todayTrend.direction" tabindex="0" v-bind="tipBind(() => todayTrendTip())"><i :class="trendIcon(todayTrend)"></i>{{ todayTrend.text }}</span>
                   <span>vs yesterday</span>
                 </p>
               </div>
 
+              <!-- Decorative only: intentionally not interactive -->
               <div v-if="spark" class="spark" role="img" aria-label="Sales over the last 14 days">
-                <svg viewBox="0 0 120 40" preserveAspectRatio="none">
+                <svg viewBox="0 0 120 40" preserveAspectRatio="none" aria-hidden="true">
                   <defs>
                     <linearGradient id="hm-spark-fill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" style="stop-color: var(--d-accent); stop-opacity: .28" />
@@ -97,17 +98,17 @@
                 <label v-if="targetMode === 'custom'" class="goal-input">₱<input type="number" min="0" step="100" inputmode="decimal" v-model.number="customTarget" aria-label="Custom daily target" @change="saveTarget" /></label>
                 <strong v-else-if="target > 0">₱{{ price(target) }}</strong>
               </div>
-              <div class="goal-track" role="progressbar" :aria-valuenow="Math.min(goalPct, 100)" aria-valuemin="0" aria-valuemax="100">
+              <div class="goal-track" role="progressbar" tabindex="0" :aria-valuenow="Math.min(goalPct, 100)" aria-valuemin="0" aria-valuemax="100" v-bind="tipBind(() => goalTip())">
                 <div class="goal-fill" :class="{ 'goal-fill--done': goalPct >= 100 }" :style="{ width: goalBarPct + '%' }"></div>
               </div>
               <p class="goal-sub">{{ goalText }}</p>
             </div>
 
             <dl class="mini-stats">
-              <div class="ms"><dt><i class="fa-solid fa-receipt"></i>Transactions</dt><dd>{{ formatNumber(anim.tx) }}</dd></div>
-              <div class="ms"><dt><i class="fa-solid fa-box-open"></i>Items sold</dt><dd>{{ formatNumber(anim.items) }}</dd></div>
-              <div class="ms"><dt><i class="fa-solid fa-tag"></i>Average sale</dt><dd>₱{{ price(anim.avg) }}</dd></div>
-              <div class="ms"><dt><i class="fa-solid fa-arrow-trend-up"></i>Profit</dt><dd class="green">₱{{ price(anim.todayProfit) }}</dd></div>
+              <div class="ms" tabindex="0" v-bind="tipBind(() => statTip('tx'))"><dt><i class="fa-solid fa-receipt"></i>Transactions</dt><dd>{{ formatNumber(anim.tx) }}</dd></div>
+              <div class="ms" tabindex="0" v-bind="tipBind(() => statTip('items'))"><dt><i class="fa-solid fa-box-open"></i>Items sold</dt><dd>{{ formatNumber(anim.items) }}</dd></div>
+              <div class="ms" tabindex="0" v-bind="tipBind(() => statTip('avg'))"><dt><i class="fa-solid fa-tag"></i>Average sale</dt><dd>₱{{ price(anim.avg) }}</dd></div>
+              <div class="ms" tabindex="0" v-bind="tipBind(() => statTip('todayProfit'))"><dt><i class="fa-solid fa-arrow-trend-up"></i>Profit</dt><dd class="green">₱{{ price(anim.todayProfit) }}</dd></div>
             </dl>
           </section>
 
@@ -124,19 +125,21 @@
 
             <p class="big-value big-value--sm">₱{{ price(anim.month) }}</p>
             <p v-if="lastMonthTotal" class="trend-line">
-              <span class="kpi-trend" :class="monthBeat ? 'up' : 'flat'" :title="`Last month in full: ₱${price(lastMonthTotal)}`"><i :class="monthBeat ? 'fa-solid fa-arrow-trend-up' : 'fa-solid fa-flag-checkered'"></i>{{ monthBeat ? 'Beat last month' : '₱' + price(monthGap) + ' to go' }}</span>
+              <span class="kpi-trend" :class="monthBeat ? 'up' : 'flat'" tabindex="0" v-bind="tipBind(() => monthTrendTip())"><i :class="monthBeat ? 'fa-solid fa-arrow-trend-up' : 'fa-solid fa-flag-checkered'"></i>{{ monthBeat ? 'Beat last month' : '₱' + price(monthGap) + ' to go' }}</span>
               <span>{{ monthBeat ? `last month in full was ₱${price(lastMonthTotal)}` : `to match last month in full (₱${price(lastMonthTotal)})` }}</span>
             </p>
 
             <div class="goal">
               <div class="goal-head"><span>Month progress</span><strong>{{ Math.round(monthProgress) }}%</strong></div>
-              <div class="goal-track"><div class="goal-fill goal-fill--blue" :style="{ width: monthBarPct + '%' }"></div></div>
+              <div class="goal-track" role="progressbar" tabindex="0" :aria-valuenow="Math.round(monthProgress)" aria-valuemin="0" aria-valuemax="100" v-bind="tipBind(() => monthTip())">
+                <div class="goal-fill goal-fill--blue" :style="{ width: monthBarPct + '%' }"></div>
+              </div>
             </div>
 
             <dl class="mini-stats mini-stats--3">
-              <div class="ms"><dt><i class="fa-solid fa-arrow-trend-up"></i>Profit</dt><dd class="green">₱{{ price(anim.profit) }}</dd></div>
-              <div class="ms"><dt><i class="fa-solid fa-percent"></i>Margin</dt><dd>{{ anim.margin.toFixed(1) }}%</dd></div>
-              <div class="ms">
+              <div class="ms" tabindex="0" v-bind="tipBind(() => statTip('profit'))"><dt><i class="fa-solid fa-arrow-trend-up"></i>Profit</dt><dd class="green">₱{{ price(anim.profit) }}</dd></div>
+              <div class="ms" tabindex="0" v-bind="tipBind(() => statTip('margin'))"><dt><i class="fa-solid fa-percent"></i>Margin</dt><dd>{{ anim.margin.toFixed(1) }}%</dd></div>
+              <div class="ms" tabindex="0" v-bind="tipBind(() => statTip('best'))">
                 <dt><i class="fa-solid fa-trophy"></i>Best day</dt>
                 <dd>{{ bestDay ? '₱' + price(bestDay.total) : '—' }}</dd>
                 <span class="ms-sub">{{ bestDay ? bestDayLabel : 'No sales yet' }}</span>
@@ -153,7 +156,7 @@
               <span class="card-icon card-icon--violet"><i class="fa-solid fa-table-cells"></i></span>
               <div>
                 <h2 id="hm-cal" class="card-title">{{ monthName }} at a glance</h2>
-                <p class="card-sub">Darker days sold more. Select a day for its numbers.</p>
+                <p class="card-sub">Darker days sold more. Hover or tap a day for its numbers.</p>
               </div>
             </div>
             <div class="seg" role="group" aria-label="Calendar metric">
@@ -167,7 +170,7 @@
               <span v-for="(w, i) in weekdays" :key="'w' + i" class="cal-dow">{{ w }}</span>
               <template v-for="(c, i) in calendar" :key="i">
                 <span v-if="!c" class="cal-blank"></span>
-                <button v-else type="button" class="cal-day" :style="{ '--i': i }" :class="[`lv${c.level}`, { 'cal-day--sel': c.key === activeRow.key, 'cal-day--today': c.key === todayKey }]" :disabled="c.future" :aria-pressed="c.key === activeRow.key" :aria-label="`${c.d}: ₱${price(c.v)}`" :title="`₱${price(c.v)}`" @click="selectDay(c.key)">{{ c.d }}</button>
+                <button v-else type="button" class="cal-day" :style="{ '--i': i }" :class="[`lv${c.level}`, { 'cal-day--sel': c.key === activeRow.key, 'cal-day--today': c.key === todayKey }]" :disabled="c.future" :aria-pressed="c.key === activeRow.key" :aria-label="`${c.d}: ₱${price(c.v)}`" v-bind="tipBind(() => dayTip(c.key))" @click="selectDay(c.key)">{{ c.d }}</button>
               </template>
               <div class="cal-scale"><span>Less</span><i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>More</span></div>
             </div>
@@ -181,8 +184,8 @@
               <p class="day-value">₱{{ price(anim.day) }}</p>
               <div v-if="activeRow.total > 0" class="split-wrap">
                 <div class="split-bar" role="img" :aria-label="`Profit ${activeMargin} percent of sales`">
-                  <span class="split-seg split-seg--profit" :style="{ width: (splitReady ? activeProfitPct : 0) + '%' }" :title="`Profit ₱${price(activeRow.profit)}`"></span>
-                  <span class="split-seg split-seg--cost" :style="{ width: (splitReady ? 100 - activeProfitPct : 0) + '%' }" :title="`Cost ₱${price(activeCost)}`"></span>
+                  <span class="split-seg split-seg--profit" tabindex="0" :style="{ width: (splitReady ? activeProfitPct : 0) + '%' }" v-bind="tipBind(() => splitTip('profit'))"></span>
+                  <span class="split-seg split-seg--cost" tabindex="0" :style="{ width: (splitReady ? 100 - activeProfitPct : 0) + '%' }" v-bind="tipBind(() => splitTip('cost'))"></span>
                 </div>
                 <div class="split-legend"><span><i class="sl sl--profit"></i>Profit</span><span><i class="sl sl--cost"></i>Cost of goods</span></div>
               </div>
@@ -235,6 +238,7 @@
                       :stroke-dashoffset="a.offset"
                       tabindex="0" role="button"
                       :aria-label="`${mixRows[i].name}, ${mixRows[i].pct.toFixed(1)} percent`"
+                      v-bind="tipBind(() => mixTip(mixRows[i]), { tap: false, pointer: true })"
                       @mouseenter="hoverIdx = i" @mouseleave="hoverIdx = null"
                       @focus="hoverIdx = i" @blur="hoverIdx = null"
                       @click="pickMix(i)" @keydown.enter.prevent="pickMix(i)" @keydown.space.prevent="pickMix(i)"
@@ -256,7 +260,7 @@
 
                 <ul class="mix-list">
                   <li v-for="(r, i) in mixRows" :key="r.name + i" :class="{ 'mix-item--sel': mixIdx === i }">
-                    <button type="button" class="mix-row" :class="{ 'mix-row--on': focusIdx === i && mixIdx !== i }" :aria-pressed="mixIdx === i" @click="pickMix(i)" @mouseenter="hoverIdx = i" @mouseleave="hoverIdx = null" @focus="hoverIdx = i" @blur="hoverIdx = null">
+                    <button type="button" class="mix-row" :class="{ 'mix-row--on': focusIdx === i && mixIdx !== i }" :aria-pressed="mixIdx === i" v-bind="tipBind(() => mixTip(r), { tap: false })" @click="pickMix(i)" @mouseenter="hoverIdx = i" @mouseleave="hoverIdx = null" @focus="hoverIdx = i" @blur="hoverIdx = null">
                       <span class="mix-top">
                         <i class="mix-dot" :style="{ background: r.color }"></i>
                         <span class="mix-name">{{ r.name }}</span>
@@ -300,21 +304,22 @@
             </header>
 
             <!-- Tiles are links only for roles that can open the Product List;
-                 for everyone else they render as plain (non-clickable) tiles. -->
+                 for everyone else they render as plain tiles that show a short
+                 explanation when clicked. -->
             <div class="tile-grid">
-              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps()" class="tile" :class="{ 'tile--static': !canProducts }">
+              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps(null, () => tileTip('hand'))" class="tile tile--first" :class="{ 'tile--static': !canProducts }">
                 <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-cubes"></i></span><i v-if="canProducts" class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
                 <p class="tile-label">In hand</p>
                 <p class="tile-value">{{ formatNumber(anim.inHand) }}</p>
                 <p class="tile-sub">{{ formatNumber(inventorySummary.quantity_to_receive) }} incoming</p>
               </component>
-              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps({ stockFilter: 'low' })" class="tile" :class="{ 'tile--warn': lowStockCount > 0, 'tile--static': !canProducts }">
+              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps({ stockFilter: 'low' }, () => tileTip('low'))" class="tile" :class="{ 'tile--warn': lowStockCount > 0, 'tile--static': !canProducts }">
                 <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-triangle-exclamation"></i></span><i v-if="canProducts" class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
                 <p class="tile-label">Low stock</p>
                 <p class="tile-value">{{ formatNumber(anim.low) }}</p>
                 <p class="tile-sub">{{ lowStockCount > 0 ? 'Reorder soon' : 'Nothing running low' }}</p>
               </component>
-              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps({ stockFilter: 'out' })" class="tile" :class="{ 'tile--alert': outOfStockCount > 0, 'tile--static': !canProducts }">
+              <component :is="canProducts ? 'router-link' : 'div'" v-bind="tileProps({ stockFilter: 'out' }, () => tileTip('out'))" class="tile" :class="{ 'tile--alert': outOfStockCount > 0, 'tile--static': !canProducts }">
                 <span class="tile-top"><span class="tile-ico"><i class="fa-solid fa-circle-xmark"></i></span><i v-if="canProducts" class="fa-solid fa-arrow-up-right-from-square tile-go"></i></span>
                 <p class="tile-label">Out of stock</p>
                 <p class="tile-value">{{ formatNumber(anim.out) }}</p>
@@ -327,7 +332,9 @@
                 <span>{{ formatNumber(stockCoverage.active) }} of {{ formatNumber(stockCoverage.total) }} items active</span>
                 <strong>{{ stockCoverage.pct }}%</strong>
               </div>
-              <div class="goal-track"><div class="goal-fill goal-fill--done" :style="{ width: (barsReady ? stockCoverage.pct : 0) + '%' }"></div></div>
+              <div class="goal-track" role="progressbar" tabindex="0" :aria-valuenow="stockCoverage.pct" aria-valuemin="0" aria-valuemax="100" v-bind="tipBind(() => coverageTip())">
+                <div class="goal-fill goal-fill--done" :style="{ width: (barsReady ? stockCoverage.pct : 0) + '%' }"></div>
+              </div>
             </div>
 
             <div v-if="canProducts || canInvLogs || canSuppliers" class="link-list">
@@ -339,6 +346,30 @@
         </div>
 
       </div>
+
+      <!-- SHARED TOOLTIP: one floating card reused by every bar, chart and stat.
+           Appears on hover (desktop), on tap (touch) and on keyboard focus, placed
+           neatly above the element it describes. -->
+      <div
+        class="tip"
+        :class="{ 'tip--on': tip.show, 'tip--below': tip.below }"
+        :style="{ left: tip.x + 'px', top: tip.y + 'px' }"
+        role="tooltip"
+        aria-hidden="true"
+      >
+        <p class="tip-title">
+          <i v-if="tip.content.color" class="tip-dot" :style="{ background: tip.content.color }"></i>
+          <span>{{ tip.content.title }}</span>
+        </p>
+        <dl v-if="tip.content.rows && tip.content.rows.length" class="tip-rows">
+          <div v-for="(r, i) in tip.content.rows" :key="i" class="tip-row">
+            <dt>{{ r.k }}</dt>
+            <dd :class="r.tone ? 'tip-' + r.tone : ''">{{ r.v }}</dd>
+          </div>
+        </dl>
+        <p v-if="tip.content.note" class="tip-note">{{ tip.content.note }}</p>
+      </div>
+
     </div>
   </Layout>
 </template>
@@ -401,6 +432,9 @@ export default {
       splitReady: false,
       raf: 0,
       dayRaf: 0,
+
+      // Shared tooltip state
+      tip: { show: false, x: 0, y: 0, below: false, content: { title: '', rows: [], note: '', color: '' } },
 
       firstLoad: true,
       loading: false,
@@ -491,8 +525,13 @@ export default {
         return { key, total: this.num(s.total), profit: profitMap[key] ?? 0 }
       })
     },
+    /* Average of all days that had sales this month (used by calendar + tooltips). */
+    monthAvg() {
+      const rows = this.monthRows.filter((r) => r.total > 0)
+      return rows.length ? rows.reduce((a, r) => a + r.total, 0) / rows.length : 0
+    },
 
-    /* sparkline — daily sales for up to the last 14 days of this month */
+    /* sparkline — daily sales for up to the last 14 days of this month (design only) */
     spark() {
       const now = new Date()
       const y = now.getFullYear()
@@ -539,8 +578,7 @@ export default {
     activeProfitPct() { const r = this.activeRow; return r.total ? Math.min(100, Math.max(0, (r.profit / r.total) * 100)) : 0 },
     activeShare() { const t = this.num(this.monthlyTotal); return t ? ((this.activeRow.total / t) * 100).toFixed(1) : '0.0' },
     activeVsAvg() {
-      const rows = this.monthRows.filter((r) => r.total > 0)
-      const avg = rows.length ? rows.reduce((a, r) => a + r.total, 0) / rows.length : 0
+      const avg = this.monthAvg
       return avg ? ((this.activeRow.total - avg) / avg) * 100 : 0
     },
 
@@ -601,6 +639,16 @@ export default {
       if (['yesterday', 'average', 'custom'].includes(saved.mode)) this.targetMode = saved.mode
       this.customTarget = this.num(saved.custom)
     } catch (e) { /* no-op */ }
+
+    // Tooltip housekeeping: close when tapping elsewhere or scrolling.
+    this._onDocPointer = (e) => {
+      const t = e.target
+      if (!(t && t.closest && t.closest('[data-dash-tip]'))) this.tipClose()
+    }
+    this._onScroll = () => this.tipClose()
+    document.addEventListener('pointerdown', this._onDocPointer, true)
+    window.addEventListener('scroll', this._onScroll, { passive: true, capture: true })
+
     this.loadDashboard()
   },
 
@@ -608,18 +656,24 @@ export default {
     this.requestSeq++
     cancelAnimationFrame(this.raf)
     cancelAnimationFrame(this.dayRaf)
+    document.removeEventListener('pointerdown', this._onDocPointer, true)
+    window.removeEventListener('scroll', this._onScroll, { passive: true, capture: true })
   },
 
   methods: {
     num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0 },
     formatNumber(n) { return Math.round(this.num(n)).toLocaleString('en-US') },
     price(v) { return this.num(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+    money(v) { return '₱' + this.price(v) },
     compact(v) { return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(this.num(v)) },
 
     /* Props for a stock tile: a router-link target when the role may open
-       the Product List, nothing (so it stays a plain div) when it may not. */
-    tileProps(query) {
-      return this.canProducts ? { to: { name: 'products', ...(query ? { query } : {}) } } : {}
+       the Product List, nothing (so it stays a plain div) when it may not.
+       Tooltip handlers are merged in here because an element can only take
+       one v-bind object. */
+    tileProps(query, getter) {
+      const link = this.canProducts ? { to: { name: 'products', ...(query ? { query } : {}) } } : {}
+      return Object.assign({}, link, getter ? this.tipBind(getter, { tap: false }) : {})
     },
 
     makeTrend(current, previous) {
@@ -665,6 +719,261 @@ export default {
     },
     animateMix() {
       this.grow('mixReady')
+    },
+
+    /* ── TOOLTIP ENGINE (hover to open) ─────────────────────
+       tipBind(getter) returns the event handlers to spread onto any element
+       with v-bind. `getter` builds the tooltip content lazily, only when the
+       tooltip is actually shown, so it always reflects the latest data.
+         • mouse / pen : shows on hover, anchored neatly above the element
+                         (flips below it when there is no room above)
+         • touch       : shows on tap, hides after a few seconds or on next tap
+         • keyboard    : shows on focus (only for keyboard focus)
+       Options:
+         { pointer: true } anchor to the cursor instead of the element
+                           (used for donut slices, whose box is the whole ring)
+         { tap: false }    skip the tap behaviour (element already does
+                           something on tap, e.g. a link)
+       The attribute is named data-dash-tip on purpose: a plain `data-tip`
+       is picked up by other tooltip scripts and produced a duplicate popup. */
+    tipBind(getter, opts = {}) {
+      const tap = opts.tap !== false
+      const pointer = opts.pointer === true
+      return {
+        'data-dash-tip': '',
+        onPointerenter: (e) => this.tipShow(e, getter, pointer),
+        onPointermove: (e) => { if (pointer) this.tipMove(e) },
+        onPointerleave: (e) => this.tipHide(e),
+        onFocus: (e) => this.tipFocus(e, getter),
+        onBlur: () => this.tipClose(),
+        onClick: (e) => { if (tap) this.tipTap(e, getter, pointer) },
+      }
+    },
+    tipClampX(x) {
+      const vw = window.innerWidth || 360
+      const half = 128
+      return Math.min(Math.max(x, half + 6), Math.max(vw - half - 6, half + 6))
+    },
+    /* Centered above the element, or below it when it sits near the top. */
+    tipAnchor(el) {
+      if (!el || !el.getBoundingClientRect) return
+      const r = el.getBoundingClientRect()
+      this.tip.below = r.top < 190
+      this.tip.x = this.tipClampX(r.left + r.width / 2)
+      this.tip.y = this.tip.below ? r.bottom + 10 : r.top - 10
+    },
+    /* Follows the cursor (above it, or below when near the top). */
+    tipPointer(x, y) {
+      this.tip.below = y < 170
+      this.tip.x = this.tipClampX(x)
+      this.tip.y = this.tip.below ? y + 20 : y - 14
+    },
+    tipSet(getter) {
+      const c = getter() || {}
+      this.tip.content = { title: c.title || '', rows: c.rows || [], note: c.note || '', color: c.color || '' }
+      this.tip.show = true
+    },
+    tipShow(e, getter, pointer) {
+      if (e.pointerType === 'touch') return
+      clearTimeout(this._tipTimer)
+      this.tipSet(getter)
+      if (pointer) this.tipPointer(e.clientX, e.clientY)
+      else this.tipAnchor(e.currentTarget)
+    },
+    tipMove(e) {
+      if (e.pointerType === 'touch' || !this.tip.show) return
+      this.tipPointer(e.clientX, e.clientY)
+    },
+    tipHide(e) {
+      if (e && e.pointerType === 'touch') return
+      this.tipClose()
+    },
+    tipClose() {
+      clearTimeout(this._tipTimer)
+      this.tip.show = false
+    },
+    tipFocus(e, getter) {
+      const el = e.currentTarget
+      if (!el || !el.matches || !el.matches(':focus-visible')) return
+      this.tipSet(getter)
+      this.tipAnchor(el)
+    },
+    tipTap(e, getter, pointer) {
+      if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return
+      clearTimeout(this._tipTimer)
+      this.tipSet(getter)
+      if (pointer) this.tipPointer(e.clientX, e.clientY)
+      else this.tipAnchor(e.currentTarget)
+      this._tipTimer = setTimeout(() => this.tipClose(), 3200)
+    },
+
+    /* ── TOOLTIP CONTENT ─────────────────────────────────── */
+    goalTip() {
+      const t = this.target
+      const labels = { yesterday: 'Yesterday', average: 'Daily average', custom: 'Custom target' }
+      const rows = [{ k: 'Sales today', v: this.money(this.todaySales) }]
+      if (t > 0) {
+        const diff = this.num(this.todaySales) - t
+        rows.push({ k: labels[this.targetMode], v: this.money(t) })
+        rows.push({ k: 'Progress', v: this.goalPct + '%' })
+        rows.push({ k: diff >= 0 ? 'Past target' : 'Still needed', v: this.money(Math.abs(diff)), tone: diff >= 0 ? 'good' : 'warn' })
+      } else {
+        rows.push({ k: 'Target', v: 'Not set' })
+      }
+      return { title: 'Daily target', rows }
+    },
+    monthTip() {
+      const avg = this.dayOfMonth ? this.num(this.monthlyTotal) / this.dayOfMonth : 0
+      const rows = [
+        { k: 'Days passed', v: `${this.dayOfMonth} of ${this.daysInMonth}` },
+        { k: 'Days left', v: String(this.daysInMonth - this.dayOfMonth) },
+        { k: 'Sales so far', v: this.money(this.monthlyTotal) },
+        { k: 'Average per day', v: this.money(avg) },
+      ]
+      return { title: `${this.monthName} progress`, rows, note: 'The bar shows how much of the month has passed.' }
+    },
+    todayTrendTip() {
+      const diff = this.num(this.todaySales) - this.num(this.yesterdayTotal)
+      return {
+        title: 'Today vs yesterday',
+        rows: [
+          { k: 'Today', v: this.money(this.todaySales) },
+          { k: 'Yesterday', v: this.money(this.yesterdayTotal) },
+          { k: diff >= 0 ? 'Ahead by' : 'Behind by', v: this.money(Math.abs(diff)), tone: diff >= 0 ? 'good' : 'bad' },
+        ],
+      }
+    },
+    monthTrendTip() {
+      const diff = this.num(this.monthlyTotal) - this.num(this.lastMonthTotal)
+      return {
+        title: 'This month vs last month',
+        rows: [
+          { k: `${this.monthName} so far`, v: this.money(this.monthlyTotal) },
+          { k: 'Last month in full', v: this.money(this.lastMonthTotal) },
+          { k: diff >= 0 ? 'Ahead by' : 'To go', v: this.money(Math.abs(diff)), tone: diff >= 0 ? 'good' : 'warn' },
+        ],
+      }
+    },
+    statTip(key) {
+      const today = this.num(this.todaySales)
+      const marginToday = today ? ((this.todaysProfit / today) * 100).toFixed(1) : '0.0'
+      switch (key) {
+        case 'tx':
+          return { title: 'Transactions today', rows: [
+            { k: 'Completed sales', v: this.formatNumber(this.transactionsToday) },
+            { k: 'Items per sale', v: this.transactionsToday ? (this.num(this.itemsSoldToday) / this.num(this.transactionsToday)).toFixed(1) : '0.0' },
+          ] }
+        case 'items':
+          return { title: 'Items sold today', rows: [
+            { k: 'Units sold', v: this.formatNumber(this.itemsSoldToday) },
+            { k: 'Transactions', v: this.formatNumber(this.transactionsToday) },
+          ] }
+        case 'avg':
+          return { title: 'Average sale', note: 'Sales today divided by transactions.', rows: [
+            { k: 'Average sale', v: this.money(this.avgTodaySale) },
+            { k: 'Sales today', v: this.money(this.todaySales) },
+            { k: 'Transactions', v: this.formatNumber(this.transactionsToday) },
+          ] }
+        case 'todayProfit':
+          return { title: 'Profit today', rows: [
+            { k: 'Profit', v: this.money(this.todaysProfit), tone: 'good' },
+            { k: 'Sales', v: this.money(this.todaySales) },
+            { k: 'Margin', v: marginToday + '%' },
+          ] }
+        case 'profit':
+          return { title: `${this.monthName} profit`, rows: [
+            { k: 'Profit', v: this.money(this.totalProfit), tone: 'good' },
+            { k: 'Sales so far', v: this.money(this.monthlyTotal) },
+            { k: 'Margin', v: this.monthMarginPct + '%' },
+          ] }
+        case 'margin':
+          return { title: 'Profit margin', note: 'Profit divided by sales for the month so far.', rows: [
+            { k: 'Margin', v: this.monthMarginPct + '%' },
+            { k: 'Profit', v: this.money(this.totalProfit), tone: 'good' },
+            { k: 'Sales', v: this.money(this.monthlyTotal) },
+          ] }
+        case 'best': {
+          const d = this.bestDay
+          if (!d) return { title: 'Best day', note: 'No sales recorded yet this month.' }
+          const share = this.num(this.monthlyTotal) ? ((d.total / this.num(this.monthlyTotal)) * 100).toFixed(1) : '0.0'
+          return { title: 'Best day of the month', rows: [
+            { k: 'Date', v: this.bestDayLabel },
+            { k: 'Sales', v: this.money(d.total) },
+            { k: 'Profit', v: this.money(d.profit), tone: 'good' },
+            { k: 'Share of month', v: share + '%' },
+          ] }
+        }
+        default:
+          return { title: '' }
+      }
+    },
+    dayTip(key) {
+      const r = this.monthRows.find((x) => x.key === key) || { total: 0, profit: 0 }
+      const title = new Date(key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+      if (!(r.total > 0)) return { title, note: 'No sales on this day.' }
+      const margin = ((r.profit / r.total) * 100).toFixed(1)
+      const avg = this.monthAvg
+      const vs = avg ? ((r.total - avg) / avg) * 100 : 0
+      return { title, rows: [
+        { k: 'Sales', v: this.money(r.total) },
+        { k: 'Profit', v: this.money(r.profit), tone: 'good' },
+        { k: 'Margin', v: margin + '%' },
+        { k: 'Vs daily average', v: `${vs >= 0 ? '+' : ''}${vs.toFixed(1)}%`, tone: vs >= 0 ? 'good' : 'bad' },
+      ] }
+    },
+    splitTip(kind) {
+      const r = this.activeRow
+      const isProfit = kind === 'profit'
+      const value = isProfit ? r.profit : this.activeCost
+      const pct = r.total ? (value / r.total) * 100 : 0
+      return {
+        title: isProfit ? 'Profit' : 'Cost of goods',
+        color: isProfit ? '#10b981' : '#EA580C',
+        rows: [
+          { k: 'Amount', v: this.money(value) },
+          { k: 'Share of sales', v: pct.toFixed(1) + '%' },
+          { k: 'Total sales', v: this.money(r.total) },
+        ],
+      }
+    },
+    mixTip(r) {
+      if (!r) return { title: '' }
+      const rows = [{ k: this.mixMetric === 'qty' ? 'Share of units' : 'Share of sales', v: r.pct.toFixed(1) + '%' }, { k: 'Sales', v: this.money(r.sales) }]
+      if (r.qty !== null) {
+        rows.push({ k: 'Units sold', v: this.formatNumber(r.qty) })
+        rows.push({ k: 'Average price', v: this.money(r.qty ? r.sales / r.qty : 0) })
+      } else {
+        rows.push({ k: 'Includes', v: 'All other products' })
+      }
+      if (r.rank) rows.unshift({ k: 'Rank', v: '#' + r.rank })
+      return { title: r.name, color: r.color, rows }
+    },
+    coverageTip() {
+      const c = this.stockCoverage
+      if (!c) return { title: '' }
+      return { title: 'Item coverage', note: 'Active items are the ones available to sell.', rows: [
+        { k: 'Active', v: this.formatNumber(c.active), tone: 'good' },
+        { k: 'Inactive', v: this.formatNumber(Math.max(c.total - c.active, 0)) },
+        { k: 'Total items', v: this.formatNumber(c.total) },
+        { k: 'Active share', v: c.pct + '%' },
+      ] }
+    },
+    tileTip(kind) {
+      const hint = this.canProducts ? 'Select to open the product list.' : ''
+      if (kind === 'hand') {
+        return { title: 'Stock in hand', note: hint, rows: [
+          { k: 'On the shelf', v: this.formatNumber(this.inventorySummary.quantity_in_hand) },
+          { k: 'Incoming', v: this.formatNumber(this.inventorySummary.quantity_to_receive) },
+        ] }
+      }
+      if (kind === 'low') {
+        return { title: 'Low stock', note: ('Still available, but at or below the reorder level. ' + hint).trim(), rows: [
+          { k: 'Items', v: this.formatNumber(this.lowStockCount), tone: this.lowStockCount > 0 ? 'warn' : '' },
+        ] }
+      }
+      return { title: 'Out of stock', note: ('Cannot be sold until restocked. ' + hint).trim(), rows: [
+        { k: 'Items', v: this.formatNumber(this.outOfStockCount), tone: this.outOfStockCount > 0 ? 'bad' : '' },
+      ] }
     },
 
     /* ── ENTRANCE ANIMATION ─────────────────────────────────
@@ -745,6 +1054,7 @@ export default {
       const seq = ++this.requestSeq
       this.loading = true
       this.loadError = ''
+      this.tipClose()
       try {
         const [res, yesterday, lastMonth] = await Promise.all([
           api.get(DASHBOARD_URL, { params: { date_range: 'this_month' } }),
@@ -795,18 +1105,24 @@ export default {
   --d-ease: cubic-bezier(.16, 1, .3, 1);
 
   /* ── SPACE TUNING ──────────────────────────────────────────
-     The app shell (Layout.vue) adds roughly 64px of its own padding around
-     every page. --bleed-* lets this page reclaim part of it on desktop.
-     Raise a value to push the content closer to the edge, lower it (or set
-     it to 0px) if content ever touches the sidebar or top bar. */
+     The app shell (Layout.vue) adds its own padding around every page.
+     --bleed-x / --bleed-y let this page reclaim part of that padding
+     (left, right and top) on EVERY screen size. Each breakpoint below
+     sets its own values. Raise a value to push content closer to the
+     edge; lower it (or set 0px) if content ever touches the sidebar,
+     top bar or screen edge. */
   --bleed-x: 30px;
   --bleed-y: 26px;
   --d-gap: 16px;
+  --d-pad-x: 24px;
 
-  min-height: 100%; background: var(--d-bg); padding: 16px 24px 40px;
+  min-height: 100%; background: var(--d-bg);
+  padding: 16px max(var(--d-pad-x), env(safe-area-inset-right)) 40px max(var(--d-pad-x), env(safe-area-inset-left));
+  margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--d-gap);
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 html[data-theme="dark"] .dash {
   --d-green-soft: rgba(16,185,129,.16); --d-blue-soft: rgba(59,130,246,.18); --d-violet-soft: rgba(99,102,241,.2);
@@ -815,7 +1131,7 @@ html[data-theme="dark"] .dash {
   --d-shadow-hover: 0 2px 4px rgba(0,0,0,.35), 0 20px 44px -16px rgba(0,0,0,.7);
   --d-shine: rgba(255,255,255,.07);
 }
-.dash button:focus-visible, .dash a:focus-visible, .dash input:focus-visible { outline: 2px solid var(--d-accent); outline-offset: 2px; }
+.dash button:focus-visible, .dash a:focus-visible, .dash input:focus-visible, .dash [tabindex]:focus-visible { outline: 2px solid var(--d-accent); outline-offset: 2px; }
 .dash-body { display: flex; flex-direction: column; gap: var(--d-gap); transition: opacity .2s ease; }
 .dash-body.is-loading { opacity: .7; }
 .green { color: var(--d-green); }
@@ -824,6 +1140,7 @@ html[data-theme="dark"] .dash {
 
 /* ── header ── */
 .page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.page-header-l { min-width: 0; }
 .page-title { font-size: 26px; font-weight: 800; color: var(--d-text); letter-spacing: -.03em; margin: 0; line-height: 1.15; }
 .page-sub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 0; font-size: 13.5px; font-weight: 500; color: var(--d-text-2); }
 .status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--d-muted); padding: 2px 10px 2px 8px; background: var(--d-surface); border: 1px solid var(--d-border); border-radius: 999px; }
@@ -839,17 +1156,13 @@ html[data-theme="dark"] .dash {
   box-shadow: 0 1px 2px rgba(16,24,40,.05);
   transition: border-color .15s ease, color .15s ease, transform .15s ease, box-shadow .15s ease, filter .15s ease;
 }
-.btn:hover:not(:disabled) { border-color: var(--d-accent-border); color: var(--d-text); transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgba(16,24,40,.18); }
-.btn:active:not(:disabled) { transform: translateY(0); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(.98); }
 .btn:disabled { opacity: .55; cursor: default; }
 .btn i { font-size: 11px; }
 .btn--primary { background: var(--d-accent); border-color: var(--d-accent); color: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.12), inset 0 1px 0 rgba(255,255,255,.18); }
-.btn--primary:hover:not(:disabled) { color: #fff; border-color: var(--d-accent); filter: brightness(1.07); }
 
 .link-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--d-accent); padding: 5px 9px; border-radius: 8px; text-decoration: none; white-space: nowrap; transition: background-color .15s ease; }
-.link-btn:hover { background: var(--d-accent-soft); }
 .link-btn i { font-size: 9px; transition: transform .2s var(--d-ease); }
-.link-btn:hover i { transform: translateX(3px); }
 
 /* ── notices: slim one-line bars, color-coded with a bold left edge ── */
 .notices { display: flex; flex-direction: column; gap: 6px; }
@@ -866,7 +1179,6 @@ html[data-theme="dark"] .dash {
 .notice--warn { background: var(--d-amber-soft); border: 1px solid rgba(245,158,11,.32); border-left: 4px solid var(--d-amber); }
 .notice--warn > i { color: var(--d-amber); background: rgba(245,158,11,.18); }
 .notice-btn { flex-shrink: 0; border: 1px solid var(--d-accent-border); background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; color: var(--d-accent); padding: 4px 12px; border-radius: 8px; text-decoration: none; white-space: nowrap; transition: background-color .15s ease; }
-.notice-btn:hover { background: var(--d-accent-soft); }
 
 /* ── cards ── */
 .card {
@@ -883,7 +1195,6 @@ html[data-theme="dark"] .dash {
   content: ''; position: absolute; top: 0; left: 24px; right: 24px; height: 1px; pointer-events: none;
   background: linear-gradient(90deg, transparent, var(--d-shine), transparent);
 }
-.card:hover { box-shadow: var(--d-shadow-hover); border-color: var(--d-border-strong); }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 
 .card--hero { overflow: hidden; }
@@ -914,24 +1225,23 @@ html[data-theme="dark"] .dash {
 /* ── segmented control ── */
 .seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--d-sunken); border: 1px solid var(--d-border); border-radius: 11px; }
 .seg-btn { border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; color: var(--d-muted); padding: 6px 12px; border-radius: 8px; transition: background-color .2s ease, color .2s ease, box-shadow .2s ease; }
-.seg-btn:hover:not(.seg-btn--active) { color: var(--d-text); }
 .seg-btn--active { background: var(--d-surface); color: var(--d-text); box-shadow: 0 1px 3px rgba(16,24,40,.16), 0 0 0 1px var(--d-border); }
 
 /* ── trend + big numbers ── */
-.kpi-trend { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 20px; display: inline-flex; align-items: center; gap: 5px; cursor: help; }
+.kpi-trend { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 20px; display: inline-flex; align-items: center; gap: 5px; cursor: default; }
 .kpi-trend i { font-size: 9.5px; }
 .kpi-trend.up { color: var(--d-green); background: var(--d-green-soft); }
 .kpi-trend.down { color: var(--d-red); background: var(--d-red-soft); }
 .kpi-trend.flat { color: var(--d-muted); background: var(--d-raised); }
 .trend-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 0; font-size: 12.5px; color: var(--d-muted); }
-.big-value { margin: 0; font-size: clamp(32px, 4.2vw, 46px); font-weight: 800; color: var(--d-text); letter-spacing: -.04em; line-height: 1.02; font-variant-numeric: tabular-nums; }
+.big-value { margin: 0; font-size: clamp(32px, 4.2vw, 46px); font-weight: 800; color: var(--d-text); letter-spacing: -.04em; line-height: 1.02; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .big-value--sm { font-size: clamp(28px, 3.2vw, 36px); }
 
 .hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .hero-main { min-width: 0; }
 
-/* sparkline */
-.spark { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+/* sparkline (decorative only) */
+.spark { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; pointer-events: none; user-select: none; }
 .spark svg { width: 150px; height: 46px; overflow: visible; }
 .spark-line { fill: none; stroke: var(--d-accent); stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset 1.4s var(--d-ease) .15s; }
 .spark-line.is-on { stroke-dashoffset: 0; }
@@ -946,12 +1256,14 @@ html[data-theme="dark"] .dash {
 .goal-input { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--d-border-strong); border-radius: 9px; background: var(--d-sunken); color: var(--d-muted); font-weight: 700; transition: border-color .15s ease, box-shadow .15s ease; }
 .goal-input:focus-within { border-color: var(--d-accent); box-shadow: 0 0 0 3px var(--d-accent-soft); }
 .goal-input input { width: 90px; border: none; background: transparent; font: inherit; font-weight: 700; color: var(--d-text); text-align: right; outline: none; }
-.goal-track { height: 10px; border-radius: 10px; background: var(--d-sunken); box-shadow: inset 0 1px 2px rgba(16,24,40,.08); overflow: hidden; }
+/* The track is the click/tap target: padded a little so thin bars are easy to hit */
+.goal-track { position: relative; height: 10px; border-radius: 10px; background: var(--d-sunken); box-shadow: inset 0 1px 2px rgba(16,24,40,.08); overflow: hidden; cursor: default; touch-action: manipulation; transition: box-shadow .2s ease, transform .2s var(--d-ease); }
+.goal-track::after { content: ''; position: absolute; inset: -8px 0; } /* bigger invisible hit area (clipped by overflow, so keep track tall enough on touch) */
 .goal-fill {
   height: 100%; border-radius: 10px;
   background: linear-gradient(90deg, var(--d-accent), color-mix(in srgb, var(--d-accent) 70%, #fbbf24));
   box-shadow: 0 0 12px -2px color-mix(in srgb, var(--d-accent) 60%, transparent);
-  transition: width 1.1s var(--d-ease);
+  transition: width 1.1s var(--d-ease), filter .2s ease;
 }
 .goal-fill--done { background: linear-gradient(90deg, #059669, var(--d-green)); box-shadow: 0 0 12px -2px rgba(16,185,129,.55); }
 .goal-fill--blue { background: linear-gradient(90deg, #2563eb, var(--d-blue)); box-shadow: 0 0 12px -2px rgba(59,130,246,.55); }
@@ -960,14 +1272,12 @@ html[data-theme="dark"] .dash {
 /* ── mini stats ── */
 .mini-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; margin: 20px 0 0; }
 .mini-stats--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.ms { padding: 12px 14px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 12px; min-width: 0; transition: border-color .2s ease, transform .2s var(--d-ease); }
-.ms:hover { border-color: var(--d-accent-border); transform: translateY(-2px); }
+.ms { padding: 12px 14px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 12px; min-width: 0; cursor: default; transition: border-color .2s ease, transform .2s var(--d-ease); }
 .mini-stats dt { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: var(--d-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini-stats dt i { font-size: 10px; color: var(--d-faint); }
 .mini-stats dd { margin: 5px 0 0; font-size: 16px; font-weight: 700; color: var(--d-text); letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini-stats dd.green { color: var(--d-green); }
 .ms-sub { display: block; margin-top: 3px; font-size: 11.5px; color: var(--d-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
 
 /* ── calendar ── */
 .cal-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 28px; align-items: start; }
@@ -977,13 +1287,13 @@ html[data-theme="dark"] .dash {
 .cal-day {
   aspect-ratio: 1.15; border: 1px solid transparent; border-radius: 10px; cursor: pointer;
   font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--d-text-2);
+  touch-action: manipulation;
   transition: transform .15s var(--d-ease), border-color .15s ease, box-shadow .15s ease, background-color .3s ease;
   /* staggered entrance; `backwards` so it never overrides the hover transform afterwards */
   animation: cal-pop .5s var(--d-ease) backwards;
   animation-delay: calc(var(--i, 0) * 16ms + 200ms);
 }
 @keyframes cal-pop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
-.cal-day:hover:not(:disabled) { transform: scale(1.1); border-color: rgb(var(--lv)); box-shadow: 0 6px 14px -6px rgba(var(--lv), .6); z-index: 1; }
 .cal-day:disabled { cursor: default; opacity: .35; }
 .cal-day--today { border-color: var(--d-text-2); }
 .cal-day--sel { border-color: rgb(var(--lv)); box-shadow: 0 0 0 3px rgba(var(--lv), .28); color: var(--d-text); }
@@ -1001,9 +1311,9 @@ html[data-theme="dark"] .dash {
 .day-head { display: flex; align-items: center; gap: 10px; min-height: 28px; }
 .day-title { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--d-text); }
 .day-head .link-btn { margin-left: auto; }
-.day-value { margin: 8px 0 14px; font-size: 30px; font-weight: 800; color: var(--d-text); letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.day-value { margin: 8px 0 14px; font-size: 30px; font-weight: 800; color: var(--d-text); letter-spacing: -.035em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .split-bar { display: flex; gap: 3px; height: 10px; border-radius: 10px; overflow: hidden; }
-.split-seg { display: block; height: 100%; cursor: help; transition: width 1s var(--d-ease); }
+.split-seg { display: block; height: 100%; cursor: default; transition: width 1s var(--d-ease), filter .2s ease; touch-action: manipulation; }
 .split-seg--profit { background: linear-gradient(90deg, #059669, var(--d-green)); border-radius: 10px 3px 3px 10px; }
 .split-seg--cost { background: linear-gradient(90deg, var(--d-accent), color-mix(in srgb, var(--d-accent) 75%, #fbbf24)); border-radius: 3px 10px 10px 3px; }
 .split-legend { display: flex; gap: 16px; margin-top: 9px; font-size: 11.5px; color: var(--d-muted); }
@@ -1022,7 +1332,7 @@ html[data-theme="dark"] .dash {
 .mix-insight { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--d-accent-soft); border: 1px solid var(--d-accent-border); font-size: 12.5px; line-height: 1.55; color: var(--d-text-2); }
 .mix-insight i { margin-top: 2px; font-size: 12px; color: var(--d-accent); }
 .mix-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: center; }
-@container (max-width: 520px) { .mix-body { grid-template-columns: minmax(0, 1fr); } .donut { margin: 0 auto; } }
+@container (max-width: 520px) { .mix-body { grid-template-columns: minmax(0, 1fr); } .donut { margin: 0 auto; width: min(240px, 100%); } }
 
 .donut { position: relative; width: 200px; max-width: 100%; aspect-ratio: 1; }
 .donut svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 6px 14px rgba(16,24,40,.12)); }
@@ -1038,8 +1348,7 @@ html[data-theme="dark"] .dash {
 .mix-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mix-list li { border: 1px solid transparent; border-radius: 12px; transition: background-color .2s ease, border-color .2s ease; }
 .mix-list li.mix-item--sel { background: var(--d-accent-soft); border-color: var(--d-accent-border); }
-.mix-row { display: flex; flex-direction: column; gap: 9px; width: 100%; padding: 11px 13px; border: none; border-radius: 12px; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; transition: background-color .2s ease; }
-.mix-row:hover { background: var(--d-raised); }
+.mix-row { display: flex; flex-direction: column; gap: 9px; width: 100%; padding: 11px 13px; border: none; border-radius: 12px; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; touch-action: manipulation; transition: background-color .2s ease; }
 .mix-row--on { background: var(--d-raised); }
 .mix-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mix-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px var(--d-surface); }
@@ -1048,7 +1357,7 @@ html[data-theme="dark"] .dash {
 .mix-pct { width: 48px; text-align: right; font-size: 12.5px; font-weight: 700; color: var(--d-text-2); font-variant-numeric: tabular-nums; }
 .mix-bar { display: block; height: 6px; border-radius: 6px; background: var(--d-sunken); overflow: hidden; }
 .mix-bar-fill { display: block; height: 100%; border-radius: 6px; transition: width 1s var(--d-ease); }
-.mix-detail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 2px 13px 13px 33px; }
+.mix-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 10px; margin: 0; padding: 2px 13px 13px 33px; }
 .mix-detail dt { font-size: 11.5px; color: var(--d-muted); }
 .mix-detail dd { margin: 2px 0 0; font-size: 13px; font-weight: 700; color: var(--d-text); font-variant-numeric: tabular-nums; }
 .mix-link { align-self: flex-start; }
@@ -1061,15 +1370,13 @@ html[data-theme="dark"] .dash {
 /* ── stock ── */
 .tile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .tile { display: block; text-decoration: none; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 14px; padding: 14px 16px 16px; transition: border-color .2s ease, transform .25s var(--d-ease), box-shadow .25s ease; }
-.tile:hover { border-color: var(--d-accent-border); transform: translateY(-3px); box-shadow: 0 12px 24px -14px rgba(16,24,40,.28); }
-/* Non-clickable version (roles without Product List access): no lift, default cursor */
+/* Plain version (roles without Product List access): no lift, click shows a short note */
 .tile--static, .tile--static:hover { cursor: default; transform: none; box-shadow: none; border-color: var(--d-border); }
 .tile--warn.tile--static:hover { border-color: rgba(245,158,11,.35); }
 .tile--alert.tile--static:hover { border-color: rgba(244,63,94,.28); }
 .tile-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .tile-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--d-violet); background: var(--d-violet-soft); }
 .tile-go { font-size: 10px; color: var(--d-faint); opacity: 0; transform: translate(-3px, 3px); transition: opacity .2s ease, transform .2s var(--d-ease); }
-.tile:hover .tile-go { opacity: 1; transform: translate(0, 0); }
 .tile-label { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--d-muted); }
 .tile-value { margin: 4px 0 2px; font-size: 28px; font-weight: 800; color: var(--d-text); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .tile-sub { margin: 0; font-size: 12px; color: var(--d-muted); }
@@ -1086,11 +1393,36 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
 .coverage-head strong { color: var(--d-text); font-weight: 700; }
 .link-list { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
 .link-list a { display: flex; align-items: center; gap: 12px; padding: 11px 10px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--d-text-2); text-decoration: none; transition: background-color .15s ease, color .15s ease; }
-.link-list a:hover { background: var(--d-raised); color: var(--d-accent); }
 .link-list a i:first-child { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--d-sunken); color: var(--d-muted); font-size: 11.5px; transition: background-color .15s ease, color .15s ease; }
-.link-list a:hover i:first-child { background: var(--d-accent-soft); color: var(--d-accent); }
 .link-list a i:last-child { margin-left: auto; font-size: 9px; color: var(--d-faint); transition: transform .2s var(--d-ease); }
-.link-list a:hover i:last-child { transform: translateX(3px); color: var(--d-accent); }
+
+/* ── shared tooltip ── */
+.tip {
+  position: fixed; z-index: 80; pointer-events: none;
+  width: max-content; min-width: 150px; max-width: min(250px, calc(100vw - 16px));
+  padding: 10px 12px 11px; border-radius: 12px;
+  background: rgba(15, 23, 42, .96); color: #f8fafc;
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 12px 32px -8px rgba(2,6,23,.5), 0 2px 6px rgba(2,6,23,.25);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  opacity: 0; transform: translate(-50%, -100%) translateY(4px);
+  transition: opacity .14s ease, transform .14s ease;
+  font-size: 12px; line-height: 1.4;
+}
+.tip--on { opacity: 1; transform: translate(-50%, -100%); }
+.tip--below { transform: translate(-50%, 0) translateY(-4px); }
+.tip--below.tip--on { transform: translate(-50%, 0); }
+.tip-title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; font-weight: 700; letter-spacing: -.005em; }
+.tip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(255,255,255,.14); }
+.tip-rows { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; gap: 5px; }
+.tip-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.tip-row dt { color: #94a3b8; font-weight: 500; }
+.tip-row dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.tip-good { color: #34d399; }
+.tip-warn { color: #fbbf24; }
+.tip-bad { color: #fb7185; }
+.tip-note { margin: 8px 0 0; color: #cbd5e1; font-size: 11.5px; line-height: 1.45; }
+.tip-title + .tip-note { margin-top: 5px; }
 
 /* ── skeleton ── */
 .sk-card { display: flex; flex-direction: column; gap: 16px; animation: none; }
@@ -1102,23 +1434,122 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
 .sk-block { height: 90px; border-radius: 14px; }
 .sk-tall { height: 240px; }
 
-/* ── responsive ── */
-/* Desktop only: pull the page outward into the shell's padding (top, left, right) */
-@media (min-width: 1001px) {
-  .dash { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+/* ── hover effects: only on devices that really hover (no sticky hover on touch) ── */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled) { border-color: var(--d-accent-border); color: var(--d-text); transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgba(16,24,40,.18); }
+  .btn--primary:hover:not(:disabled) { color: #fff; border-color: var(--d-accent); filter: brightness(1.07); }
+  .link-btn:hover { background: var(--d-accent-soft); }
+  .link-btn:hover i { transform: translateX(3px); }
+  .notice-btn:hover { background: var(--d-accent-soft); }
+  .card:hover { box-shadow: var(--d-shadow-hover); border-color: var(--d-border-strong); }
+  .seg-btn:hover:not(.seg-btn--active) { color: var(--d-text); }
+  .ms:hover { border-color: var(--d-accent-border); transform: translateY(-2px); }
+  .goal-track:hover { box-shadow: inset 0 1px 2px rgba(16,24,40,.08), 0 0 0 3px var(--d-accent-soft); }
+  .goal-track:hover .goal-fill { filter: brightness(1.08); }
+  .cal-day:hover:not(:disabled) { transform: scale(1.1); border-color: rgb(var(--lv)); box-shadow: 0 6px 14px -6px rgba(var(--lv), .6); z-index: 1; }
+  .split-seg:hover { filter: brightness(1.12); }
+  .mix-row:hover { background: var(--d-raised); }
+  .tile:hover:not(.tile--static) { border-color: var(--d-accent-border); transform: translateY(-3px); box-shadow: 0 12px 24px -14px rgba(16,24,40,.28); }
+  .tile:hover .tile-go { opacity: 1; transform: translate(0, 0); }
+  .link-list a:hover { background: var(--d-raised); color: var(--d-accent); }
+  .link-list a:hover i:first-child { background: var(--d-accent-soft); color: var(--d-accent); }
+  .link-list a:hover i:last-child { transform: translateX(3px); color: var(--d-accent); }
 }
-@media (max-width: 1000px) { .row-two, .cal-layout { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 900px) { .dash { padding: 12px 14px 32px; --d-gap: 14px; } }
+
+/* ── responsive ──
+   --bleed-x / --bleed-y reclaim the shell's padding at every size, and
+   --d-pad-x is the page's own inner side padding. */
+
+/* Large screens: more breathing room and slightly roomier cards */
+@media (min-width: 1500px) {
+  .dash { --d-gap: 20px; --d-pad-x: 32px; padding-bottom: 48px; }
+  .card { padding: 24px 26px; }
+}
+
+/* Tablets and below: single column layout */
+@media (max-width: 1000px) {
+  .dash { --bleed-x: 22px; --bleed-y: 20px; }
+  .row-two, .cal-layout { grid-template-columns: minmax(0, 1fr); }
+  .cal-layout { gap: 20px; }
+  /* with the full width available, keep the product donut and list side by side */
+  .mix-body { grid-template-columns: 200px minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .dash { --d-pad-x: 16px; --d-gap: 14px; padding-top: 12px; padding-bottom: 32px; }
+}
+
+/* Phones */
 @media (max-width: 600px) {
-  .card { padding: 18px 16px; border-radius: 16px; }
-  .page-header { flex-direction: column; align-items: stretch; }
+  .dash { --bleed-x: 16px; --bleed-y: 16px; --d-pad-x: 12px; --d-gap: 12px; padding-top: 10px; }
+
+  .card { padding: 16px 14px; border-radius: 16px; }
+  .card::before { left: 16px; right: 16px; }
+  .card-header { gap: 12px; margin-bottom: 14px; }
+  .card-head-l { width: 100%; }
+
+  /* header: title on top, full-width 44px touch buttons below */
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
   .page-title { font-size: 24px; }
-  .notice { flex-wrap: wrap; }
-  .mini-stats, .mini-stats--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .spark { align-items: flex-start; }
-  .day { padding: 16px; }
-  .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .page-header-right { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; }
+  .btn { height: 44px; font-size: 13px; }
+
+  /* notices: message on top, action button spans the full width */
+  .notice { flex-wrap: wrap; padding: 8px 10px 8px 12px; }
+  .notice > span { flex-basis: calc(100% - 40px); }
+  .notice-btn { flex-basis: 100%; text-align: center; padding: 9px 12px; }
+
+  /* segmented controls fill the card width and are easy to tap */
+  .seg { width: 100%; }
+  .seg-btn { flex: 1; padding: 9px 8px; font-size: 12.5px; }
+
+  /* hero: number first, then the decorative line spans the full width */
+  .hero-row { flex-direction: column; align-items: stretch; gap: 14px; }
+  .spark { align-items: stretch; width: 100%; }
+  .spark svg { width: 100%; height: 56px; }
+  .spark-cap { align-self: flex-end; }
+
+  .goal { margin-top: 18px; }
+  .goal-track { height: 12px; }
+  .goal-input input { width: 100px; font-size: 16px; } /* 16px stops iOS zooming into the field */
+
+  .mini-stats, .mini-stats--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+  .ms { padding: 11px 12px; }
+  .mini-stats--3 .ms:last-child { grid-column: 1 / -1; }
+
+  /* calendar: bigger square tap targets across the whole width */
+  .cal { gap: 5px; }
+  .cal-day { aspect-ratio: 1; border-radius: 9px; font-size: 12.5px; }
+  .day { padding: 16px 14px; }
+  .day-value { font-size: 28px; }
+  .split-bar { height: 12px; }
+
+  /* sales mix: donut centered, list underneath */
+  .mix { gap: 14px; }
+  .mix-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .donut { margin: 0 auto; width: min(230px, 100%); }
+  .mix-row { padding: 12px 10px; }
+  .mix-detail { padding: 2px 10px 12px 30px; }
+
+  /* stock: "In hand" spans the top, the two alerts sit side by side */
+  .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .tile--first { grid-column: 1 / -1; }
+  .tile { padding: 12px 14px 14px; }
+  .coverage { padding: 12px 14px; }
+  .link-list a { padding: 13px 10px; }
+
+  /* tooltip a touch narrower so it never crowds the screen edge */
+  .tip { min-width: 140px; max-width: calc(100vw - 20px); }
 }
+
+/* Very small phones */
+@media (max-width: 360px) {
+  .dash { --d-pad-x: 10px; }
+  .card { padding: 14px 12px; }
+  .big-value { font-size: 30px; }
+  .cal { gap: 4px; }
+  .mix-amt { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dash * { transition: none !important; animation: none !important; }
   .spark-line { stroke-dashoffset: 0; }

@@ -2,19 +2,19 @@
   <Layout>
     <div class="prod-page">
 
-      <!-- ── PAGE HEADER ── -->
+      <!-- ── PAGE HEADER (one row: INVENTORY / Edit Product) ── -->
       <div class="page-header">
-        <div>
-          <p class="page-eyebrow">Inventory</p>
-          <h1 class="page-title">Edit Product</h1>
+        <div class="page-heading">
+          <div class="page-title-row">
+            <span class="page-eyebrow">Inventory</span>
+            <span class="page-crumb-sep" aria-hidden="true">/</span>
+            <h1 class="page-title">Edit Product</h1>
+          </div>
           <p v-if="!pageLoading && form.ProductName" class="page-sub">
             {{ form.ProductName }}
             <span class="sku-chip" :class="{ 'sku-chip--empty': !form.SKU }">{{ form.SKU || 'No SKU yet' }}</span>
           </p>
         </div>
-        <RouterLink to="/products" class="btn btn--ghost">
-          <i class="fa-solid fa-arrow-left"></i> Back to List
-        </RouterLink>
       </div>
 
       <!-- ── FLOATING TOASTS (always visible, even when scrolled) ── -->
@@ -892,15 +892,16 @@ onBeforeUnmount(() => {
   /* ── SPACE TUNING (same values as the Product List) ──
      The app shell (Layout.vue) adds roughly 64px of its own padding around every page.
      --bleed-* reclaims part of it on desktop, on the top AND on both sides.
+     The page was pulled up: --bleed-y is larger and the page's own top padding is smaller.
      Lower a value (or set it to 0px) if content ever touches the sidebar or top bar. */
   --bleed-x: 30px;
-  --bleed-y: 26px;
-  --p-gap: 18px;
+  --bleed-y: 30px;
+  --p-gap: 14px;
 
   min-height: 100%;
   overflow-x: clip;             /* the page never scrolls sideways (clip, so sticky keeps working) */
   background: var(--p-bg);
-  padding: 16px 24px 40px;
+  padding: 8px 24px 40px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--p-gap);
   transition: background-color .22s ease;
@@ -942,10 +943,14 @@ onBeforeUnmount(() => {
   .col-side .form-card-sub { display: none; }
 }
 
-.page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.page-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--p-accent); text-transform: uppercase; margin: 0 0 5px; }
-.page-title   { font-size: 26px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.03em; margin: 0; transition: color .22s; }
-.page-sub     { margin: 6px 0 0; font-size: 13.5px; color: var(--p-text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+/* PAGE HEADER — one row: "INVENTORY / Edit Product", both words the same size */
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page-heading { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.page-title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.page-eyebrow { font-size: 16px; font-weight: 700; letter-spacing: .12em; color: var(--p-accent); text-transform: uppercase; line-height: 1.2; margin: 0; }
+.page-crumb-sep { font-size: 16px; font-weight: 300; color: var(--p-text-faint); line-height: 1.2; }
+.page-title   { font-size: 16px; font-weight: 800; color: var(--p-text-primary); letter-spacing: -.02em; line-height: 1.2; margin: 0; transition: color .22s; }
+.page-sub     { margin: 2px 0 0; font-size: 13px; color: var(--p-text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .sku-chip {
   font-size: 11.5px; font-weight: 700; padding: 2px 10px; border-radius: 20px;
   background: var(--p-surface-raised); border: 1px solid var(--p-border); color: var(--p-text-secondary);
@@ -1300,10 +1305,11 @@ html[data-theme="dark"] .margin-hint--loss { color: #F87171; }
   .summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
-  .prod-page { padding: 12px 14px 32px; --p-gap: 14px; }
+  .prod-page { padding: 8px 14px 32px; --p-gap: 12px; }
 }
 @media (max-width: 800px) {
-  .prod-page { padding: 16px 16px 24px; }
+  .prod-page { padding: 8px 16px 24px; }
+  .page-eyebrow, .page-title, .page-crumb-sep { font-size: 14px; }
   .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
   .spec-row { grid-template-columns: 1fr 1fr; }
   .spec-row .spec-remove { grid-column: 2; justify-self: end; }

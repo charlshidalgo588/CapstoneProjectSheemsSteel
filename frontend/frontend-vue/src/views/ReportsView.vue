@@ -209,11 +209,11 @@
             <!-- Hero: sales + profit + margin -->
             <article class="stat stat--hero">
               <div class="hero-cols">
-                <div class="hero-col">
+                <div class="hero-col hero-col--tip" tabindex="0" v-bind="tipBind(() => heroTip('sales'))">
                   <p class="stat-label">Total sales</p>
                   <p class="stat-value stat-value--xl">₱{{ price(animated.sales) }}</p>
                   <p v-if="salesTrend.available" class="trend-line">
-                    <span class="trend-badge" :class="salesTrend.direction">
+                    <span class="trend-badge" :class="salesTrend.direction" tabindex="0" v-bind="tipBind(() => trendTip())">
                       <i :class="trendIcon"></i>{{ salesTrend.text }}
                     </span>
                     <span>vs {{ comparisonLabel }}</span>
@@ -221,7 +221,7 @@
                   <p v-else class="stat-note">No earlier period to compare.</p>
                 </div>
 
-                <div class="hero-col hero-col--profit">
+                <div class="hero-col hero-col--profit hero-col--tip" tabindex="0" v-bind="tipBind(() => heroTip('profit'))">
                   <p class="stat-label">Profit</p>
                   <p class="stat-value stat-value--xl stat-value--green">₱{{ price(animated.profit) }}</p>
                   <p class="stat-note">{{ profitMarginPct }}% of sales</p>
@@ -233,19 +233,19 @@
                   <span>Profit margin</span>
                   <strong>{{ profitMarginPct }}%</strong>
                 </div>
-                <div class="margin-track" role="img" :aria-label="`Profit margin ${profitMarginPct} percent`">
+                <div class="margin-track" role="progressbar" tabindex="0" :aria-valuenow="marginBarPct" aria-valuemin="0" aria-valuemax="100" :aria-label="`Profit margin ${profitMarginPct} percent`" v-bind="tipBind(() => marginTip())">
                   <div class="margin-fill" :style="{ width: marginBarPct + '%' }"></div>
                 </div>
               </div>
             </article>
 
             <!-- Secondary KPIs -->
-            <article v-for="s in secondaryStats" :key="s.key" class="stat">
+            <article v-for="s in secondaryStats" :key="s.key" class="stat stat--tip" tabindex="0" v-bind="tipBind(() => statTip(s.key))">
               <span class="stat-icon" :class="`stat-icon--${s.tone}`"><i class="fa-solid" :class="s.icon"></i></span>
               <div class="stat-body">
                 <p class="stat-label">{{ s.label }}</p>
-                <p class="stat-value" :class="{ 'stat-value--text': s.text }" :title="s.value">{{ s.value }}</p>
-                <p class="stat-sub" :title="s.sub">{{ s.sub }}</p>
+                <p class="stat-value" :class="{ 'stat-value--text': s.text }">{{ s.value }}</p>
+                <p class="stat-sub">{{ s.sub }}</p>
               </div>
             </article>
           </div>
@@ -327,7 +327,7 @@
                   :disabled="c.future"
                   :aria-pressed="!!heatActive && c.key === heatActive.key"
                   :aria-label="`${c.title}: ₱${price(c.v)}`"
-                  :title="`${c.title}: ₱${price(c.v)}`"
+                  v-bind="tipBind(() => heatTip(c))"
                   @click="selectHeat(c.key)"
                 >
                   <template v-if="heatShape === 'day'">
@@ -356,8 +356,8 @@
 
               <div v-if="heatDetail.cell.total > 0" class="split-wrap">
                 <div class="split-bar" role="img" :aria-label="`Profit ${heatDetail.margin} percent of sales`">
-                  <span class="split-seg split-seg--profit" :style="{ width: (barsReady ? heatDetail.profitPct : 0) + '%' }" :title="`Profit ₱${price(heatDetail.cell.profit)}`"></span>
-                  <span class="split-seg split-seg--cost" :style="{ width: (barsReady ? 100 - heatDetail.profitPct : 0) + '%' }" :title="`Cost ₱${price(heatDetail.cost)}`"></span>
+                  <span class="split-seg split-seg--profit" tabindex="0" :style="{ width: (barsReady ? heatDetail.profitPct : 0) + '%' }" v-bind="tipBind(() => splitTip('profit'))"></span>
+                  <span class="split-seg split-seg--cost" tabindex="0" :style="{ width: (barsReady ? 100 - heatDetail.profitPct : 0) + '%' }" v-bind="tipBind(() => splitTip('cost'))"></span>
                 </div>
                 <div class="split-legend"><span><i class="sl sl--profit"></i>Profit</span><span><i class="sl sl--cost"></i>Cost of goods</span></div>
               </div>
@@ -413,6 +413,7 @@
                       :stroke-dashoffset="a.offset"
                       tabindex="0" role="button"
                       :aria-label="`${mixDonut[i].name}, ${mixDonut[i].pct.toFixed(1)} percent`"
+                      v-bind="tipBind(() => mixTip(mixDonut[i]), { tap: false, pointer: true })"
                       @mouseenter="hoverSlice = i" @mouseleave="hoverSlice = null"
                       @focus="hoverSlice = i" @blur="hoverSlice = null"
                       @click="pickSlice(i)" @keydown.enter.prevent="pickSlice(i)" @keydown.space.prevent="pickSlice(i)"
@@ -427,7 +428,7 @@
                     <template v-else>
                       <strong>{{ topMetric === 'qty' ? formatNumber(mixBase) : '₱' + compact(mixBase) }}</strong>
                       <span class="dc-name">{{ topMetric === 'qty' ? 'Units sold' : 'Total sales' }}</span>
-                      <span class="dc-sub">Tap a slice or product</span>
+                      <span class="dc-sub">Hover or tap a slice</span>
                     </template>
                   </div>
                 </div>
@@ -439,6 +440,7 @@
                       class="mix-row"
                       :class="{ 'mix-row--on': focusSlice !== null && focusSlice === sliceOf(i) && mixSel !== i }"
                       :aria-pressed="mixSel === i"
+                      v-bind="tipBind(() => mixTip(r), { tap: false })"
                       @click="pickMix(i)"
                       @mouseenter="hoverRow = i" @mouseleave="hoverRow = null"
                       @focus="hoverRow = i" @blur="hoverRow = null"
@@ -498,7 +500,7 @@
               >
                 <component
                   :is="invLink(box) ? RouterLink : 'div'"
-                  v-bind="invLink(box) ? { to: invLink(box) } : {}"
+                  v-bind="invProps(box)"
                   class="inv-link"
                 >
                   <span class="inv-icon"><i class="fa-solid" :class="inventoryIcon(box)"></i></span>
@@ -517,7 +519,9 @@
                 <span>{{ formatNumber(stockCoverage.active) }} of {{ formatNumber(stockCoverage.total) }} items well stocked</span>
                 <strong>{{ stockCoverage.pct }}%</strong>
               </div>
-              <div class="coverage-track"><div class="coverage-fill" :style="{ width: stockCoverage.pct + '%' }"></div></div>
+              <div class="coverage-track" role="progressbar" tabindex="0" :aria-valuenow="stockCoverage.pct" aria-valuemin="0" aria-valuemax="100" v-bind="tipBind(() => coverageTip())">
+                <div class="coverage-fill" :style="{ width: stockCoverage.pct + '%' }"></div>
+              </div>
             </div>
           </aside>
         </div>
@@ -730,6 +734,29 @@
           <span>{{ BUSINESS_NAME }} · {{ reportTypeLabel }} · {{ periodLabel }} · Ref. {{ reportRef }}</span>
           <span>Generated {{ printGeneratedAt }}</span>
         </footer>
+      </div>
+
+      <!-- SHARED TOOLTIP: one floating card reused by every bar, heat cell, slice and stat.
+           Appears on hover (desktop), on tap (touch) and on keyboard focus, placed neatly
+           above the element it describes. (The trend line chart keeps its own Chart.js tooltip.) -->
+      <div
+        class="tip"
+        :class="{ 'tip--on': tip.show, 'tip--below': tip.below }"
+        :style="{ left: tip.x + 'px', top: tip.y + 'px' }"
+        role="tooltip"
+        aria-hidden="true"
+      >
+        <p class="tip-title">
+          <i v-if="tip.content.color" class="tip-dot" :style="{ background: tip.content.color }"></i>
+          <span>{{ tip.content.title }}</span>
+        </p>
+        <dl v-if="tip.content.rows && tip.content.rows.length" class="tip-rows">
+          <div v-for="(r, i) in tip.content.rows" :key="i" class="tip-row">
+            <dt>{{ r.k }}</dt>
+            <dd :class="r.tone ? 'tip-' + r.tone : ''">{{ r.v }}</dd>
+          </div>
+        </dl>
+        <p v-if="tip.content.note" class="tip-note">{{ tip.content.note }}</p>
       </div>
 
     </div>
@@ -1031,6 +1058,7 @@ const pickerLabel = computed(() => {
 })
 
 function openPicker() {
+  tipClose()
   if (pickerDaysMode.value) {
     const src = mode.value === 'week' ? (selectedWeek.value || currentWeekValue) : (selectedDay.value || currentDayValue)
     const [y, m] = src.split('-').map(Number)
@@ -1055,10 +1083,17 @@ function togglePicker() { pickerOpen.value ? closePicker() : openPicker() }
 
 function onDocPointer(e) {
   if (pickerOpen.value && pickerRoot.value && !pickerRoot.value.contains(e.target)) pickerOpen.value = false
+  // Tooltip: tapping anywhere that isn't a tooltip target closes it.
+  const t = e.target
+  if (!(t && t.closest && t.closest('[data-dash-tip]'))) tipClose()
 }
 function onDocKey(e) {
-  if (e.key === 'Escape' && pickerOpen.value) closePicker(true)
+  if (e.key === 'Escape') {
+    tipClose()
+    if (pickerOpen.value) closePicker(true)
+  }
 }
+function onDocScroll() { tipClose() }
 
 const pkTitle = computed(() => {
   if (pickerView.value === 'days')   return `${MONTH_NAMES[browseMonth.value]} ${browseYear.value}`
@@ -1312,7 +1347,7 @@ const peak = computed(() => {
   for (const r of chartRows.value) {
     if (r.total > 0 && (!best || r.total > best.total)) best = r
   }
-  return best ? { label: formatPointLabel(best.date), title: formatPointTitle(best.date), total: best.total } : null
+  return best ? { label: formatPointLabel(best.date), title: formatPointTitle(best.date), total: best.total, profit: best.profit } : null
 })
 
 // Best seller by sales amount (independent of the metric toggle).
@@ -1412,6 +1447,9 @@ const invLink = (box) => {
   if (k === 'out' && num(box.value) > 0) return { name: 'products', query: { stockFilter: 'out' } }
   return null
 }
+// One v-bind object for an inventory row: the router link (when it has one) + the hover/tap tooltip.
+const invProps = (box) =>
+  Object.assign({}, invLink(box) ? { to: invLink(box) } : {}, tipBind(() => invTip(box), { tap: false }))
 
 const stockCoverage = computed(() => {
   const total  = inventorySummary.value.find((b) => invKey(b) === 'total')
@@ -1675,6 +1713,7 @@ function setTopMetric(metric) {
   mixSel.value = null
   hoverSlice.value = null
   hoverRow.value = null
+  tipClose()
   animateBarsIn()
 }
 
@@ -1827,7 +1866,7 @@ const heatTitle = computed(() => {
 })
 const heatSub = computed(() => {
   const what = mode.value === 'year' ? 'months' : 'days'
-  const pick = `Select a ${heatCellWord.value} for its numbers.`
+  const pick = `Hover or tap a ${heatCellWord.value} for its numbers.`
   const anchor = mode.value === 'week' ? selectedWeek.value : mode.value === 'day' ? selectedDay.value : ''
   if (anchor) {
     const s = mode.value === 'week' ? new Date(`${anchor}T00:00:00`) : weekStartOf(anchor)
@@ -1893,6 +1932,270 @@ async function openHeatCell() {
 }
 
 /* ════════════════════════════════════════════════════════════
+   TOOLTIP ENGINE  (bars, heat cells, donut slices, stat cards)
+   tipBind(getter) returns the event handlers to spread onto any element
+   with v-bind. `getter` builds the tooltip content lazily, only when the
+   tooltip is actually shown, so it always reflects the latest data.
+     • mouse / pen : shows on hover, centered above the element
+                     (flips below it when there is no room above)
+     • touch       : shows on tap, hides after a few seconds or on the next tap elsewhere
+     • keyboard    : shows on focus (only for keyboard focus)
+   Options:
+     { pointer: true } anchor to the cursor instead of the element
+                       (used for donut slices, whose box is the whole ring)
+     { tap: false }    skip the tap behaviour (when the element already
+                       does something on tap, like opening a row)
+   The attribute is named data-dash-tip on purpose: a plain `data-tip` is
+   picked up by other tooltip scripts in the app and produced a duplicate popup.
+   The trend line chart is NOT wired to this: it keeps its Chart.js tooltip.
+════════════════════════════════════════════════════════════ */
+const tip = reactive({
+  show: false, x: 0, y: 0, below: false,
+  content: { title: '', rows: [], note: '', color: '' },
+})
+let tipTimer = 0
+
+function tipBind(getter, opts = {}) {
+  const tap = opts.tap !== false
+  const pointer = opts.pointer === true
+  return {
+    'data-dash-tip': '',
+    onPointerenter: (e) => tipShow(e, getter, pointer),
+    onPointermove: (e) => { if (pointer) tipMove(e) },
+    onPointerleave: (e) => tipHide(e),
+    onFocus: (e) => tipFocus(e, getter),
+    onBlur: () => tipClose(),
+    onClick: (e) => { if (tap) tipTap(e, getter, pointer) },
+  }
+}
+function tipClampX(x) {
+  const vw = window.innerWidth || 360
+  const half = 128
+  return Math.min(Math.max(x, half + 6), Math.max(vw - half - 6, half + 6))
+}
+// Centered above the element, or below it when it sits near the top.
+function tipAnchor(el) {
+  if (!el || !el.getBoundingClientRect) return
+  const r = el.getBoundingClientRect()
+  tip.below = r.top < 190
+  tip.x = tipClampX(r.left + r.width / 2)
+  tip.y = tip.below ? r.bottom + 10 : r.top - 10
+}
+// Follows the cursor (above it, or below when near the top).
+function tipPointer(x, y) {
+  tip.below = y < 170
+  tip.x = tipClampX(x)
+  tip.y = tip.below ? y + 20 : y - 14
+}
+function tipSet(getter) {
+  const c = getter() || {}
+  tip.content = { title: c.title || '', rows: c.rows || [], note: c.note || '', color: c.color || '' }
+  tip.show = true
+}
+function tipShow(e, getter, pointer) {
+  if (e.pointerType === 'touch') return
+  clearTimeout(tipTimer)
+  tipSet(getter)
+  if (pointer) tipPointer(e.clientX, e.clientY)
+  else tipAnchor(e.currentTarget)
+}
+function tipMove(e) {
+  if (e.pointerType === 'touch' || !tip.show) return
+  tipPointer(e.clientX, e.clientY)
+}
+function tipHide(e) {
+  if (e && e.pointerType === 'touch') return
+  tipClose()
+}
+function tipClose() {
+  clearTimeout(tipTimer)
+  tip.show = false
+}
+function tipFocus(e, getter) {
+  const el = e.currentTarget
+  if (!el || !el.matches || !el.matches(':focus-visible')) return
+  tipSet(getter)
+  tipAnchor(el)
+}
+function tipTap(e, getter, pointer) {
+  if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return
+  clearTimeout(tipTimer)
+  tipSet(getter)
+  if (pointer) tipPointer(e.clientX, e.clientY)
+  else tipAnchor(e.currentTarget)
+  tipTimer = setTimeout(tipClose, 3200)
+}
+
+/* ── Tooltip content ── */
+function heroTip(kind) {
+  if (kind === 'sales') {
+    return {
+      title: 'Total sales',
+      rows: [
+        { k: 'Sales', v: peso(salesTotal.value) },
+        { k: 'Transactions', v: formatNumber(txCount.value) },
+        { k: 'Average sale', v: peso(avgTransaction.value) },
+        { k: 'Items sold', v: formatNumber(itemsSold.value) },
+      ],
+    }
+  }
+  const cost = Math.max(num(salesTotal.value) - num(profitTotal.value), 0)
+  return {
+    title: 'Profit',
+    rows: [
+      { k: 'Profit', v: peso(profitTotal.value), tone: 'good' },
+      { k: 'Cost of goods', v: peso(cost) },
+      { k: 'Sales', v: peso(salesTotal.value) },
+      { k: 'Margin', v: profitMarginPct.value + '%' },
+    ],
+  }
+}
+function marginTip() {
+  return {
+    title: 'Profit margin',
+    note: 'Profit divided by total sales for this period.',
+    rows: [
+      { k: 'Margin', v: profitMarginPct.value + '%' },
+      { k: 'Profit', v: peso(profitTotal.value), tone: 'good' },
+      { k: 'Sales', v: peso(salesTotal.value) },
+    ],
+  }
+}
+function trendTip() {
+  const t = salesTrend.value
+  if (!t.available) return { title: 'No earlier period to compare.' }
+  const cur = num(salesTotal.value)
+  const prev = num(previousTotal.value)
+  const diff = cur - prev
+  const rows = [
+    { k: 'This period', v: peso(cur) },
+    { k: comparisonLabel.value || 'Previous', v: peso(prev) },
+  ]
+  if (!t.isNew) rows.push({ k: diff >= 0 ? 'Ahead by' : 'Behind by', v: peso(Math.abs(diff)), tone: diff >= 0 ? 'good' : 'bad' })
+  return {
+    title: `vs ${comparisonLabel.value || 'previous period'}`,
+    rows,
+    note: t.isNew ? 'There were no sales in the earlier period.' : '',
+  }
+}
+function statTip(key) {
+  const p = peak.value
+  const b = bestSeller.value
+  switch (key) {
+    case 'items':
+      return { title: 'Items sold', rows: [
+        { k: 'Units sold', v: formatNumber(itemsSold.value) },
+        { k: 'Transactions', v: formatNumber(txCount.value) },
+        { k: 'Items per sale', v: basketSize.value },
+      ] }
+    case 'tx':
+      return { title: 'Transactions', note: 'Total sales divided by transactions gives the average sale.', rows: [
+        { k: 'Completed sales', v: formatNumber(txCount.value) },
+        { k: 'Average sale', v: peso(avgTransaction.value) },
+        { k: 'Total sales', v: peso(salesTotal.value) },
+      ] }
+    case 'peak': {
+      if (!p) return { title: peakWord.value, note: 'No sales recorded yet.' }
+      const share = num(salesTotal.value) ? ((p.total / num(salesTotal.value)) * 100).toFixed(1) : '0.0'
+      return { title: peakWord.value, rows: [
+        { k: bucketWord.value, v: p.title },
+        { k: 'Sales', v: peso(p.total) },
+        { k: 'Profit', v: peso(p.profit), tone: 'good' },
+        { k: 'Share of period', v: share + '%' },
+      ] }
+    }
+    case 'best': {
+      if (!b) return { title: 'Best seller', note: 'No sales recorded yet.' }
+      return { title: b.ProductName, rows: [
+        { k: 'Units sold', v: formatNumber(b.total_quantity) },
+        { k: 'Sales', v: peso(b.total_sales) },
+        { k: 'Average price', v: peso(avgPrice(b)) },
+        { k: 'Share of sales', v: b.sharePct + '%' },
+        ...(b.CategoryName ? [{ k: 'Category', v: b.CategoryName }] : []),
+      ] }
+    }
+    default:
+      return { title: '' }
+  }
+}
+function heatTip(c) {
+  if (!c) return { title: '' }
+  const title = c.title
+  if (!(c.total > 0)) return { title, note: `No sales in this ${heatCellWord.value}.` }
+  const withSales = heatReal.value.filter((r) => r.total > 0)
+  const avg = withSales.length ? withSales.reduce((a, r) => a + r.total, 0) / withSales.length : 0
+  const vs = avg ? ((c.total - avg) / avg) * 100 : 0
+  const share = heatSum.value ? ((c.total / heatSum.value) * 100).toFixed(1) : '0.0'
+  const margin = c.total ? ((c.profit / c.total) * 100).toFixed(1) : '0.0'
+  return { title, rows: [
+    { k: 'Sales', v: peso(c.total) },
+    { k: 'Profit', v: peso(c.profit), tone: 'good' },
+    { k: 'Margin', v: margin + '%' },
+    { k: `Share of ${heatRangeWord.value}`, v: share + '%' },
+    { k: `Vs ${heatCellWord.value}ly average`, v: `${vs >= 0 ? '+' : ''}${vs.toFixed(1)}%`, tone: vs >= 0 ? 'good' : 'bad' },
+  ] }
+}
+function splitTip(kind) {
+  const d = heatDetail.value
+  if (!d) return { title: '' }
+  const isProfit = kind === 'profit'
+  const value = isProfit ? d.cell.profit : d.cost
+  const pct = d.cell.total ? (value / d.cell.total) * 100 : 0
+  return {
+    title: isProfit ? 'Profit' : 'Cost of goods',
+    color: isProfit ? '#10b981' : '#EA580C',
+    rows: [
+      { k: 'Amount', v: peso(value) },
+      { k: 'Share of sales', v: pct.toFixed(1) + '%' },
+      { k: 'Total sales', v: peso(d.cell.total) },
+    ],
+  }
+}
+function mixTip(r) {
+  if (!r) return { title: '' }
+  const rows = [
+    { k: topMetric.value === 'qty' ? 'Share of units' : 'Share of sales', v: r.pct.toFixed(1) + '%' },
+    { k: 'Sales', v: peso(r.sales) },
+  ]
+  let note = ''
+  if (!r.isOther) {
+    rows.push({ k: 'Units sold', v: formatNumber(r.qty) })
+    rows.push({ k: 'Average price', v: peso(r.qty ? r.sales / r.qty : 0) })
+    if (r.category) rows.push({ k: 'Category', v: r.category })
+  } else {
+    if (r.qty !== null && r.qty !== undefined && r.qty > 0) rows.push({ k: 'Units sold', v: formatNumber(r.qty) })
+    if (r.isService) note = 'Your share of extra services (worker pay excluded).'
+  }
+  if (r.rank) rows.unshift({ k: 'Rank', v: '#' + r.rank })
+  return { title: r.name, color: r.color, rows, note }
+}
+function coverageTip() {
+  const c = stockCoverage.value
+  if (!c) return { title: '' }
+  return {
+    title: 'Item coverage',
+    note: 'Well stocked items are available to sell and not running low.',
+    rows: [
+      { k: 'Well stocked', v: formatNumber(c.active), tone: 'good' },
+      { k: 'Other items', v: formatNumber(Math.max(c.total - c.active, 0)) },
+      { k: 'Total items', v: formatNumber(c.total) },
+      { k: 'Coverage', v: c.pct + '%' },
+    ],
+  }
+}
+function invTip(box) {
+  const link = invLink(box)
+  const hint = invHint(box)
+  const note = [hint, link ? 'Select to open the product list.' : ''].filter(Boolean).join(' ')
+  const tone = invTone(box)
+  return {
+    title: box.label,
+    note,
+    rows: [{ k: 'Count', v: formatNumber(box.value), tone: tone === 'alert' ? 'bad' : tone === 'warn' ? 'warn' : '' }],
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    API
    Week mode calls GET /api/reports with
      { mode: 'week', start: 'YYYY-MM-DD', end: 'YYYY-MM-DD' }
@@ -1918,6 +2221,7 @@ async function loadReports() {
   const seq = ++requestSeq
   loading.value = true
   loadError.value = ''
+  tipClose()
 
   try {
     const { params, label } = periodParams(0)
@@ -2389,6 +2693,7 @@ function buildChart() {
 ════════════════════════════════════════════════════════════ */
 function onViewportResize() {
   updateStickyTop()
+  tipClose()
   clearTimeout(resizeTimer)
   resizeTimer = setTimeout(() => {
     if (isNarrowViewport() !== chartWasNarrow && chartRows.value.length) buildChart()
@@ -2435,6 +2740,7 @@ async function printReport() {
   printing.value = true
   try {
     closePicker()
+    tipClose()
     snapAnimation()
     barsReady.value = true
     printGeneratedAt.value = formatStamp()
@@ -2451,6 +2757,7 @@ async function printReport() {
 onMounted(async () => {
   document.addEventListener('pointerdown', onDocPointer)
   document.addEventListener('keydown', onDocKey)
+  window.addEventListener('scroll', onDocScroll, { passive: true, capture: true })
   window.addEventListener('resize', onViewportResize)
   window.addEventListener('orientationchange', onViewportResize)
   await nextTick()
@@ -2465,8 +2772,10 @@ onBeforeUnmount(() => {
   requestSeq++
   cancelAnimationFrame(animFrame)
   clearTimeout(resizeTimer)
+  clearTimeout(tipTimer)
   document.removeEventListener('pointerdown', onDocPointer)
   document.removeEventListener('keydown', onDocKey)
+  window.removeEventListener('scroll', onDocScroll, { passive: true, capture: true })
   window.removeEventListener('resize', onViewportResize)
   window.removeEventListener('orientationchange', onViewportResize)
   if (themeObserver) themeObserver.disconnect()
@@ -2478,10 +2787,10 @@ onBeforeUnmount(() => {
      SCOPED styles — component layout only.
 
      Breakpoints used below:
-       ≥1101px  desktop (full layout, bleeds into the shell padding)
-       ≤1100px  tablet landscape (summary → 2 cols, inventory under the mix)
+       ≥1500px  large screens (roomier gaps and cards)
+       ≤1100px  tablet landscape (summary → 2 cols, inventory under the mix, tighter shell bleed)
        ≤860px   tablet portrait (heatmap detail goes under the heatmap)
-       ≤700px   phone (compact sticky bar, bottom-sheet picker, stacked cards)
+       ≤700px   phone (compact sticky bar, bottom-sheet picker, stacked cards, edge-to-edge layout)
        ≤480px   small phone (hero stacks, heat strip becomes a list)
 ══════════════════════════════════════════════════════ -->
 <style scoped>
@@ -2521,19 +2830,26 @@ onBeforeUnmount(() => {
   --rp-ease: cubic-bezier(.16, 1, .3, 1);
   --radius: 16px;
 
-  /* ── SPACE TUNING ──────────────────────────────────────────
-     The app shell (Layout.vue) adds roughly 64px of its own padding around
-     every page. --bleed-* lets this page reclaim part of it on desktop.
-     Raise a value to push the content closer to the edge, lower it (or set
-     it to 0px) if content ever touches the sidebar or top bar. */
+  /* ── SPACE TUNING (same values as the Home page) ───────────
+     The app shell (Layout.vue) adds its own padding around every page.
+     --bleed-x / --bleed-y let this page reclaim part of that padding
+     (left, right and top) on EVERY screen size; each breakpoint below sets
+     its own values. --rp-pad-x is the page's own inner side padding.
+     Raise a bleed value to push content closer to the edge; lower it (or set
+     it to 0px) if content ever touches the sidebar, top bar or screen edge.
+
+     IMPORTANT: do NOT add `max-width: 100%` to .reports. It caps the width at
+     the shell's content box, so the negative right margin below can no longer
+     stretch the page and a strip on the right is left empty. */
   --bleed-x: 30px;
   --bleed-y: 26px;
   --rp-gap: 16px;
+  --rp-pad-x: 24px;
 
   min-height: 100%;
-  max-width: 100%;
   background: var(--rp-bg);
-  padding: 16px 24px 40px;
+  padding: 16px max(var(--rp-pad-x), env(safe-area-inset-right)) 40px max(var(--rp-pad-x), env(safe-area-inset-left));
+  margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--rp-gap);
   transition: background-color 0.22s ease;
@@ -2558,7 +2874,8 @@ html[data-theme="dark"] .reports {
 .reports button:focus-visible,
 .reports select:focus-visible,
 .reports a:focus-visible,
-.reports input:focus-visible { outline: 2px solid var(--rp-accent); outline-offset: 2px; }
+.reports input:focus-visible,
+.reports [tabindex]:focus-visible { outline: 2px solid var(--rp-accent); outline-offset: 2px; }
 
 /* Snappier taps on touch screens (no 300ms delay / double-tap zoom on controls) */
 .reports button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
@@ -2783,7 +3100,9 @@ html[data-theme="dark"] .reports {
   box-shadow: var(--rp-shadow);
   padding: 18px 20px;
   min-width: 0;
+  transition: border-color .2s ease;
 }
+.stat--tip { cursor: default; }
 .stat--hero {
   grid-column: span 2; grid-row: span 2;
   flex-direction: column; align-items: stretch; justify-content: space-between; gap: 20px;
@@ -2793,6 +3112,7 @@ html[data-theme="dark"] .reports {
 }
 .hero-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
 .hero-col  { display: flex; flex-direction: column; gap: 6px; min-width: 0; container-type: inline-size; }
+.hero-col--tip { cursor: default; border-radius: 10px; }
 .hero-col--profit { padding-left: 24px; border-left: 1px solid var(--rp-accent-border); }
 
 .stat-icon {
@@ -2808,7 +3128,7 @@ html[data-theme="dark"] .reports {
 .stat-label { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--rp-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* One line, always. The font scales with the card width (cqw) and any
-   extreme overflow falls back to an ellipsis (full value is in the title). */
+   extreme overflow falls back to an ellipsis (full value shows in the tooltip). */
 .stat-value {
   margin: 0; font-size: 22px; font-weight: 800; color: var(--rp-text-primary);
   letter-spacing: -.03em; line-height: 1.15;
@@ -2826,7 +3146,7 @@ html[data-theme="dark"] .reports {
 .trend-line { display: flex; align-items: center; gap: 8px; margin: 2px 0 0; font-size: 12.5px; color: var(--rp-text-secondary); font-weight: 600; flex-wrap: wrap; }
 .trend-badge {
   font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 20px;
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: 4px; cursor: default;
 }
 .trend-badge i { font-size: 10px; }
 .trend-badge.up   { color: var(--rp-green); background: var(--rp-green-soft); }
@@ -2836,6 +3156,8 @@ html[data-theme="dark"] .reports {
 .margin-meter { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--rp-accent-border); }
 .margin-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 12.5px; font-weight: 600; color: var(--rp-text-muted); }
 .margin-head strong { font-size: 14px; font-weight: 800; color: var(--rp-text-primary); font-variant-numeric: tabular-nums; }
+/* Progress tracks are the hover / tap target: soft ring on hover, normal cursor */
+.margin-track, .coverage-track { position: relative; cursor: default; transition: box-shadow .2s ease; }
 .margin-track { height: 8px; border-radius: 8px; background: var(--rp-surface-sunken); overflow: hidden; }
 .margin-fill { height: 100%; border-radius: 8px; background: var(--rp-green); transition: width .7s cubic-bezier(.16, 1, .3, 1); }
 
@@ -2907,7 +3229,6 @@ html[data-theme="dark"] .reports {
 .heat--month .heat-cell { aspect-ratio: 1.15; }
 .heat--day .heat-cell   { min-height: 124px; gap: 4px; }
 .heat--year .heat-cell  { min-height: 88px; gap: 4px; }
-.heat-cell:hover:not(:disabled) { transform: scale(1.06); border-color: rgb(var(--lv)); box-shadow: 0 6px 14px -6px rgba(var(--lv), .6); z-index: 1; }
 .heat-cell:disabled { cursor: default; opacity: .35; }
 .heat-cell--today { border-color: var(--rp-text-secondary); }
 .heat-cell--sel { border-color: rgb(var(--lv)); box-shadow: 0 0 0 3px rgba(var(--lv), .28); color: var(--rp-text-primary); }
@@ -2936,7 +3257,7 @@ html[data-theme="dark"] .reports {
 .heat-muted { margin: 0; font-size: 12.5px; color: var(--rp-text-muted); }
 
 .split-bar { display: flex; gap: 3px; height: 10px; border-radius: 10px; overflow: hidden; }
-.split-seg { display: block; height: 100%; cursor: help; transition: width 1s var(--rp-ease); }
+.split-seg { display: block; height: 100%; cursor: default; transition: width 1s var(--rp-ease), filter .2s ease; }
 .split-seg--profit { background: linear-gradient(90deg, #059669, var(--rp-green)); border-radius: 10px 3px 3px 10px; }
 .split-seg--cost { background: linear-gradient(90deg, var(--rp-accent), #FB923C); border-radius: 3px 10px 10px 3px; }
 .split-legend { display: flex; gap: 16px; margin-top: 9px; font-size: 11.5px; color: var(--rp-text-muted); flex-wrap: wrap; }
@@ -2963,7 +3284,7 @@ html[data-theme="dark"] .reports {
 .mix-insight { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border); font-size: 12.5px; line-height: 1.55; color: var(--rp-text-secondary); }
 .mix-insight i { margin-top: 2px; font-size: 12px; color: var(--rp-accent); }
 .mix-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
-@container (max-width: 520px) { .mix-body { grid-template-columns: minmax(0, 1fr); } .donut { margin: 0 auto; position: relative; top: auto; } }
+@container (max-width: 520px) { .mix-body { grid-template-columns: minmax(0, 1fr); } .donut { margin: 0 auto; position: relative; top: auto; width: min(240px, 100%); } }
 
 .donut { position: sticky; top: 16px; width: 200px; max-width: 100%; aspect-ratio: 1; }
 .donut svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 6px 14px rgba(16,24,40,.12)); }
@@ -3039,17 +3360,57 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
 .coverage-track { height: 6px; border-radius: 6px; background: var(--rp-surface-sunken); overflow: hidden; }
 .coverage-fill { height: 100%; border-radius: 6px; background: var(--rp-green); transition: width .6s ease; }
 
+/* ── SHARED TOOLTIP ── */
+.tip {
+  position: fixed; z-index: 80; pointer-events: none;
+  width: max-content; min-width: 150px; max-width: min(250px, calc(100vw - 16px));
+  padding: 10px 12px 11px; border-radius: 12px;
+  background: rgba(15, 23, 42, .96); color: #f8fafc;
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 12px 32px -8px rgba(2,6,23,.5), 0 2px 6px rgba(2,6,23,.25);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  opacity: 0; transform: translate(-50%, -100%) translateY(4px);
+  transition: opacity .14s ease, transform .14s ease;
+  font-size: 12px; line-height: 1.4;
+}
+.tip--on { opacity: 1; transform: translate(-50%, -100%); }
+.tip--below { transform: translate(-50%, 0) translateY(-4px); }
+.tip--below.tip--on { transform: translate(-50%, 0); }
+.tip-title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; font-weight: 700; letter-spacing: -.005em; overflow-wrap: anywhere; }
+.tip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(255,255,255,.14); }
+.tip-rows { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; gap: 5px; }
+.tip-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.tip-row dt { color: #94a3b8; font-weight: 500; }
+.tip-row dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.tip-good { color: #34d399; }
+.tip-warn { color: #fbbf24; }
+.tip-bad { color: #fb7185; }
+.tip-note { margin: 8px 0 0; color: #cbd5e1; font-size: 11.5px; line-height: 1.45; }
+.tip-title + .tip-note { margin-top: 5px; }
+
+/* ── Hover effects: only on devices that really hover (no sticky hover after a tap) ── */
+@media (hover: hover) and (pointer: fine) {
+  .heat-cell:hover:not(:disabled) { transform: scale(1.06); border-color: rgb(var(--lv)); box-shadow: 0 6px 14px -6px rgba(var(--lv), .6); z-index: 1; }
+  .margin-track:hover, .coverage-track:hover { box-shadow: 0 0 0 3px var(--rp-accent-soft); }
+  .split-seg:hover { filter: brightness(1.12); }
+  .stat--tip:hover { border-color: var(--rp-accent-border); }
+}
+
 /* ══════════════════════════════════════════════════════════
    RESPONSIVE
+   --bleed-x / --bleed-y reclaim the shell's padding at every size,
+   --rp-pad-x is the page's own inner side padding.
 ══════════════════════════════════════════════════════════ */
 
-/* Desktop only: pull the page outward into the shell's padding (top, left, right) */
-@media (min-width: 1001px) {
-  .reports { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+/* ── Large screens: more breathing room ── */
+@media (min-width: 1500px) {
+  .reports { --rp-gap: 20px; --rp-pad-x: 32px; padding-bottom: 48px; }
+  .card { padding: 24px 28px 22px; }
 }
 
 /* ── Tablet landscape ── */
 @media (max-width: 1100px) {
+  .reports { --bleed-x: 22px; --bleed-y: 20px; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat--hero { grid-column: 1 / -1; grid-row: auto; }
   .content-grid { grid-template-columns: minmax(0, 1fr); }
@@ -3061,7 +3422,7 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
 
 /* ── Tablet portrait ── */
 @media (max-width: 900px) {
-  .reports { padding: 12px 14px 32px; --rp-gap: 14px; }
+  .reports { --rp-pad-x: 16px; --rp-gap: 14px; padding-top: 12px; padding-bottom: 32px; }
   .period-bar { gap: 10px; }
   .period-end { margin-left: 0; width: 100%; justify-content: space-between; }
   .picker-trigger { min-width: 180px; }
@@ -3075,20 +3436,22 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
 }
 
 /* ── Phone ──
-   Goals: a slim sticky bar (period only), big touch targets (≥ 40px),
-   export actions in the page header, and single-column cards. */
+   Goals: edge-to-edge layout that uses the shell's top and side padding, a slim
+   sticky bar (period only), big touch targets (≥ 40px), export actions in the
+   page header, and single-column cards. */
 @media (max-width: 700px) {
   .reports {
-    padding: 14px 14px calc(32px + env(safe-area-inset-bottom, 0px));
-    --rp-gap: 14px;
+    --bleed-x: 16px; --bleed-y: 16px; --rp-pad-x: 12px; --rp-gap: 12px;
+    padding-top: 10px;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
   }
 
-  /* Header: title on the left, export row full width underneath */
+  /* Header: title on top, export row full width underneath */
   .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
   .page-title { font-size: 23px; }
   .page-updated { display: block; }
   .report-toolbar--header { display: flex; width: 100%; }
-  .report-toolbar--header .rt-btn { flex: 1; height: 42px; padding: 0 8px; font-size: 13px; }
+  .report-toolbar--header .rt-btn { flex: 1; height: 44px; padding: 0 8px; font-size: 13px; }
 
   /* Sticky bar: group-by + navigation only (≈ 100px tall) */
   .period-bar {
@@ -3098,11 +3461,11 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
   .seg { width: 100%; }
   .seg-btn { flex: 1; text-align: center; padding: 9px 6px; font-size: 13px; }
   .period-nav { width: 100%; gap: 8px; }
-  .icon-btn { width: 42px; height: 42px; border-radius: 11px; font-size: 13px; }
+  .icon-btn { width: 44px; height: 44px; border-radius: 11px; font-size: 13px; }
   .picker { flex: 1; min-width: 0; }
-  .picker-trigger { width: 100%; min-width: 0; height: 42px; font-size: 14px; }
+  .picker-trigger { width: 100%; min-width: 0; height: 44px; font-size: 14px; }
   .link-btn--current {
-    align-self: stretch; text-align: center; padding: 9px 10px; font-size: 13px;
+    align-self: stretch; text-align: center; padding: 10px; font-size: 13px;
     background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border);
   }
   .period-end { display: none; }
@@ -3130,42 +3493,48 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
   .pk-link { padding: 10px 12px; font-size: 13.5px; }
 
   /* Summary: hero on top, KPI cards 2 × 2 with the icon above the text */
+  .summary-grid { gap: 10px; }
   .stat--hero { padding: 18px 16px; gap: 16px; }
   .hero-cols { gap: 14px; }
   .hero-col--profit { padding-left: 14px; }
   .stat:not(.stat--hero) { flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px; }
   .stat:not(.stat--hero) .stat-body { width: 100%; flex: none; }
-  
+
   /* Names (best seller / peak) may wrap to two lines instead of being cut off */
+  .stat-body .stat-value--text {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+    font-size: 15px;
+  }
+  .stat-sub {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.35;
+  }
 
- .stat-body .stat-value--text {
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow-wrap: anywhere;
-  line-height: 1.25;
-  font-size: 15px;
-}
-
-.stat-sub {
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.35;
-}
+  /* Thicker progress tracks are easier to tap */
+  .margin-track { height: 12px; border-radius: 12px; }
+  .margin-fill { border-radius: 12px; }
+  .coverage-track { height: 10px; border-radius: 10px; }
+  .coverage-fill { border-radius: 10px; }
+  .split-bar { height: 12px; }
 
   /* Cards */
-  .card { padding: 18px 16px 16px; }
+  .card { padding: 18px 14px 16px; border-radius: 16px; }
   .card-head { margin-bottom: 14px; }
   .card-head > div:first-child { flex-basis: 100%; }
   .card-head .seg, .card-head .legend-row { width: 100%; }
-  .card-head .seg .seg-btn { padding: 8px 6px; }
-  .legend-chip { flex: 1; justify-content: center; padding: 8px 12px; font-size: 12.5px; }
+  .card-head .seg .seg-btn { padding: 9px 6px; }
+  .legend-chip { flex: 1; justify-content: center; padding: 9px 12px; font-size: 12.5px; }
 
   /* Chart */
   .chart-area { height: 240px; }
@@ -3177,7 +3546,7 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
   .hc-num { font-size: 18px; }
   .hc-amt { font-size: 10px; }
   .heat--year { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .heat-day { padding: 16px; }
+  .heat-day { padding: 16px 14px; }
   .heat-day-value { font-size: 26px; }
   .heat-day-head .link-btn { padding: 8px 10px; }
 
@@ -3190,12 +3559,13 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
   .inv-row:nth-last-child(2):nth-child(odd) { border-bottom: 1px solid var(--rp-border); }
   .inv-row:last-child { border-bottom: none; }
   .inv-link { padding: 14px 6px; }
+
+  /* Tooltip a touch narrower so it never crowds the screen edge */
+  .tip { min-width: 140px; max-width: calc(100vw - 20px); }
 }
 
 /* ── Small phone (≤ 480px) ── */
 @media (max-width: 480px) {
-  .reports { padding-left: 12px; padding-right: 12px; }
-
   /* Sales and profit stack so each number gets the full card width */
   .hero-cols { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .hero-col--profit { padding-left: 0; border-left: none; padding-top: 14px; border-top: 1px solid var(--rp-accent-border); }
@@ -3216,6 +3586,7 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
 
 /* ── Very narrow phones (≤ 380px) ── */
 @media (max-width: 380px) {
+  .reports { --rp-pad-x: 10px; }
   .mix-amt { display: none; }
   .summary-grid { gap: 10px; }
   .stat:not(.stat--hero) { padding: 12px; }
@@ -3283,7 +3654,7 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
     color: #0f172a !important;
   }
 
-  /* Hide every interactive piece (including the sticky period bar); show only the print sheet */
+  /* Hide every interactive piece (including the sticky period bar and the tooltip); show only the print sheet */
   #reports-print-area > :not(.print-sheet) { display: none !important; }
   #reports-print-area .print-sheet { display: block !important; }
 

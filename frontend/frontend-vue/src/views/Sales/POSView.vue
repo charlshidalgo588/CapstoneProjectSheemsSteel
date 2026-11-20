@@ -167,17 +167,7 @@
             <button @click="search = ''" aria-label="Clear search"><i class="fa-solid fa-xmark"></i></button>
           </span>
           <div class="meta-actions">
-            <!-- Extra service (labour): visible on both tabs, with a count when services are in the sale -->
-            <button
-              type="button"
-              class="meta-chip service-chip"
-              @click="openServiceModal()"
-              title="Add an extra service fee (installation, cutting, delivery…)"
-            >
-              <i class="fa-solid fa-screwdriver-wrench"></i>
-              Add service
-              <span v-if="services.length" class="service-chip-count">{{ services.length }}</span>
-            </button>
+            <!-- "Add service" now lives in the Current Sale header (top of the cart panel) -->
             <button
               v-if="view === 'products'"
               type="button"
@@ -306,15 +296,26 @@
         <div v-if="isMobile" class="cart-drawer-handle" aria-hidden="true"></div>
 
         <div class="cart-header">
+          <!-- Title (left) · Add service (center) · Clear (right) -->
           <div class="cart-header-top">
             <div class="cart-title-wrap">
               <h2 class="cart-title">Current Sale</h2>
               <span class="cart-badge">{{ cart.length }} item{{ cart.length !== 1 ? 's' : '' }}</span>
             </div>
+
+            <button
+              type="button"
+              class="cart-svc-btn"
+              @click="openServiceModal()"
+              title="Add an extra service fee (installation, cutting, delivery…)"
+              aria-label="Add service"
+            >
+              <i class="fa-solid fa-screwdriver-wrench"></i>
+              <span>Add service</span>
+              <span v-if="services.length" class="cart-svc-count">{{ services.length }}</span>
+            </button>
+
             <div class="cart-header-top-right">
-              <button v-if="isMobile" type="button" class="cart-svc-btn" @click="openServiceModal()" title="Add an extra service fee (labour)">
-                <i class="fa-solid fa-screwdriver-wrench"></i> Service
-              </button>
               <button v-if="cart.length > 0 || services.length > 0" type="button" class="cart-clear-link" @click="clearCart">
                 <i class="fa-solid fa-trash-can"></i> Clear
               </button>
@@ -3221,14 +3222,6 @@ async function completePayment() {
 .meta-chip--active { background: var(--p-accent-soft); border-color: var(--p-accent-border); color: var(--p-accent); }
 .meta-chip:focus-visible, .scan-btn:focus-visible, .smode-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
 .meta-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
-/* Add service: neutral (grey) on purpose, not orange */
-.service-chip:hover { border-color: var(--p-text-muted); color: var(--p-text-primary); background: var(--p-surface-raised); }
-.service-chip-count {
-  min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--p-text-secondary); color: var(--p-surface);
-  font-size: 10px; font-weight: 800;
-}
 
 /* Products / Leftovers tab switch */
 .view-tabs {
@@ -3396,39 +3389,60 @@ async function completePayment() {
   flex-shrink: 0;
 }
 
-/* Cart header — one compact title row */
+/* Cart header — one compact title row: title (left) · Add service (center) · Clear (right) */
 .cart-header {
   position: relative; z-index: 5;  /* customer dropdown floats above the list */
   padding: 10px 14px 8px; border-bottom: 1px solid var(--p-border);
   flex-shrink: 0; background: var(--p-surface);
   transition: border-color .22s, background-color .22s;
 }
-.cart-header-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; row-gap: 6px; margin-bottom: 8px; }
-.cart-title-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.cart-header-top-right { display: flex; align-items: center; gap: 6px; }
-.cart-title   { font-size: 16px; font-weight: 800; color: var(--p-text-primary); margin: 0; letter-spacing: -.02em; transition: color .22s; }
+.cart-header-top {
+  display: flex; align-items: center; flex-wrap: nowrap;
+  gap: 6px; margin-bottom: 8px;
+}
+.cart-title-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 0; }
+/* Reserves room for "Clear" so the centre button never jumps when the cart is empty */
+.cart-header-top-right { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex-shrink: 0; min-width: 50px; }
+.cart-title   { font-size: 14px; font-weight: 800; color: var(--p-text-primary); margin: 0; letter-spacing: -.02em; white-space: nowrap; transition: color .22s; }
 .cart-badge   {
-  font-size: 11px; font-weight: 700;
+  font-size: 10.5px; font-weight: 700; white-space: nowrap; flex-shrink: 0;
   background: var(--p-accent-soft); color: var(--p-accent);
-  border: 1px solid var(--p-accent-border); border-radius: 20px; padding: 2px 9px;
+  border: 1px solid var(--p-accent-border); border-radius: 20px; padding: 2px 7px;
 }
 .cart-clear-link {
-  display: inline-flex; align-items: center; gap: 5px;
-  height: 28px; padding: 0 9px; border: none; border-radius: 7px;
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  height: 28px; padding: 0 5px; border: none; border-radius: 7px;
   background: none; color: var(--p-text-faint);
-  font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer;
+  font-size: 11.5px; font-weight: 600; font-family: inherit; cursor: pointer;
   transition: background .15s, color .15s;
 }
 .cart-clear-link:hover { background: rgba(244,63,94,.10); color: var(--p-red); }
+
+/* Add service — centred between the title and Clear; solid outline + soft fill so it reads as a real action */
 .cart-svc-btn {
-  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
-  border: 1.5px dashed var(--p-border-strong); border-radius: 8px; background: none; cursor: pointer;
-  color: var(--p-text-muted); font: 600 12px 'Inter', system-ui, sans-serif; white-space: nowrap;
-  transition: border-color .15s, color .15s, background-color .15s;
+  margin: 0 auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 30px; padding: 0 9px; flex-shrink: 0;
+  border: 1.5px solid var(--p-accent-border); border-radius: 9px; cursor: pointer;
+  background: var(--p-accent-soft); color: var(--p-accent);
+  font: 700 11.5px 'Inter', system-ui, sans-serif; white-space: nowrap;
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s, transform .15s;
 }
 .cart-svc-btn i { font-size: 11px; }
-.cart-svc-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); background: var(--p-accent-soft); }
+.cart-svc-btn:hover {
+  background: var(--p-accent); border-color: var(--p-accent); color: #fff;
+  box-shadow: 0 3px 10px rgba(249,115,22,.30); transform: translateY(-1px);
+}
+.cart-svc-btn:active { transform: none; box-shadow: none; }
 .cart-svc-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
+.cart-svc-count {
+  min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--p-accent); color: #fff;
+  font-size: 10px; font-weight: 800; line-height: 1;
+}
+.cart-svc-btn:hover .cart-svc-count { background: #fff; color: var(--p-accent); }
+
 .cart-drawer-close {
   width: 30px; height: 30px; border: none; border-radius: 8px;
   background: var(--p-surface-raised); color: var(--p-text-muted);
@@ -3988,15 +4002,6 @@ async function completePayment() {
 .svc-note { margin: -8px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--c-text-faint, #64748b); }
 
 /* Extra service — cart panel */
-.cart-service-bar { flex-shrink: 0; padding: 0 12px 10px; }
-.cart-service-btn {
-  width: 100%; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px;
-  border: 1.5px dashed var(--p-border-strong); border-radius: 10px; background: none; cursor: pointer;
-  color: var(--p-text-muted); font: 600 12.5px 'Inter', system-ui, sans-serif;
-  transition: border-color .15s, color .15s, background-color .15s;
-}
-.cart-service-btn:hover { border-color: var(--p-accent-border); color: var(--p-accent); background: var(--p-accent-soft); }
-.cart-service-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
 .cart-item--service { border-left: 3px solid var(--p-accent); }
 .svc-line-icon { margin-right: 6px; font-size: 10.5px; color: var(--p-accent); }
 
@@ -4276,6 +4281,7 @@ async function completePayment() {
 @media (prefers-reduced-motion: reduce) {
   .sk, .scanner-line, .svc-alert { animation: none; }
   .piece-bar-sold { transition: none; }
+  .cart-svc-btn { transition: none; }
   .modal-fade-enter-active, .modal-fade-leave-active,
   .scanner-slide-enter-active, .scanner-slide-leave-active,
   .fade-enter-active, .fade-leave-active { transition: none; }
@@ -4286,6 +4292,9 @@ async function completePayment() {
   .pos-root { margin: -22px; }
   .pos-right { width: 320px; min-width: 320px; }
   .product-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+  /* Narrower cart panel: tighten the header row so title · Add service · Clear still fit on one line */
+  .cart-title { font-size: 13.5px; }
+  .cart-svc-btn > i { display: none; }   /* drop the icon, keep the label, so Clear still fits */
 }
 
 /* ═══ RESPONSIVE — MOBILE (≤768px) ═══ */
@@ -4334,6 +4343,14 @@ async function completePayment() {
   .pos-right.cart-drawer--open { transform: translateY(0); }
   /* drawer height is content-driven here, so the list needs a floor */
   .cart-items { flex: 1 1 auto; min-height: 220px; }
+
+  /* Full-width drawer: room to breathe again */
+  .cart-title { font-size: 16px; }
+  .cart-badge { font-size: 11px; padding: 2px 9px; }
+  .cart-svc-btn { padding: 0 12px; font-size: 12px; }
+  .cart-svc-btn > i { display: inline; }
+  .cart-clear-link { padding: 0 8px; font-size: 12px; }
+  .cart-header-top-right { min-width: 64px; }
 }
 
 /* Narrow screens: each size becomes a two-line card */

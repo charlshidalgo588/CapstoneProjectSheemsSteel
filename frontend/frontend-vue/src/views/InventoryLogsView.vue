@@ -592,6 +592,18 @@
         <span>Generated {{ printGeneratedAt }}</span>
       </div>
 
+      <!-- BACK TO TOP (phones and tablets only) -->
+      <button
+        type="button"
+        class="back-top"
+        :class="{ 'back-top--on': showTop }"
+        :inert="showTop ? null : ''"
+        aria-label="Back to top"
+        @click="scrollToTop"
+      >
+        <i class="fa-solid fa-arrow-up"></i>
+      </button>
+
     </div>
   </Layout>
 </template>
@@ -1006,6 +1018,25 @@ function updateStickyHeight() {
     h = stack.offsetHeight
   }
   root.style.setProperty('--sticky-h', `${h}px`)
+}
+
+/* ── BACK TO TOP (phones / tablets) ──
+   Scroll events don't bubble, so the listener sits on the app shell's
+   scrolling container (or the window when the page itself scrolls). */
+const showTop = ref(false)
+let topScroller = null
+
+function scrollPos() {
+  return topScroller ? topScroller.scrollTop : (window.scrollY || document.documentElement.scrollTop || 0)
+}
+function onTopScroll() { showTop.value = scrollPos() > 400 }
+function scrollToTop(e) {
+  // Let go of focus first: the button hides itself once the page is back at the top.
+  if (e && e.currentTarget && e.currentTarget.blur) e.currentTarget.blur()
+  const smooth = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const opts = { top: 0, behavior: smooth ? 'smooth' : 'auto' }
+  if (topScroller) topScroller.scrollTo(opts)
+  else window.scrollTo(opts)
 }
 
 function onResize() {
@@ -1864,6 +1895,9 @@ onMounted(async () => {
   await nextTick()
   updateStickyTop()
   updateStickyHeight()
+  topScroller = findScrollParent(rootEl.value)
+  ;(topScroller || window).addEventListener('scroll', onTopScroll, { passive: true })
+  onTopScroll()
   if (window.ResizeObserver) {
     stackObserver = new ResizeObserver(updateStickyHeight)
     if (stickyStack.value) stackObserver.observe(stickyStack.value)
@@ -1885,6 +1919,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   window.removeEventListener('orientationchange', onResize)
   if (stackObserver) { stackObserver.disconnect(); stackObserver = null }
+  ;(topScroller || window).removeEventListener('scroll', onTopScroll)
   clearTimeout(flashTimer)
   destroyAllTables()
   unregisterLogsSearch()
@@ -1892,14 +1927,15 @@ onBeforeUnmount(() => {
 </script>
 
 <!-- ─── SCOPED: page layout & component styles ────────────
-     Breakpoints used below:
-       ≥1101px  desktop (period bar + summary cards pinned together)
-       ≤1100px  summary cards scroll sideways in one short row
+     Breakpoints used below (same as the Reports page):
+       ≥1500px  large screens (roomier gaps and cards)
+       ≤1100px  tablet landscape (summary cards scroll sideways in one short row, tighter shell bleed)
        ≤900px   tablet / phone: only the slim period bar is pinned,
                 tables turn into labelled cards
-       ≤700px   phone: export row moves to the header, picker + breakdown
-                become bottom sheets, summary cards go 2 × 3
-       ≤480px   small phone: tighter cards, one-column table cards
+       ≤700px   phone: edge-to-edge layout, export row moves to the header,
+                picker + breakdown become bottom sheets, summary cards go 2 × 3
+       ≤480px   small phone: tighter cards
+       ≤380px   very narrow phones: one field per line in the row cards
 ──────────────────────────────────────────────────────────── -->
 <style scoped>
 @import url('https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css');
@@ -1941,19 +1977,26 @@ onBeforeUnmount(() => {
      so the target stops just below it. */
   --sticky-h: 0px;
 
-  /* ── SPACE TUNING (same values as Home and Reports) ────────
-     The app shell (Layout.vue) adds roughly 64px of its own padding around
-     every page. --bleed-* lets this page reclaim part of it on desktop.
-     Raise a value to push the content closer to the edge, lower it (or set
-     it to 0px) if content ever touches the sidebar or top bar. */
+  /* ── SPACE TUNING (same values as Home and Reports) ───────────
+     The app shell (Layout.vue) adds its own padding around every page.
+     --bleed-x / --bleed-y let this page reclaim part of that padding
+     (left, right and top) on EVERY screen size; each breakpoint below sets
+     its own values. --il-pad-x is the page's own inner side padding.
+     Raise a bleed value to push content closer to the edge; lower it (or set
+     it to 0px) if content ever touches the sidebar, top bar or screen edge.
+
+     IMPORTANT: do NOT add `max-width: 100%` to .inv-logs. It caps the width at
+     the shell's content box, so the negative right margin below can no longer
+     stretch the page and a strip on the right is left empty. */
   --bleed-x: 30px;
   --bleed-y: 26px;
   --il-gap: 16px;
+  --il-pad-x: 24px;
 
   min-height: 100%;
-  max-width: 100%;
   background: var(--il-bg);
-  padding: 16px 24px 40px;
+  padding: 16px max(var(--il-pad-x), env(safe-area-inset-right)) 40px max(var(--il-pad-x), env(safe-area-inset-left));
+  margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex;
   flex-direction: column;
@@ -2200,7 +2243,7 @@ html[data-theme="dark"] .inv-logs {
   color: var(--il-accent); text-transform: uppercase; margin: 0 0 4px;
 }
 
-/* ── KPI STRIP (compact, clickable) ──
+/* ── KPI STRIP (compact, clickable, with a detail line) ──
    All six cards sit on ONE row, each with the icon beside the text so the
    cards stay short. minmax(0, 1fr) lets every column shrink evenly. When the
    screen gets narrow the row scrolls sideways instead of growing taller;
@@ -2506,6 +2549,9 @@ html[data-theme="dark"] .status-pill--rem     { background: rgba(59,130,246,0.18
 }
 html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); color: #A5B4FC; }
 
+/* ── BACK TO TOP: floating arrow, phones and tablets only ── */
+.back-top { display: none; }
+
 /* Print-only blocks are hidden on screen */
 .print-only { display: none; }
 
@@ -2513,17 +2559,21 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
    RESPONSIVE
    Screen-only breakpoints (kept off the print media so the report
    never collapses into mobile cards on paper).
+   --bleed-x / --bleed-y reclaim the shell's padding at every size,
+   --il-pad-x is the page's own inner side padding (same values as Reports).
 ══════════════════════════════════════════════════════════ */
 
-/* Desktop only: pull the page outward into the shell's padding (top, left, right).
-   Screen only, so the printed report is never shifted. */
-@media screen and (min-width: 1001px) {
-  .inv-logs { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+/* ── Large screens: more breathing room ── */
+@media screen and (min-width: 1500px) {
+  .inv-logs { --il-gap: 20px; --il-pad-x: 32px; padding-bottom: 48px; }
+  .card { padding: 24px 28px 22px; }
 }
 
-/* Below 1100px the six cards no longer fit evenly, so they scroll sideways in one short row
+/* ── Tablet landscape ──
+   The six cards no longer fit evenly, so they scroll sideways in one short row
    (the pinned area never gets taller). Cards snap into place as you swipe. */
 @media screen and (max-width: 1100px) {
+  .inv-logs { --bleed-x: 22px; --bleed-y: 20px; }
   .kpi-strip {
     display: flex; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin;
     scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
@@ -2542,8 +2592,43 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   }
 }
 
+/* ── Back-to-top button (tablet portrait and phones) ── */
 @media screen and (max-width: 900px) {
-  .inv-logs { padding: 12px 14px 32px; --il-gap: 14px; }
+ .back-top {
+  position: fixed; z-index: 45;
+  --back-top-bottom: 104px;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(var(--back-top-bottom) + env(safe-area-inset-bottom, 0px));
+  width: 42px; height: 42px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  /* exactly the login page's back-to-top button */
+  border: 1.5px solid #CBD5E1;
+  background: var(--il-surface);
+  color: #475569;
+  font-size: 13px; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+  opacity: 0; transform: translateY(14px) scale(.9); pointer-events: none; visibility: hidden;
+  transition: opacity .2s ease, transform .22s var(--il-ease), visibility 0s linear .22s;
+}
+html[data-theme="dark"] .back-top { border-color: #334155; color: #CBD5E1; }
+
+/* no orange outline or border on tap/focus */
+.inv-logs .back-top:focus,
+.inv-logs .back-top:focus-visible,
+.inv-logs .back-top:active { outline: none; border-color: #CBD5E1; }
+html[data-theme="dark"] .inv-logs .back-top:focus,
+html[data-theme="dark"] .inv-logs .back-top:focus-visible,
+html[data-theme="dark"] .inv-logs .back-top:active { border-color: #334155; }
+  .back-top--on {
+    opacity: 1; transform: none; pointer-events: auto; visibility: visible;
+    transition: opacity .2s ease, transform .22s var(--il-ease), visibility 0s;
+  }
+  .back-top:active { transform: scale(.94); }
+}
+
+/* ── Tablet portrait ── */
+@media screen and (max-width: 900px) {
+  .inv-logs { --il-pad-x: 16px; --il-gap: 14px; padding-top: 12px; padding-bottom: 32px; }
   .period-bar { gap: 10px; }
   .period-end { margin-left: 0; width: 100%; justify-content: space-between; }
   .picker-trigger { min-width: 180px; }
@@ -2596,12 +2681,14 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 }
 
 /* ── Phone ──
-   Goals: a slim pinned bar (period only), big touch targets (≥ 40px),
-   export actions in the page header, bottom sheets instead of popovers. */
+   Goals: edge-to-edge layout that uses the shell's top and side padding, a slim
+   pinned bar (period only), big touch targets (≥ 40px), export actions in the
+   page header, bottom sheets instead of popovers, single-column cards. */
 @media screen and (max-width: 700px) {
   .inv-logs {
-    padding: 14px 14px calc(32px + env(safe-area-inset-bottom, 0px));
-    --il-gap: 14px;
+    --bleed-x: 16px; --bleed-y: 16px; --il-pad-x: 12px; --il-gap: 12px;
+    padding-top: 10px;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Header: title on top, export row full width underneath */
@@ -2609,20 +2696,21 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .page-title { font-size: 23px; }
   .page-updated { display: block; }
   .report-toolbar--header { display: flex; width: 100%; }
-  .report-toolbar--header .rt-btn { flex: 1; height: 42px; padding: 0 8px; }
+  .report-toolbar--header .rt-btn { flex: 1; height: 44px; padding: 0 8px; }
 
   /* Pinned bar: group-by + navigation only (≈ 100px tall) */
   .period-bar {
     flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px;
+    border-radius: 14px;
   }
   .seg { width: 100%; }
   .seg-btn { flex: 1; text-align: center; padding: 9px 6px; font-size: 13px; }
   .period-nav { width: 100%; gap: 8px; }
-  .icon-btn { width: 42px; height: 42px; border-radius: 11px; font-size: 13px; }
+  .icon-btn { width: 44px; height: 44px; border-radius: 11px; font-size: 13px; }
   .picker { flex: 1; min-width: 0; }
-  .picker-trigger { width: 100%; min-width: 0; height: 42px; font-size: 14px; }
+  .picker-trigger { width: 100%; min-width: 0; height: 44px; font-size: 14px; }
   .link-btn--current {
-    align-self: stretch; text-align: center; padding: 9px 10px; font-size: 13px;
+    align-self: stretch; text-align: center; padding: 10px; font-size: 13px;
     background: var(--il-accent-soft); border: 1px solid var(--il-accent-border);
   }
   .period-end { display: none; }
@@ -2662,7 +2750,7 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .kpi-value { font-size: 18px; }
 
   /* Cards */
-  .card { padding: 18px 16px 16px; }
+  .card { padding: 18px 14px 16px; border-radius: 16px; }
   .card-header { margin-bottom: 14px; }
   .card-sub { font-size: 12px; }
 
@@ -2688,11 +2776,11 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .il-break-table { font-size: 13px; }
   .il-break-table th, .il-break-table td { padding: 9px 8px; }
   .il-var-row td { padding-left: 16px; }
+
 }
 
 /* ── Small phone (≤ 480px) ── */
 @media screen and (max-width: 480px) {
-  .inv-logs { padding-left: 12px; padding-right: 12px; }
   .kpi-value { font-size: 17px; }
   .qty-details { padding: 6px 8px; }
   .qty-row { gap: 8px; }
@@ -2700,6 +2788,7 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 
 /* ── Very narrow phones (≤ 380px): one field per line inside the row cards ── */
 @media screen and (max-width: 380px) {
+  .inv-logs { --il-pad-x: 10px; }
   .data-table--stack tbody tr { grid-template-columns: minmax(0, 1fr); }
   .kpi-strip { gap: 8px; }
   .kpi-card { padding: 10px 10px 12px; }
@@ -2714,9 +2803,8 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .kpi-card, .rt-btn, .picker-caret, .pk-day, .pk-cell { transition: none; }
+  .inv-logs * { transition: none !important; }
   .kpi-card:hover { transform: none; }
-  .pop-enter-active, .pop-leave-active { transition: none; }
   .card--flash { animation: none; }
 }
 
@@ -2771,6 +2859,7 @@ html[data-theme="dark"] .category-pill { background: rgba(99,102,241,0.18); colo
   .svc-pager,
   .section--screen,
   .card-eyebrow,
+  .back-top,
   .il-modal-backdrop { display: none !important; }
 
   /* The sticky stack is just a plain block on paper (only the summary tiles remain) */

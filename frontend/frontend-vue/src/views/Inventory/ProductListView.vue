@@ -2,23 +2,23 @@
   <Layout>
     <div class="prod-list-page" ref="pageRef">
 
-      <!-- ═════════════ 1. PAGE HEADER ═════════════ -->
+      <!-- ═════════════ 1. PAGE HEADER (one compact row: Inventory / Product List  ·····  Add Product) ═════════════ -->
       <header ref="headerRef" class="page-header">
-        <div>
-          <p class="page-eyebrow">Inventory</p>
-          <h1 class="page-title">{{ view === 'cuts' ? 'Cut Tracking' : 'Product List' }}</h1>
-          <p class="page-sub">
-            {{ view === 'cuts'
-              ? 'Leftover pieces from cut sales. They turn to Used when sold on the POS. Scrap the ones you throw away.'
-              : 'Stock by size, restocking and product management.' }}
+        <div class="page-heading">
+          <div class="page-title-row">
+            <span class="page-eyebrow">Inventory</span>
+            <span class="page-crumb-sep" aria-hidden="true">/</span>
+            <h1 class="page-title">{{ view === 'cuts' ? 'Cut Tracking' : 'Product List' }}</h1>
+          </div>
+          <!-- Only Cut Tracking keeps a short explanation; the Products view has no subtitle -->
+          <p v-if="view === 'cuts'" class="page-sub">
+            Leftover pieces from cut sales. They turn to Used when sold on the POS. Scrap the ones you throw away.
           </p>
         </div>
-        <RouterLink to="/products/create" class="btn btn--primary">
-          <i class="fa-solid fa-plus"></i> Add Product
-        </RouterLink>
       </header>
 
-      <!-- ═════════════ 2. VIEW SWITCH (Products / Cut tracking) ═════════════ -->
+      <!-- ═════════════ 2. VIEW SWITCH (Products / Cut tracking) + Add Product on the same row ═════════════ -->
+      <div class="tabs-row">
       <nav class="view-tabs" role="tablist" aria-label="Inventory views">
         <button type="button" role="tab" class="view-tab" :class="{ 'view-tab--on': view === 'products' }"
           :aria-selected="view === 'products'" @click="setView('products')">
@@ -33,6 +33,10 @@
           <span class="vt-count" :class="{ 'vt-count--blue': availableCount > 0 }">{{ availableCount }}</span>
         </button>
       </nav>
+      <RouterLink to="/products/create" class="btn btn--primary btn--sm tabs-add">
+        <i class="fa-solid fa-plus"></i> Add Product
+      </RouterLink>
+      </div>
 
       <!-- ═════════════ 3. ALERTS ═════════════ -->
       <transition name="alert-fade">
@@ -422,7 +426,7 @@
                 <button
                   v-else
                   type="button"
-                  class="pager-btn"
+                  class="pager-btn pager-btn--num"
                   :class="{ 'pager-btn--on': it === page }"
                   :aria-current="it === page ? 'page' : undefined"
                   :aria-label="`Page ${it}`"
@@ -610,11 +614,12 @@
       </div>
     </Teleport>
 
-    <!-- ═════════════ RESTOCK MODAL (one size at a time) ═════════════ -->
+    <!-- ═════════════ RESTOCK MODAL (one size at a time). A bottom sheet on phones. ═════════════ -->
     <Teleport to="body">
       <transition name="modal-fade">
-        <div v-if="modalVisible" class="modal-backdrop" @click.self="closeRestockModal">
+        <div v-if="modalVisible" class="modal-backdrop modal-backdrop--sheet" @click.self="closeRestockModal">
           <div class="restock-modal" role="dialog" aria-modal="true" aria-label="Restock product">
+            <span class="sheet-grab" aria-hidden="true"></span>
             <div class="restock-modal-header">
               <div class="restock-modal-icon">
                 <i class="fa-solid fa-boxes-stacked"></i>
@@ -675,7 +680,7 @@
                   <label class="restock-label">Quantity to add <span class="req">*</span></label>
                   <div class="qty-row">
                     <button type="button" class="qty-btn" @click="restockQty = Math.max(1, (restockQty || 1) - 1)" aria-label="Decrease"><i class="fa-solid fa-minus"></i></button>
-                    <input v-model.number="restockQty" type="number" min="1" required class="qty-input" />
+                    <input v-model.number="restockQty" type="number" min="1" required class="qty-input" inputmode="numeric" />
                     <button type="button" class="qty-btn" @click="restockQty = (restockQty || 0) + 1" aria-label="Increase"><i class="fa-solid fa-plus"></i></button>
                   </div>
                   <div class="qty-quick">
@@ -1023,6 +1028,7 @@ function onResizeSticky() { initStickyTop(); syncSticky() }
 function teardownSticky() {
   (scrollEl || window).removeEventListener('scroll', onScrollSticky)
   window.removeEventListener('resize', onResizeSticky)
+  window.removeEventListener('orientationchange', onResizeSticky)
 }
 
 function setupSticky() {
@@ -1030,6 +1036,7 @@ function setupSticky() {
   scrollEl = findScrollParent(pageRef.value)
   ;(scrollEl || window).addEventListener('scroll', onScrollSticky, { passive: true })
   window.addEventListener('resize', onResizeSticky)
+  window.addEventListener('orientationchange', onResizeSticky)
   initStickyTop()
   syncSticky()
 }
@@ -1805,6 +1812,15 @@ onBeforeUnmount(() => {
      C. Toolbar & sticky block   H. Cut tracking
      D. Buttons & alerts         I. Modals
      E. Bulk bar                 J. Responsive (no horizontal scroll) / motion
+
+   Breakpoints (same idea as Inventory Logs and Reports):
+     ≥1500px  large screens  (roomier gaps and side padding)
+     ≤1100px  tablet landscape (cards 3 across, tighter shell bleed)
+     ≤900px   tablet portrait  (smaller side padding)
+     ≤860px   table rows become labelled cards
+     ≤700px   phone: edge-to-edge layout (top + sides reclaimed), 44px touch targets,
+              restock modal becomes a bottom sheet
+     ≤380px   very narrow phones
 ════════════════════════════════════════════════════════════════ */
 
 /* ── A. TOKENS & PAGE SHELL ── */
@@ -1829,14 +1845,23 @@ onBeforeUnmount(() => {
   --radius: 16px;
 
   /* ── SPACE TUNING (same values as Home, Reports and Inventory Logs) ──
-     The app shell (Layout.vue) adds roughly 64px of its own padding around
-     every page. --bleed-* lets this page reclaim part of it on desktop,
-     on BOTH the left and the right side (same as the Home page).
-     Raise a value to push the content closer to the edge, lower it (or set
-     it to 0px) if content ever touches the sidebar or top bar. */
+     The app shell (Layout.vue) adds its own padding around every page.
+     --bleed-x / --bleed-y let this page reclaim part of that padding
+     (left, right and top) on EVERY screen size; each breakpoint below sets
+     its own values. --pl-pad-x is the page's own inner side padding.
+     Raise a bleed value to push content closer to the edge; lower it (or set
+     it to 0px) if content ever touches the sidebar, top bar or screen edge.
+
+     The top of the page was pulled up: --bleed-y is larger and the page's own top
+     padding is smaller, so the header sits higher and the table gets more room.
+
+     IMPORTANT: do NOT add `max-width: 100%` to .prod-list-page. It caps the width at
+     the shell's content box, so the negative side margins below can no longer
+     stretch the page and a strip is left empty. */
   --bleed-x: 30px;
-  --bleed-y: 26px;
-  --pl-gap: 16px;
+  --bleed-y: 30px;
+  --pl-gap: 12px;
+  --pl-pad-x: 24px;
 
   /* Distance from the top of the scrolling area where the sticky block stops.
      This is set automatically by the script (it cancels the shell's top padding
@@ -1848,16 +1873,20 @@ onBeforeUnmount(() => {
   --pl-ease: cubic-bezier(.16, 1, .3, 1);
 
   min-height: 100%;
-  /* No max-width here: a "max-width: 100%" cap stopped the negative right margin
-     from widening the page, which left the empty strip on the right. */
   overflow-x: clip;             /* the page never scrolls sideways (clip, so sticky keeps working) */
   background: var(--pl-bg);
-  padding: 16px 24px 40px;
+  padding: 8px max(var(--pl-pad-x), env(safe-area-inset-right)) 40px max(var(--pl-pad-x), env(safe-area-inset-left));
+  /* reclaim the shell's top / left / right padding on every screen size */
+  margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--pl-gap);
   transition: background-color .22s;
+  -webkit-text-size-adjust: 100%;
 }
 .prod-list-page > * { min-width: 0; }
+
+/* Snappier taps on touch screens (no 300ms delay / double-tap zoom on controls) */
+.prod-list-page button, .prod-list-page a { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 
 /* visually hidden, still read by screen readers */
 .sr-only {
@@ -1865,20 +1894,30 @@ onBeforeUnmount(() => {
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 
-/* ── B. HEADER, TABS & KPIs ── */
-.page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.page-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--pl-accent); text-transform: uppercase; margin: 0 0 5px; }
-.page-title   { font-size: 26px; font-weight: 800; color: var(--pl-text-primary); letter-spacing: -.03em; margin: 0; transition: color .22s; }
-.page-sub     { margin: 6px 0 0; font-size: 13px; color: var(--pl-text-muted); }
+/* ── B. HEADER, TABS & KPIs ──
+   One compact row: "INVENTORY / Product List" on the left, Add Product on the right. */
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page-heading { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.page-title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+/* "Inventory" and "Product List" share the same size (16px), each keeping its own style. */
+.page-eyebrow { font-size: 16px; font-weight: 700; letter-spacing: .12em; color: var(--pl-accent); text-transform: uppercase; line-height: 1.2; margin: 0; }
+.page-crumb-sep { font-size: 16px; font-weight: 300; color: var(--pl-text-faint); line-height: 1.2; }
+.page-title   { font-size: 16px; font-weight: 800; color: var(--pl-text-primary); letter-spacing: -.02em; line-height: 1.2; margin: 0; transition: color .22s; }
+.page-sub     { margin: 2px 0 0; font-size: 12.5px; color: var(--pl-text-muted); }
+/* Tabs on the left, Add Product on the right, both on one row sharing the bottom line */
+.tabs-row {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 12px;
+  border-bottom: 1px solid var(--pl-border);
+}
+.tabs-add { flex-shrink: 0; margin-bottom: 6px; white-space: nowrap; }
 
 /* Products / Cut tracking switch */
 .view-tabs {
-  display: flex; gap: 4px;
-  border-bottom: 1px solid var(--pl-border);
+  display: flex; gap: 4px; min-width: 0;
 }
 .view-tab {
   position: relative; display: inline-flex; align-items: center; gap: 9px;
-  padding: 11px 16px 13px; border: none; background: none; cursor: pointer;
+  padding: 8px 14px 10px; border: none; background: none; cursor: pointer;
   font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--pl-text-muted);
   border-radius: 10px 10px 0 0;
   transition: color .16s, background-color .16s;
@@ -2394,6 +2433,7 @@ html[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, .82); }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; transform: scale(.95) translateY(10px); }
 
 /* restock modal */
+.sheet-grab { display: none; }   /* the drag handle only shows when the modal is a phone bottom sheet */
 .restock-modal {
   width: 100%; max-width: 480px; max-height: calc(100vh - 40px); overflow: hidden;
   display: flex; flex-direction: column;
@@ -2562,10 +2602,9 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
    It is only turned on below, where the toolbar is sticky (wide screens). */
 .toolbar-add { display: none; white-space: nowrap; }
 
-/* Desktop only: pull the page outward into the shell's padding (top, left AND right),
-   exactly like the Home page, so the right side is used as well. */
-@media (min-width: 1001px) {
-  .prod-list-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+/* Large screens: more breathing room (same as Inventory Logs) */
+@media (min-width: 1500px) {
+  .prod-list-page { --pl-gap: 16px; --pl-pad-x: 32px; padding-bottom: 48px; }
 }
 
 /* Wide screens: the cards, search and filters stay pinned at the very top while the table scrolls.
@@ -2576,7 +2615,7 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
   .sticky-controls {
     position: sticky; top: var(--sticky-top); z-index: 20;
     background: var(--pl-bg);
-    padding: 10px 24px 10px; margin: -10px -24px -10px;
+    padding: 10px var(--pl-pad-x) 10px; margin: -10px calc(-1 * var(--pl-pad-x)) -10px;
     transition: box-shadow .2s ease;
   }
   .sticky-controls.is-stuck {
@@ -2592,14 +2631,16 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
   .form-select { width: 172px; }
 }
 
-/* 5 cards no longer fit one row: 3 across, then 2 across on phones */
+/* Tablet landscape: 5 cards no longer fit one row (3 across), a tighter shell bleed */
 @media (max-width: 1100px) {
+  .prod-list-page { --bleed-x: 22px; --bleed-y: 24px; }
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .kpi-strip--cuts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* Tablet portrait */
 @media (max-width: 900px) {
-  .prod-list-page { padding: 12px 14px 32px; --pl-gap: 14px; }
+  .prod-list-page { --pl-pad-x: 16px; --pl-gap: 12px; padding-top: 8px; padding-bottom: 32px; }
 }
 
 /* Narrow screens: every table row becomes a labelled card */
@@ -2632,20 +2673,109 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
   .data-table tbody tr.sizes-row { border-bottom: 1px solid var(--pl-border); }
 }
 
+/* ── Phone ──
+   Goals (same as Inventory Logs): edge-to-edge layout that uses the shell's top and side
+   padding, big touch targets (≥ 40px), a bottom-sheet restock modal, single-column cards. */
 @media (max-width: 700px) {
-  .prod-list-page { padding: 16px 16px 40px; }
-  .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .page-header .btn { width: 100%; justify-content: center; }
-  .view-tab { flex: 1; justify-content: center; padding: 11px 8px 13px; }
-  .toolbar-row { flex-direction: column; align-items: stretch; }
+  .prod-list-page {
+    --bleed-x: 16px; --bleed-y: 20px; --pl-pad-x: 12px; --pl-gap: 10px;
+    padding-top: 6px;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Header + tabs: the title row stays on one line, the Add Product button goes full width below it */
+  .page-eyebrow, .page-title { font-size: 14px; }
+  .page-sub { font-size: 12.5px; }
+  .page-header { align-items: stretch; }
+  .tabs-row { flex-direction: column-reverse; align-items: stretch; border-bottom: none; gap: 10px; }
+  .tabs-add { width: 100%; justify-content: center; min-height: 44px; margin-bottom: 0; }
+  .view-tabs { border-bottom: 1px solid var(--pl-border); }
+  .view-tab { flex: 1; justify-content: center; padding: 10px 8px 12px; }
+
+  /* Summary cards: 2 across. With 5 cards the first one spans the full row (1 + 2 × 2).
+     Cut tracking has 4 cards and stays a 2 × 2 grid. */
+  .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kpi-strip:not(.kpi-strip--cuts) .kpi-card--featured { grid-column: 1 / -1; }
+  .kpi-strip .kpi-card { padding: 10px 11px; gap: 9px; }
+  .kpi-strip .kpi-icon { width: 32px; height: 32px; font-size: 13px; }
+  .kpi-strip .kpi-value { font-size: 19px; }
+  .kpi-strip .kpi-label { font-size: 10px; }
+  .kpi-strip .kpi-hint { font-size: 11px; }
+
+  /* Toolbar: search on top, category + buttons below, big tap targets */
+  .toolbar { padding: 8px; }
+  .toolbar-row { flex-direction: column; align-items: stretch; gap: 8px; }
   .search-wrap { flex-basis: auto; }
+  .search-input { height: 44px; font-size: 16px; }   /* 16px stops iOS zoom */
   .select-group { width: 100%; }
-  .form-select { width: 100%; }
+  .form-select { width: 100%; height: 44px; font-size: 14px; }
   .toolbar-end { margin-left: 0; }
-  .toolbar-end .btn { flex: 1; justify-content: center; }
+  .toolbar-end .btn, .tool-btn { flex: 1; justify-content: center; height: 44px; }
+
+  /* Bulk bar stacks */
+  .bulk-bar { flex-direction: column; align-items: stretch; }
+  .bulk-bar-actions { justify-content: space-between; }
+  .bulk-bar-actions .btn { flex: 1; justify-content: center; min-height: 40px; }
+
+  /* Table cards use the full width */
+  .table-card { border-radius: 14px; }
+  .data-table tbody td { padding: 8px 12px; }
+  .data-table tbody td.td-check { padding: 0 12px; }
+  .data-table tbody td.td-check .chk { width: 24px; height: 24px; }
+
+  /* Row actions: restock takes the free space, others are 40px square-ish targets */
+  .action-row { gap: 8px; }
+  .restock-btn { flex: 1 1 auto; justify-content: center; height: 40px; }
+  .sizes-btn { height: 40px; padding: 0 12px; }
+  .menu-btn { width: 40px; height: 40px; }
+  .rem-btn { min-height: 38px; padding: 0 16px; }
+  .size-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* Footer + pager: big Previous / Next, numbers shrink away except the current page */
   .table-footer--pager { flex-direction: column; align-items: stretch; }
-  .pager { justify-content: center; }
+  .footer-text { text-align: center; }
+  .pager { justify-content: center; gap: 6px; flex-wrap: nowrap; }
+  .pager-btn { min-width: 40px; height: 40px; }
+  .pager-btn--wide { flex: 1; padding: 0 12px; }
+  .pager-btn--num:not(.pager-btn--on), .pager-gap { display: none; }
+
+  /* Restock modal becomes a bottom sheet */
+  .modal-backdrop--sheet { align-items: flex-end; padding: 0; }
+  .modal-backdrop--sheet .restock-modal {
+    max-width: none; max-height: 92dvh;
+    border-radius: 22px 22px 0 0; border-bottom: none;
+  }
+  .sheet-grab { display: block; flex-shrink: 0; width: 38px; height: 4px; margin: 8px auto 0; border-radius: 4px; background: var(--pl-border-strong); }
+  .restock-modal-body { padding: 14px 16px calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .restock-modal-header { padding: 12px 16px 10px; }
+  .modal-close-btn { width: 36px; height: 36px; }
+  .size-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 34dvh; }
+  .qty-btn { width: 46px; height: 46px; }
+  .qty-input { height: 46px; font-size: 16px; }
+  .qty-chip { height: 38px; }
+  .restock-footer .btn { min-height: 46px; }
+
+  /* Delete modals keep the centred card but use safe edges */
+  .modal-backdrop { padding: 12px; }
+  .del-modal-footer { padding: 0 20px 22px; }
+  .del-modal-btn { height: 46px; }
 }
+
+/* Very narrow phones */
+@media (max-width: 380px) {
+  .prod-list-page { --pl-pad-x: 10px; }
+  .kpi-strip { gap: 6px; }
+  .kpi-strip .kpi-card { padding: 9px 9px; }
+  .size-grid { grid-template-columns: minmax(0, 1fr); }
+  .size-pick { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Landscape phones: keep sheets short enough to fit */
+@media (max-height: 520px) and (orientation: landscape) {
+  .modal-backdrop--sheet .restock-modal { max-height: calc(100dvh - 8px); }
+  .size-pick { max-height: 30dvh; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sk, .row-highlight td, .sizes-panel, .kpi-strip .kpi-card, .table-card--flash { animation: none; }
   .kpi-card, .size-tile, .btn, .restock-btn, .sizes-btn i, .sticky-controls, .kpi-hint i { transition: none; }

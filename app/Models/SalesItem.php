@@ -51,6 +51,8 @@ class SalesItem extends Model
         return round($fullCost, 2);
     }
 
+    public const PROFIT_SQL = 'SUM(COALESCE(sales_items.AllocatedProfit, (sales_items.PriceAtSale - COALESCE(sales_items.CostAtSale, 0)) * sales_items.Quantity))';
+    
     /** Profit of this line: the allocated profit when set, else (price - cost) x qty. */
     public function lineProfit(): float
     {

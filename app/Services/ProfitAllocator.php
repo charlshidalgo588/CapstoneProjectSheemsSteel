@@ -47,7 +47,7 @@ final class ProfitAllocator
      *
      * @param array|null $cut ['full_length' => float, 'sold_length' => float]
      */
-    public static function forCut(int $qty, float $unitCost, float $listPrice, ?array $cut): ?array
+        public static function forCut(int $qty, float $unitCost, float $listPrice, ?array $cut, ?float $actualUnitPrice = null): ?array
     {
         $full = (float) ($cut['full_length'] ?? 0);
         $sold = (float) ($cut['sold_length'] ?? 0);
@@ -56,29 +56,44 @@ final class ProfitAllocator
             return null;
         }
 
-        $totalCost   = self::money($qty * $unitCost);
-        $totalProfit = self::money($qty * ($listPrice - $unitCost));
+        $share     = max(0.0, min(1.0, $sold / $full));
+        $totalCost = self::money($qty * $unitCost);
+        $soldCost  = self::money($totalCost * $share);
+        $restCost  = self::money($totalCost - $soldCost);
 
-        return self::split($totalCost, $totalProfit, $sold / $full);
+        // Money really received. If no price is given, use the old list-price way.
+        $revenue = self::money($qty * ($actualUnitPrice ?? $listPrice * $share));
+
+        return [
+            'sold_cost'   => $soldCost,
+            'sold_profit' => self::money($revenue - $soldCost),
+            'rest_cost'   => $restCost,
+            'rest_profit' => self::money($qty * $listPrice * (1 - $share) - $restCost),
+        ];
     }
 
     /**
      * Selling $qty of the $have pieces held by a remnant row.
      * Selling the last pieces takes the whole remaining balance (no cent left behind).
      */
-    public static function forRemnantUnits(float $remainingCost, float $remainingProfit, int $have, int $qty): array
+        public static function forRemnantUnits(float $remainingCost, float $remainingProfit, int $have, int $qty, ?float $revenue = null): array
     {
         $have = max($have, 1);
 
-        if ($qty >= $have) {
-            return [
+        $alloc = $qty >= $have
+            ? [
                 'sold_cost'   => self::money($remainingCost),
                 'sold_profit' => self::money($remainingProfit),
                 'rest_cost'   => 0.0,
                 'rest_profit' => 0.0,
-            ];
+            ]
+            : self::split($remainingCost, $remainingProfit, $qty / $have);
+
+        // Profit = money really received minus the saved cost.
+        if ($revenue !== null) {
+            $alloc['sold_profit'] = self::money($revenue - $alloc['sold_cost']);
         }
 
-        return self::split($remainingCost, $remainingProfit, $qty / $have);
+        return $alloc;
     }
 }

@@ -150,7 +150,7 @@ class SaleController extends Controller
                     ?? ($item['original_price'] ?? $item['price']));
 
                 // Cut piece -> book only the proportional share; the rest goes to the remnant.
-                $alloc = ProfitAllocator::forCut($qty, $unitCost, $listPrice, $cut);
+                $alloc = ProfitAllocator::forCut($qty, $unitCost, $listPrice, $cut, (float) $item['price']);
 
                 $sale->salesItems()->create([
                     'ProductID'       => $item['product_id'],
@@ -292,7 +292,8 @@ class SaleController extends Controller
                 (float) $rem->RemainingCost,
                 (float) $rem->RemainingProfit,
                 $have,
-                $qty
+                $qty,
+                (float) $item['price'] * $qty   // money really received
             );
 
             $lineCost   = $alloc['sold_cost'];
@@ -473,16 +474,13 @@ class SaleController extends Controller
 
         return response()->json($data);
     }
-
-    /**
-     * PUBLIC: BEST SELLERS (login page)
-     * Returns the SAFE public shape (no cost price, sizes + category included)
-     * via ProductController::formatPublic().
+     /* PUBLIC: BEST SELLERS (login page)
+     * Returns the SAFE public shape (no cost price, sizes included).
      * Only filters on `sales.Status` when that column exists.
      */
     public function bestSellers()
     {
-        $products = Cache::remember('public_best_sellers_v3', now()->addMinutes(10), function () {
+        $products = Cache::remember('public_best_sellers_v2', now()->addMinutes(10), function () {
             $sale       = new Sale;
             $relation   = $sale->salesItems();
             $itemsTable = $relation->getRelated()->getTable();
@@ -504,7 +502,7 @@ class SaleController extends Controller
                 return collect();
             }
 
-            $found = Product::with(['category', 'inventory', 'variants'])
+            $found = Product::with(['inventory', 'variants'])
                 ->whereIn('ProductID', $topIds)
                 ->get()
                 ->keyBy('ProductID');
