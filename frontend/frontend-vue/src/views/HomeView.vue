@@ -5,7 +5,7 @@
       <!-- HEADER -->
       <div class="page-header">
         <div class="page-header-l">
-          <h1 class="page-title">Dashboard</h1>
+          <h1 class="page-title">Dashboards</h1>
         </div>
         <div v-if="canTransactions" class="page-header-right">
           <router-link :to="{ name: 'sales-transactions' }" class="btn"><i class="fa-solid fa-receipt"></i>Transactions</router-link>
