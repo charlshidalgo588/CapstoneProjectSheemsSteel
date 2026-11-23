@@ -205,7 +205,7 @@
                 <span class="card-icon card-icon--green"><i class="fa-solid fa-chart-pie"></i></span>
                 <div>
                   <h2 id="hm-mix" class="card-title">Where sales come from</h2>
-                  <p class="card-sub">Share of {{ monthName }} {{ mixNoun }} by product</p>
+                  <p class="card-sub">Share of {{ monthName }} {{ mixNoun }} by top {{ MIX_LIMIT }} products</p>
                 </div>
               </div>
               <div class="seg" role="group" aria-label="Measure by">
@@ -387,6 +387,10 @@ const DASHBOARD_URL = '/api/dashboard'
 const TARGET_KEY = 'home.target'
 const pad = (n) => String(n).padStart(2, '0')
 
+// How many named products the "Where sales come from" card shows.
+// Everything else is grouped into one grey "Other items" slice.
+const MIX_LIMIT = 3
+
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -396,6 +400,7 @@ export default {
 
   data() {
     return {
+      MIX_LIMIT,
       todaySales: 0,
       itemsSoldToday: 0,
       transactionsToday: 0,
@@ -606,9 +611,9 @@ export default {
       return avg ? ((this.activeRow[this.calMetric] - avg) / avg) * 100 : 0
     },
 
-    /* sales mix (top 5 products by the chosen measure + one grey "Other items" slice) */
+    /* sales mix (top MIX_LIMIT products by the chosen measure + one grey "Other items" slice) */
     mixRows() {
-      const palette = ['#EA580C', '#6366F1', '#10B981', '#3B82F6', '#F59E0B']
+      const palette = ['#EA580C', '#6366F1', '#10B981']
       const m = this.mixMetric
       const val = (r) => (m === 'qty' ? r.qty : m === 'profit' ? r.profit : r.sales)
       const items = this.topSellingItems
@@ -621,11 +626,11 @@ export default {
         // A product sold at a loss has no share of the profit, so it stays out of that view.
         .filter((r) => m !== 'profit' || r.profit > 0)
         .sort((a, b) => val(b) - val(a))
-        .slice(0, 5)
+        .slice(0, MIX_LIMIT)
         .map((r, idx) => ({ ...r, color: palette[idx], rank: idx + 1 }))
 
       if (m !== 'qty') {
-        // Whatever the five products don't explain (other products + the shop's share of services).
+        // Whatever the top products don't explain (other products + the shop's share of services).
         const otherSales = Math.max(this.num(this.monthlyTotal) - items.reduce((a, r) => a + r.sales, 0), 0)
         const otherProfit = Math.max(this.num(this.totalProfit) - items.reduce((a, r) => a + r.profit, 0), 0)
         const otherVal = m === 'profit' ? otherProfit : otherSales

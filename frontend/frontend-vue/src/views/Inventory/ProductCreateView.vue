@@ -479,10 +479,14 @@
 
     </div>
 
-    <!-- ══ BARCODE SCANNER MODAL (same USB + Camera pipeline/UX as POS.vue) ══ -->
-    <transition name="alert-fade">
+    <!-- ══ BARCODE SCANNER MODAL (same USB + Camera pipeline/UX as POS.vue) ══
+         Teleported to <body> so it sits outside Layout's stacking context:
+         only the backdrop is blurred, never the modal itself. Its styles
+         re-declare the --p-* tokens from --c-* (see .scan-modal-backdrop). -->
+    <Teleport to="body">
+    <transition name="scan-fade">
       <div v-if="showBarcodeScanner" class="scan-modal-backdrop" @click.self="closeBarcodeScanner" @keydown.esc="closeBarcodeScanner">
-        <div class="scan-modal">
+        <div class="scan-modal" role="dialog" aria-modal="true" aria-label="Scan barcode">
           <div class="scan-modal-header">
             <h3>Scan Barcode</h3>
             <button class="scan-modal-close" @click="closeBarcodeScanner" aria-label="Close scanner">
@@ -581,6 +585,7 @@
         </div>
       </div>
     </transition>
+    </Teleport>
 
     <!-- ══ UNSAVED CHANGES CONFIRMATION ══
          Same look as the POS.vue "Clear this sale?" modal. Teleported to
@@ -1753,15 +1758,40 @@ html[data-theme="dark"] .margin-hint--loss { color: #F87171; }
 .save-bar-meta { font-size: 12px; color: var(--p-text-muted); }
 .save-bar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
-/* BARCODE SCANNER MODAL */
+/* BARCODE SCANNER MODAL
+   Teleported to <body>, so it is OUTSIDE .prod-page and cannot see the --p-*
+   tokens. They are re-declared here from the global --c-* tokens (with
+   fallbacks) so every rule below keeps working unchanged.
+   Only the backdrop blurs what is behind it; the modal card sits on top,
+   fully sharp (solid background, its own stacking context). */
 .scan-modal-backdrop {
+  --p-surface:        var(--c-surface, #1e293b);
+  --p-surface-raised: var(--c-surface-raised, #26364b);
+  --p-surface-sunken: var(--c-surface-sunken, #172033);
+  --p-border:         var(--c-border, #334155);
+  --p-border-strong:  var(--c-border-strong, #47566b);
+  --p-text-primary:   var(--c-text-primary, #f1f5f9);
+  --p-text-secondary: var(--c-text-secondary, #cbd5e1);
+  --p-text-muted:     var(--c-text-muted, #94a3b8);
+  --p-text-faint:     var(--c-text-faint, #64748b);
+  --p-accent:         var(--c-accent, #f97316);
+  --p-accent-soft:    var(--c-accent-soft, rgba(249,115,22,.14));
+  --p-accent-border:  var(--c-accent-border, rgba(249,115,22,.4));
+  --p-ring:           var(--c-accent-ring, rgba(249,115,22,.25));
+
   position: fixed; inset: 0;
-  background: var(--c-overlay); backdrop-filter: blur(6px);
+  background: var(--c-overlay, rgba(0,0,0,.6));
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 .scan-modal {
-  background: var(--p-surface); border: 1px solid var(--p-border);
+  position: relative; isolation: isolate;
+  background-color: var(--c-surface-overlay, var(--c-surface, #1e293b));
+  border: 1px solid var(--p-border);
   border-radius: 16px; width: 100%; max-width: 360px; overflow: hidden;
+  box-shadow: var(--c-shadow-xl, 0 24px 60px rgba(0,0,0,.5));
   transition: background-color .22s, border-color .22s;
 }
 .scan-modal-header {
@@ -1780,6 +1810,10 @@ html[data-theme="dark"] .margin-hint--loss { color: #F87171; }
 .scan-modal-body { padding: 18px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .form-hint--tip { font-style: italic; margin-top: 2px; }
 .form-hint--success { color: #10b981; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+
+/* Backdrop fade — opacity only (no transform on a fixed, blurred layer) */
+.scan-fade-enter-active, .scan-fade-leave-active { transition: opacity .2s ease; }
+.scan-fade-enter-from, .scan-fade-leave-to { opacity: 0; }
 
 /* Mode toggle: USB vs Camera — same as POS.vue */
 .scanner-mode-toggle { display: inline-flex; gap: 6px; margin-bottom: 2px; }
@@ -2000,5 +2034,6 @@ html[data-theme="dark"] .margin-hint--loss { color: #F87171; }
   .save-dot--dirty { animation: none; }
   .variant-toggle i, .ready-bar span { transition: none; }
   .alert-fade-enter-active, .alert-fade-leave-active { transition: none; }
+  .scan-fade-enter-active, .scan-fade-leave-active { transition: none; }
 }
 </style>

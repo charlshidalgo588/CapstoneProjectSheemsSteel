@@ -2,57 +2,42 @@
   <Layout>
     <div class="prod-view-page">
 
-      <!-- ── COMPACT PAGE HEADER (one row: back · title · edit) ── -->
+      <!-- ── PAGE HEADER (one row: INVENTORY / Product Details) ── -->
       <div class="page-header">
-        <div class="header-main">
-          <RouterLink to="/products" class="btn btn--back" title="Back to the product list">
-            <i class="fa-solid fa-arrow-left"></i> Back to Products
-          </RouterLink>
-          <div class="title-block">
-            <p class="page-eyebrow">Inventory</p>
-            <div class="title-row">
-              <h1 class="page-title">{{ product.ProductName || 'Product Details' }}</h1>
-              <span v-if="!loading" class="status-pill" :class="stockClass">
-                <span class="status-dot"></span>{{ stockLabel }}
-              </span>
-              <span v-if="!loading && product.ProductName" class="sku-chip" :class="{ 'sku-chip--empty': !product.SKU }">
-                {{ product.SKU || 'No SKU' }}
-              </span>
-            </div>
+        <div class="page-heading">
+          <div class="page-title-row">
+            <span class="page-eyebrow">Inventory</span>
+            <span class="page-crumb-sep" aria-hidden="true">/</span>
+            <h1 class="page-title">Product Details</h1>
           </div>
-        </div>
-        <div class="header-actions" v-if="!loading">
-          <RouterLink :to="`/products/${product.ProductID}/edit`" class="btn btn--primary">
-            <i class="fa-solid fa-pen-to-square"></i> Edit Product
-          </RouterLink>
+          <p v-if="!loading && product.ProductName" class="page-sub">
+            <strong class="page-sub-name">{{ product.ProductName }}</strong>
+            <span class="status-pill" :class="stockClass">
+              <span class="status-dot"></span>{{ stockLabel }}
+            </span>
+            <span class="sku-chip" :class="{ 'sku-chip--empty': !product.SKU }">{{ product.SKU || 'No SKU' }}</span>
+          </p>
         </div>
       </div>
 
-      <!-- ── LOADING SKELETON (same three columns as the page) ── -->
-      <div v-if="loading" class="view-layout">
-        <div class="col col-left">
-          <div class="detail-card skeleton-card skeleton-card--fill">
-            <div class="skeleton-block"></div>
-            <div class="skeleton-line skeleton-line--wide"></div>
-            <div class="skeleton-line"></div>
-            <div class="skeleton-line skeleton-line--narrow"></div>
-          </div>
-        </div>
-        <div class="col col-main">
+      <!-- ── LOADING SKELETON ── -->
+      <div v-if="loading" class="skeleton-layout">
+        <div class="skeleton-main">
           <div class="skeleton-stats">
-            <div v-for="n in 4" :key="n" class="detail-card skeleton-tile">
+            <div v-for="n in 3" :key="n" class="detail-card skeleton-tile">
               <div class="skeleton-line skeleton-line--narrow"></div>
               <div class="skeleton-line skeleton-line--big"></div>
             </div>
           </div>
-          <div class="detail-card skeleton-card skeleton-card--fill">
+          <div v-for="n in 2" :key="'m' + n" class="detail-card skeleton-card">
             <div class="skeleton-line skeleton-line--wide"></div>
             <div class="skeleton-line"></div>
             <div class="skeleton-line skeleton-line--narrow"></div>
           </div>
         </div>
-        <div class="col col-side">
-          <div class="detail-card skeleton-card skeleton-card--fill">
+        <div class="skeleton-side">
+          <div class="detail-card skeleton-card">
+            <div class="skeleton-block"></div>
             <div class="skeleton-line skeleton-line--wide"></div>
             <div class="skeleton-line"></div>
           </div>
@@ -60,76 +45,15 @@
       </div>
 
       <!-- ── CONTENT ──
-           Wide screens: three columns that fill the screen height, so nothing scrolls.
-           Narrow / very short screens: one normal scrolling column. -->
+           Wide screens: main column (left) + side column (right).
+           Narrow screens: both columns dissolve into one list, ordered by the .o-* classes. -->
       <div v-else class="view-layout">
 
-        <!-- ══ COLUMN 1: IMAGE + IDENTITY ══ -->
-        <div class="col col-left">
-          <div class="detail-card detail-card--image">
-            <div class="product-image-wrap">
-              <img
-                v-if="product.Product_Image"
-                :src="imageUrl(product.Product_Image)"
-                :alt="product.ProductName"
-                class="product-image"
-              />
-              <div v-else class="product-image-placeholder">
-                <i class="fa-solid fa-cube"></i>
-                <span>No image</span>
-              </div>
-            </div>
+        <!-- ═════════ MAIN COLUMN: stats, sizes, offcuts ═════════ -->
+        <div class="col-main">
 
-            <div class="identity-list">
-              <div class="identity-row">
-                <span class="identity-label">SKU</span>
-                <span class="identity-val identity-val--mono">
-                  {{ product.SKU || 'N/A' }}
-                  <button v-if="product.SKU" type="button" class="copy-btn" :class="{ 'copy-btn--done': copied === 'sku' }" title="Copy SKU" @click="copyText(product.SKU, 'sku')">
-                    <i class="fa-solid" :class="copied === 'sku' ? 'fa-check' : 'fa-copy'"></i>
-                  </button>
-                </span>
-              </div>
-              <div class="identity-row">
-                <span class="identity-label">Barcode</span>
-                <span class="identity-val identity-val--mono">
-                  {{ product.Barcode || '—' }}
-                  <button v-if="product.Barcode" type="button" class="copy-btn" :class="{ 'copy-btn--done': copied === 'barcode' }" title="Copy barcode" @click="copyText(product.Barcode, 'barcode')">
-                    <i class="fa-solid" :class="copied === 'barcode' ? 'fa-check' : 'fa-copy'"></i>
-                  </button>
-                </span>
-              </div>
-              <div class="identity-row">
-                <span class="identity-label">Category</span>
-                <span class="identity-val">
-                  <span class="category-pill">{{ product.category?.CategoryName || 'N/A' }}</span>
-                </span>
-              </div>
-              <div class="identity-row">
-                <span class="identity-label">Brand</span>
-                <span class="identity-val">{{ product.Brand || '—' }}</span>
-              </div>
-              <div class="identity-row">
-                <span class="identity-label">Unit</span>
-                <span class="identity-val">{{ product.Unit || '—' }}</span>
-              </div>
-              <div class="identity-row">
-                <span class="identity-label">Returnable</span>
-                <span class="identity-val">
-                  <span class="returnable-pill" :class="product.IsReturnable ? 'returnable-pill--yes' : 'returnable-pill--no'">
-                    <i :class="product.IsReturnable ? 'fa-solid fa-rotate-left' : 'fa-solid fa-ban'"></i>
-                    {{ product.IsReturnable ? 'Yes' : 'No' }}
-                  </span>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ══ COLUMN 2: AT A GLANCE + DETAILS + SIZES ══ -->
-        <div class="col col-main">
-
-          <div class="stat-grid">
+          <!-- ══ AT A GLANCE ══ -->
+          <div class="stat-grid o-stats">
             <div class="stat-tile stat-tile--price">
               <span class="stat-label">{{ variants.length > 1 ? 'Price range' : 'Selling price' }}</span>
               <span class="stat-value stat-value--green">{{ priceLabel }}</span>
@@ -146,46 +70,29 @@
             <div class="stat-tile">
               <span class="stat-label">Reorder level</span>
               <span class="stat-value">{{ product.inventory?.ReorderLevel ?? 0 }} <small>units</small></span>
-              <span class="stat-sub">Alert at or below</span>
+              <span class="stat-sub">Alert at or below this</span>
             </div>
             <div v-if="offcutPieces > 0" class="stat-tile">
               <span class="stat-label">Offcuts on hand</span>
-              <span class="stat-value stat-value--amber">{{ offcutPieces }} <small>pc{{ offcutPieces > 1 ? 's' : '' }}</small></span>
+              <span class="stat-value stat-value--amber">{{ offcutPieces }} <small>piece{{ offcutPieces > 1 ? 's' : '' }}</small></span>
               <span class="stat-sub">Tracked separately</span>
             </div>
           </div>
 
-          <!-- Product details -->
-          <div class="detail-card">
+          <!-- ══ SIZES, PRICES & STOCK ══ -->
+          <div class="detail-card o-sizes">
             <div class="detail-card-header">
-              <div class="detail-card-icon detail-card-icon--blue"><i class="fa-solid fa-circle-info"></i></div>
-              <h2 class="detail-card-title">Product Details</h2>
-            </div>
-            <div class="detail-card-body">
-              <p
-                class="desc-text"
-                :class="{ 'desc-text--empty': !product.Description }"
-                :title="product.Description || ''"
-              >{{ product.Description || 'No description available.' }}</p>
-
-              <div v-if="specTiles.length" class="attr-grid">
-                <div v-for="a in specTiles" :key="a.label" class="attr-tile">
-                  <span class="attr-label">{{ a.label }}</span>
-                  <span class="attr-val">{{ a.value }}</span>
-                </div>
+              <div class="detail-card-icon detail-card-icon--green">
+                <i class="fa-solid fa-tags"></i>
               </div>
-            </div>
-          </div>
-
-          <!-- Sizes, prices & stock: takes the remaining height -->
-          <div class="detail-card detail-card--fill">
-            <div class="detail-card-header">
-              <div class="detail-card-icon detail-card-icon--green"><i class="fa-solid fa-tags"></i></div>
-              <h2 class="detail-card-title">Sizes, Prices &amp; Stock</h2>
+              <div class="detail-card-heading">
+                <h2 class="detail-card-title">Sizes, Prices &amp; Stock</h2>
+                <p class="detail-card-sub">Every size with its price, margin and stock.</p>
+              </div>
               <span class="count-pill">{{ variants.length }} size{{ variants.length === 1 ? '' : 's' }}</span>
             </div>
 
-            <div class="size-table-wrap">
+            <div class="size-table-wrap size-table-wrap--sizes">
               <table class="size-table">
                 <thead>
                   <tr>
@@ -218,16 +125,145 @@
               </table>
             </div>
           </div>
+
+          <!-- ══ CUT OFFCUTS ON HAND ══ -->
+          <div class="detail-card o-offcuts" v-if="remnants.length">
+            <div class="detail-card-header">
+              <div class="detail-card-icon detail-card-icon--amber">
+                <i class="fa-solid fa-scissors"></i>
+              </div>
+              <div class="detail-card-heading">
+                <h2 class="detail-card-title">Cut Offcuts on Hand</h2>
+                <p class="detail-card-sub">Leftover lengths from cut pieces. Tracked separately from whole-piece stock.</p>
+              </div>
+              <span class="count-pill count-pill--amber">{{ offcutPieces }} piece{{ offcutPieces > 1 ? 's' : '' }}</span>
+            </div>
+
+            <div class="size-table-wrap size-table-wrap--offcuts">
+              <table class="size-table">
+                <thead>
+                  <tr>
+                    <th>Size</th>
+                    <th class="num">Length each</th>
+                    <th class="num">Pieces</th>
+                    <th>From receipt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="r in remnants" :key="r.RemnantID">
+                    <td class="size-name">{{ r.VariantLabel || '—' }}</td>
+                    <td class="num">{{ Number(r.Length) }} {{ r.Unit }}</td>
+                    <td class="num">{{ r.Quantity }}</td>
+                    <td class="mono">SR-{{ String(r.SaleID).padStart(5, '0') }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
-        <!-- ══ COLUMN 3: SUPPLIERS + OFFCUTS ══ -->
-        <div class="col col-side">
+        <!-- ═════════ SIDE COLUMN: product card, details, suppliers ═════════ -->
+        <div class="col-side">
 
-          <div class="detail-card detail-card--fill">
+          <!-- ══ PRODUCT CARD (thumbnail + codes + quick facts) ══ -->
+          <div class="detail-card o-product">
+            <div class="product-top">
+              <div class="product-image-wrap">
+                <img
+                  v-if="product.Product_Image"
+                  :src="imageUrl(product.Product_Image)"
+                  :alt="product.ProductName"
+                  class="product-image"
+                />
+                <div v-else class="product-image-placeholder">
+                  <i class="fa-solid fa-cube"></i>
+                  <span>No image</span>
+                </div>
+              </div>
+
+              <div class="product-codes">
+                <div class="code-block">
+                  <span class="identity-label">SKU</span>
+                  <span class="identity-val identity-val--mono">
+                    <span class="code-text">{{ product.SKU || 'N/A' }}</span>
+                    <button v-if="product.SKU" type="button" class="copy-btn" :class="{ 'copy-btn--done': copied === 'sku' }" title="Copy SKU" @click="copyText(product.SKU, 'sku')">
+                      <i class="fa-solid" :class="copied === 'sku' ? 'fa-check' : 'fa-copy'"></i>
+                    </button>
+                  </span>
+                </div>
+                <div class="code-block">
+                  <span class="identity-label">Barcode</span>
+                  <span class="identity-val identity-val--mono">
+                    <span class="code-text">{{ product.Barcode || '—' }}</span>
+                    <button v-if="product.Barcode" type="button" class="copy-btn" :class="{ 'copy-btn--done': copied === 'barcode' }" title="Copy barcode" @click="copyText(product.Barcode, 'barcode')">
+                      <i class="fa-solid" :class="copied === 'barcode' ? 'fa-check' : 'fa-copy'"></i>
+                    </button>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="fact-grid">
+              <div class="fact-tile">
+                <span class="identity-label">Category</span>
+                <span class="fact-val"><span class="category-pill">{{ product.category?.CategoryName || 'N/A' }}</span></span>
+              </div>
+              <div class="fact-tile">
+                <span class="identity-label">Brand</span>
+                <span class="fact-val">{{ product.Brand || '—' }}</span>
+              </div>
+              <div class="fact-tile">
+                <span class="identity-label">Unit</span>
+                <span class="fact-val">{{ product.Unit || '—' }}</span>
+              </div>
+              <div class="fact-tile">
+                <span class="identity-label">Returnable</span>
+                <span class="fact-val">
+                  <span class="returnable-pill" :class="product.IsReturnable ? 'returnable-pill--yes' : 'returnable-pill--no'">
+                    <i :class="product.IsReturnable ? 'fa-solid fa-rotate-left' : 'fa-solid fa-ban'"></i>
+                    {{ product.IsReturnable ? 'Yes' : 'No' }}
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ══ PRODUCT DETAILS ══ -->
+          <div class="detail-card o-details">
             <div class="detail-card-header">
-              <div class="detail-card-icon detail-card-icon--violet"><i class="fa-solid fa-truck-field"></i></div>
-              <h2 class="detail-card-title">Suppliers</h2>
-              <span v-if="product.suppliers?.length" class="count-pill">{{ product.suppliers.length }}</span>
+              <div class="detail-card-icon detail-card-icon--blue">
+                <i class="fa-solid fa-circle-info"></i>
+              </div>
+              <div class="detail-card-heading">
+                <h2 class="detail-card-title">Product Details</h2>
+                <p class="detail-card-sub">Description, material and finish.</p>
+              </div>
+            </div>
+            <div class="detail-card-body">
+              <p class="desc-text" :class="{ 'desc-text--empty': !product.Description }">
+                {{ product.Description || 'No description available.' }}
+              </p>
+
+              <div v-if="specTiles.length" class="attr-grid">
+                <div v-for="a in specTiles" :key="a.label" class="attr-tile">
+                  <span class="attr-label">{{ a.label }}</span>
+                  <span class="attr-val">{{ a.value }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ══ SUPPLIERS ══ -->
+          <div class="detail-card o-suppliers">
+            <div class="detail-card-header">
+              <div class="detail-card-icon detail-card-icon--violet">
+                <i class="fa-solid fa-truck-field"></i>
+              </div>
+              <div class="detail-card-heading">
+                <h2 class="detail-card-title">Supplier Information</h2>
+                <p class="detail-card-sub">Who this product is bought from.</p>
+              </div>
+              <span v-if="product.suppliers?.length" class="count-pill count-pill--violet">{{ product.suppliers.length }}</span>
             </div>
 
             <div v-if="product.suppliers?.length" class="supplier-grid">
@@ -252,40 +288,32 @@
 
             <div v-else class="no-suppliers">
               <i class="fa-solid fa-truck-field"></i>
-              <p>No suppliers assigned.</p>
-            </div>
-          </div>
-
-          <div v-if="remnants.length" class="detail-card detail-card--fill">
-            <div class="detail-card-header" title="Offcuts are tracked separately from full-piece stock">
-              <div class="detail-card-icon detail-card-icon--amber"><i class="fa-solid fa-scissors"></i></div>
-              <h2 class="detail-card-title">Cut Offcuts</h2>
-              <span class="count-pill count-pill--amber">{{ offcutPieces }} pc{{ offcutPieces > 1 ? 's' : '' }}</span>
-            </div>
-            <div class="size-table-wrap">
-              <table class="size-table">
-                <thead>
-                  <tr>
-                    <th>Size</th>
-                    <th class="num">Length</th>
-                    <th class="num">Pcs</th>
-                    <th>Receipt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="r in remnants" :key="r.RemnantID">
-                    <td class="size-name">{{ r.VariantLabel || '—' }}</td>
-                    <td class="num">{{ Number(r.Length) }} {{ r.Unit }}</td>
-                    <td class="num">{{ r.Quantity }}</td>
-                    <td class="mono">SR-{{ String(r.SaleID).padStart(5, '0') }}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <p>No suppliers assigned to this product.</p>
             </div>
           </div>
         </div>
 
       </div>
+
+      <!-- ══ FLOATING ACTION BAR (pinned to the bottom of the screen while scrolling) ══ -->
+      <div class="action-bar">
+        <div class="action-bar-status">
+          <i class="fa-solid fa-cube action-bar-icon"></i>
+          <div class="action-bar-text">
+            <strong>{{ loading ? 'Loading product…' : (product.ProductName || 'Product') }}</strong>
+            <span v-if="!loading" class="action-bar-meta">{{ variants.length }} size{{ variants.length === 1 ? '' : 's' }} · {{ totalStock }} units in stock</span>
+          </div>
+        </div>
+        <div class="action-bar-actions">
+          <RouterLink to="/products" class="btn btn--ghost" title="Back to the product list">
+            <i class="fa-solid fa-arrow-left"></i> <span class="btn-text">Back to Products</span>
+          </RouterLink>
+          <RouterLink v-if="!loading && product.ProductID" :to="`/products/${product.ProductID}/edit`" class="btn btn--primary">
+            <i class="fa-solid fa-pen-to-square"></i> Edit Product
+          </RouterLink>
+        </div>
+      </div>
+
     </div>
   </Layout>
 </template>
@@ -350,10 +378,10 @@ const margin = v =>
 const specTiles = computed(() => {
   const p = product.value
   const tiles = []
-  if (p.Material)    tiles.push({ label: 'Material',       value: p.Material })
+  if (p.Material)    tiles.push({ label: 'Material',      value: p.Material })
   if (p.ProfileType) tiles.push({ label: 'Profile / Type', value: p.ProfileType })
-  if (p.Color)       tiles.push({ label: 'Color',          value: p.Color })
-  if (p.Weight)      tiles.push({ label: 'Weight',         value: `${p.Weight} ${p.WeightUnit || ''}`.trim() })
+  if (p.Color)       tiles.push({ label: 'Color',         value: p.Color })
+  if (p.Weight)      tiles.push({ label: 'Weight',        value: `${p.Weight} ${p.WeightUnit || ''}`.trim() })
   return tiles
 })
 
@@ -432,25 +460,19 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
   --pv-blue:           #3b82f6;
   --pv-violet:         #6366f1;
   --pv-amber:          #f59e0b;
-  --radius: 14px;
+  --radius: 16px;
 
-  /* ── SPACE TUNING (same bleed values as the Add / Edit / List pages) ── */
+  /* ── SPACE TUNING (same values as the Add / Edit / List pages) ──
+     --bleed-*: reclaims part of the app shell's padding on desktop.
+     Lower a value (or set it to 0px) if content ever touches the sidebar or top bar. */
   --bleed-x: 30px;
-  --bleed-y: 26px;
+  --bleed-y: 30px;
   --pv-gap: 14px;
 
-  /* ── FIT-TO-SCREEN TUNING ──
-     On wide screens the page is exactly as tall as the visible area, so nothing
-     scrolls. The shell (Layout.vue) has a top bar and some bottom padding that the
-     page must leave room for. If the browser still shows a page scrollbar, RAISE
-     these numbers; if there is an empty strip under the page, LOWER them. */
-  --shell-top: 64px;
-  --shell-bottom: 32px;
-
   min-height: 100%;
-  overflow-x: clip;
+  overflow-x: clip;             /* the page never scrolls sideways (clip, so sticky keeps working) */
   background: var(--pv-bg);
-  padding: 14px 22px 22px;
+  padding: 8px 24px 16px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--pv-gap);
   transition: background-color .22s ease;
@@ -462,28 +484,26 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
   .prod-view-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
 }
 
-/* ── PAGE HEADER (compact, one row) ── */
-.page-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-shrink: 0; }
-.header-main { display: flex; align-items: center; gap: 16px; min-width: 0; }
-.title-block { min-width: 0; padding-left: 16px; border-left: 1px solid var(--pv-border-strong); }
-.page-eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .12em; color: var(--pv-accent); text-transform: uppercase; margin: 0 0 2px; }
-.title-row  { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
-.page-title {
-  font-size: 22px; font-weight: 800; color: var(--pv-text-primary); letter-spacing: -.03em; margin: 0;
-  transition: color .22s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
-}
+/* ── PAGE HEADER ── */
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page-heading { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.page-title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.page-eyebrow { font-size: 16px; font-weight: 700; letter-spacing: .12em; color: var(--pv-accent); text-transform: uppercase; line-height: 1.2; margin: 0; }
+.page-crumb-sep { font-size: 16px; font-weight: 300; color: var(--pv-text-faint); line-height: 1.2; }
+.page-title { font-size: 16px; font-weight: 800; color: var(--pv-text-primary); letter-spacing: -.02em; line-height: 1.2; margin: 0; transition: color .22s; }
+.page-sub   { margin: 2px 0 0; font-size: 13px; color: var(--pv-text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.page-sub-name { font-size: 13.5px; font-weight: 700; color: var(--pv-text-primary); overflow-wrap: anywhere; }
 .sku-chip {
-  font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 20px;
+  font-size: 11.5px; font-weight: 700; padding: 2px 10px; border-radius: 20px;
   background: var(--pv-surface-raised); border: 1px solid var(--pv-border); color: var(--pv-text-secondary);
-  font-variant-numeric: tabular-nums; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .sku-chip--empty { color: #d97706; border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.10); }
-.header-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
 
 .status-pill {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 11px; font-weight: 700; letter-spacing: .03em;
-  border-radius: 20px; padding: 3px 10px; white-space: nowrap;
+  border-radius: 20px; padding: 2px 10px; white-space: nowrap;
 }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .status-pill--ok  { background: rgba(16,185,129,.12); color: #059669; }
@@ -497,73 +517,78 @@ html[data-theme="dark"] .status-pill--oos { background: rgba(244,63,94,.16);  co
 .btn {
   display: inline-flex; align-items: center; gap: 7px;
   font-size: 13px; font-weight: 600; font-family: inherit;
-  border-radius: 10px; padding: 9px 16px; cursor: pointer;
-  border: 1.5px solid transparent; text-decoration: none; white-space: nowrap;
+  border-radius: 10px; padding: 10px 18px; cursor: pointer;
+  border: 1.5px solid transparent; text-decoration: none;
   transition: background .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s;
 }
 .btn:active { transform: scale(.98); }
 .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--pv-ring); }
+.btn--ghost   { background: var(--pv-surface); border-color: var(--pv-border-strong); color: var(--pv-text-secondary); }
+.btn--ghost:hover { background: var(--pv-surface-raised); border-color: var(--pv-accent-border); color: var(--pv-text-primary); }
 .btn--primary {
   background: linear-gradient(135deg, var(--pv-accent) 0%, var(--c-accent-deep) 100%);
   color: #fff; box-shadow: var(--c-shadow-accent);
 }
 .btn--primary:hover { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
 
-/* Back button: smaller, but still bordered and accent-tinted so it is easy to spot. */
-.btn--back {
-  gap: 7px; padding: 6px 12px 6px 7px; font-size: 12.5px;
-  background: var(--pv-surface); border-color: var(--pv-border-strong); color: var(--pv-text-primary);
-  box-shadow: var(--c-shadow-sm); flex-shrink: 0;
+/* ── FLOATING ACTION BAR ──
+   Sticks to the bottom of the screen while you scroll (same behaviour as the Edit page's
+   save bar). margin-top:auto keeps it at the very bottom even when the page is short. */
+.action-bar {
+  position: sticky; bottom: 14px; z-index: 30; order: 9;
+  margin-top: auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 14px 10px 18px; border-radius: 16px;
+  background: var(--pv-surface); border: 1px solid var(--pv-border-strong);
+  box-shadow: 0 12px 34px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.08);
 }
-.btn--back i {
-  width: 20px; height: 20px; border-radius: 6px; font-size: 10px;
-  display: inline-flex; align-items: center; justify-content: center;
+.action-bar-status { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.action-bar-icon {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
   background: var(--pv-accent-soft); color: var(--pv-accent);
-  transition: transform .18s, background-color .18s, color .18s;
 }
-.btn--back:hover { border-color: var(--pv-accent); color: var(--pv-accent); background: var(--pv-accent-soft); }
-.btn--back:hover i { transform: translateX(-2px); background: var(--pv-accent); color: #fff; }
+.action-bar-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.action-bar-text strong { font-size: 13.5px; font-weight: 700; color: var(--pv-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-bar-meta { font-size: 12px; color: var(--pv-text-muted); }
+.action-bar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
-/* ── LAYOUT ──
-   Default (narrow or very short screens): one normal scrolling column.
-   Wide, tall-enough screens: the page is exactly the visible height and the three
-   columns share it, so nothing scrolls. */
+/* ── CONTENT LAYOUT ──
+   Narrow screens: one column, cards ordered by the .o-* classes (the two column
+   wrappers dissolve with display: contents).
+   Wide screens: main column on the left, side column on the right. */
 .view-layout { display: flex; flex-direction: column; gap: var(--pv-gap); min-width: 0; }
-.col { display: flex; flex-direction: column; gap: var(--pv-gap); min-width: 0; }
+.col-main, .col-side { display: contents; }
+.o-stats { order: 1; } .o-product { order: 2; } .o-details { order: 3; }
+.o-sizes { order: 4; } .o-offcuts { order: 5; } .o-suppliers { order: 6; }
 
-@media (min-width: 1101px) and (min-height: 561px) {
-  .prod-view-page {
-    height: calc(100dvh - var(--shell-top) - var(--shell-bottom) + var(--bleed-y));
-    min-height: 0;
-    overflow: hidden;
-  }
+@media (min-width: 1100px) {
   .view-layout {
-    flex: 1 1 0; min-height: 0;
-    display: grid; grid-template-columns: 250px minmax(0, 1fr) 290px;
-    gap: var(--pv-gap); align-items: stretch;
+    display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 28vw, 360px);
+    gap: var(--pv-gap) 20px; align-items: start;
   }
-  .col { min-height: 0; }
-  .detail-card--fill { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-  .detail-card--image { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-  .detail-card--image .product-image-wrap { flex: 1 1 0; min-height: 90px; aspect-ratio: auto; max-height: none; }
-  .detail-card--image .identity-list { flex-shrink: 0; }
-  .size-table-wrap { flex: 1 1 0; min-height: 0; overflow: auto; }
-  .supplier-grid { flex: 1 1 0; min-height: 0; overflow: auto; }
-}
-@media (min-width: 1500px) and (min-height: 561px) {
-  .view-layout { grid-template-columns: 290px minmax(0, 1fr) 330px; }
+  .col-main, .col-side {
+    display: flex; flex-direction: column; gap: var(--pv-gap); min-width: 0; grid-row: 1;
+  }
+  .col-main { grid-column: 1; }
+  .col-side { grid-column: 2; }
+  .o-stats, .o-product, .o-details, .o-sizes, .o-offcuts, .o-suppliers { order: 0; }
 }
 
 /* ── SKELETON ── */
-.skeleton-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-.skeleton-tile  { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.skeleton-card  { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-.skeleton-card--fill { flex: 1 1 0; }
-.skeleton-block { height: 180px; border-radius: 12px; background: var(--pv-border); animation: shimmer 1.4s infinite; }
-.skeleton-line  { height: 12px; border-radius: 6px; background: var(--pv-border); animation: shimmer 1.4s infinite; width: 80%; }
+.skeleton-layout { display: flex; flex-direction: column; gap: var(--pv-gap); }
+.skeleton-main, .skeleton-side { display: flex; flex-direction: column; gap: var(--pv-gap); min-width: 0; }
+@media (min-width: 1100px) {
+  .skeleton-layout { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 28vw, 360px); gap: 20px; align-items: start; }
+}
+.skeleton-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.skeleton-tile  { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.skeleton-card  { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.skeleton-block { height: 120px; border-radius: 12px; background: var(--pv-border); animation: shimmer 1.4s infinite; }
+.skeleton-line  { height: 13px; border-radius: 6px; background: var(--pv-border); animation: shimmer 1.4s infinite; width: 80%; }
 .skeleton-line--wide   { width: 100%; }
 .skeleton-line--narrow { width: 50%; }
-.skeleton-line--big    { height: 20px; width: 70%; }
+.skeleton-line--big    { height: 22px; width: 70%; }
 @keyframes shimmer { 0%,100%{opacity:.6} 50%{opacity:.3} }
 
 /* ── DETAIL CARDS ── */
@@ -573,13 +598,14 @@ html[data-theme="dark"] .status-pill--oos { background: rgba(244,63,94,.16);  co
   transition: background-color .22s, border-color .22s;
 }
 .detail-card-header {
-  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
-  padding: 10px 16px; border-bottom: 1px solid var(--pv-border);
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 22px 12px; border-bottom: 1px solid var(--pv-border);
   transition: border-color .22s;
 }
+.detail-card-heading { min-width: 0; }
 .detail-card-icon {
-  width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; font-size: 13px;
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
 }
 .detail-card-icon--blue   { background: rgba(59,130,246,.12); color: var(--pv-blue);   }
 .detail-card-icon--green  { background: rgba(16,185,129,.12); color: var(--pv-green);  }
@@ -589,19 +615,22 @@ html[data-theme="dark"] .detail-card-icon--blue   { background: rgba(59,130,246,
 html[data-theme="dark"] .detail-card-icon--green  { background: rgba(16,185,129,.18); }
 html[data-theme="dark"] .detail-card-icon--amber  { background: rgba(245,158,11,.18); }
 html[data-theme="dark"] .detail-card-icon--violet { background: rgba(99,102,241,.18); }
-.detail-card-title { font-size: 14px; font-weight: 700; color: var(--pv-text-primary); margin: 0; transition: color .22s; }
-.detail-card-body  { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.detail-card-title { font-size: 15px; font-weight: 700; color: var(--pv-text-primary); margin: 0 0 2px; transition: color .22s; }
+.detail-card-sub   { font-size: 12.5px; color: var(--pv-text-muted); margin: 0; }
+.detail-card-body  { padding: 16px 22px 18px; display: flex; flex-direction: column; gap: 14px; }
 .count-pill {
-  margin-left: auto; flex-shrink: 0; font-size: 11px; font-weight: 700;
-  padding: 3px 10px; border-radius: 20px; background: var(--pv-accent-soft); color: var(--pv-accent);
+  margin-left: auto; flex-shrink: 0; font-size: 11.5px; font-weight: 700;
+  padding: 4px 12px; border-radius: 20px; background: var(--pv-accent-soft); color: var(--pv-accent);
 }
-.count-pill--amber { background: rgba(245,158,11,.14); color: #d97706; }
-html[data-theme="dark"] .count-pill--amber { color: #FCD34D; }
+.count-pill--amber  { background: rgba(245,158,11,.14); color: #d97706; }
+.count-pill--violet { background: rgba(99,102,241,.12); color: var(--pv-violet); }
+html[data-theme="dark"] .count-pill--amber  { color: #FCD34D; }
+html[data-theme="dark"] .count-pill--violet { background: rgba(99,102,241,.20); color: #A5B4FC; }
 
 /* ── AT A GLANCE ── */
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; flex-shrink: 0; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
 .stat-tile {
-  display: flex; flex-direction: column; gap: 3px; padding: 10px 14px; min-width: 0;
+  display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; min-width: 0;
   background: var(--pv-surface); border: 1px solid var(--pv-border);
   border-radius: var(--radius); box-shadow: var(--c-shadow-sm);
   transition: background-color .22s, border-color .22s;
@@ -610,70 +639,52 @@ html[data-theme="dark"] .count-pill--amber { color: #FCD34D; }
   background: linear-gradient(rgba(16,185,129,.07), rgba(16,185,129,.07)), var(--pv-surface);
   border-color: rgba(16,185,129,.28);
 }
-.stat-label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-text-muted); }
+.stat-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-text-muted); }
 .stat-value {
-  font-size: 19px; font-weight: 800; color: var(--pv-text-primary); letter-spacing: -.03em;
+  font-size: 22px; font-weight: 800; color: var(--pv-text-primary); letter-spacing: -.03em;
   font-variant-numeric: tabular-nums; overflow-wrap: anywhere; line-height: 1.15;
 }
-.stat-value small { font-size: 11.5px; font-weight: 600; color: var(--pv-text-faint); letter-spacing: 0; }
+.stat-value small { font-size: 12px; font-weight: 600; color: var(--pv-text-faint); letter-spacing: 0; }
 .stat-value--green { color: var(--pv-green); }
 .stat-value--amber { color: var(--pv-amber); }
 .stat-value--red   { color: var(--pv-red); }
 html[data-theme="dark"] .stat-value--green { color: #4ADE80; }
 html[data-theme="dark"] .stat-value--amber { color: #FCD34D; }
 html[data-theme="dark"] .stat-value--red   { color: #F87171; }
-.stat-sub { font-size: 11.5px; color: var(--pv-text-faint); display: flex; align-items: center; min-height: 16px; }
+.stat-sub { font-size: 12px; color: var(--pv-text-faint); display: flex; align-items: center; min-height: 18px; }
 .low-stock-badge {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 10.5px; font-weight: 700;
+  font-size: 11px; font-weight: 700;
   background: rgba(245,158,11,.14); color: #d97706;
-  border-radius: 20px; padding: 1px 8px;
+  border-radius: 20px; padding: 2px 8px;
 }
 html[data-theme="dark"] .low-stock-badge { background: rgba(245,158,11,.18); color: #FCD34D; }
 
-/* ── PRODUCT DETAILS ── */
-.desc-text {
-  margin: 0; font-size: 13px; line-height: 1.55; color: var(--pv-text-secondary);
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-}
-.desc-text--empty { color: var(--pv-text-faint); font-style: italic; }
-.attr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-.attr-tile {
-  display: flex; flex-direction: column; gap: 2px; padding: 7px 12px; min-width: 0;
-  background: var(--pv-surface-sunken); border: 1px solid var(--pv-border); border-radius: 10px;
-}
-.attr-label { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-text-muted); }
-.attr-val   { font-size: 13px; font-weight: 600; color: var(--pv-text-primary); overflow-wrap: anywhere; }
-
-/* ── IMAGE + IDENTITY ── */
+/* ── PRODUCT CARD (thumbnail + codes + quick facts) ── */
+.product-top { display: flex; align-items: center; gap: 14px; padding: 14px 16px 10px; }
 .product-image-wrap {
-  position: relative; width: 100%;
-  aspect-ratio: 1; max-height: 280px; overflow: hidden;
-  background: var(--pv-surface-sunken);
-  border-bottom: 1px solid var(--pv-border);
+  position: relative; width: 92px; height: 92px; flex-shrink: 0; overflow: hidden;
+  border-radius: 12px; background: var(--pv-surface-sunken); border: 1px solid var(--pv-border);
   transition: background-color .22s;
 }
 .product-image { width: 100%; height: 100%; object-fit: cover; display: block; }
 .product-image-placeholder {
-  width: 100%; height: 100%; display: flex; flex-direction: column; gap: 6px;
+  width: 100%; height: 100%; display: flex; flex-direction: column; gap: 4px;
   align-items: center; justify-content: center;
-  font-size: 38px; color: var(--pv-text-faint);
+  font-size: 24px; color: var(--pv-text-faint);
 }
-.product-image-placeholder span { font-size: 11.5px; font-weight: 600; }
+.product-image-placeholder span { font-size: 10.5px; font-weight: 600; }
 
-.identity-list { padding: 4px 16px 6px; display: flex; flex-direction: column; }
-.identity-row  {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 7px 0; border-bottom: 1px dashed var(--pv-border);
-}
-.identity-row:last-child { border-bottom: none; }
-.identity-label { font-size: 10.5px; font-weight: 600; color: var(--pv-text-faint); text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
-.identity-val   { font-size: 12.5px; font-weight: 600; color: var(--pv-text-primary); text-align: right; display: inline-flex; align-items: center; gap: 5px; transition: color .22s; overflow-wrap: anywhere; min-width: 0; }
-.identity-val--mono { font-variant-numeric: tabular-nums; font-family: 'SF Mono','Fira Code',monospace; font-size: 11.5px; }
+.product-codes { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.code-block { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.identity-label { font-size: 10.5px; font-weight: 700; color: var(--pv-text-faint); text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+.identity-val   { font-size: 13px; font-weight: 600; color: var(--pv-text-primary); display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.identity-val--mono { font-variant-numeric: tabular-nums; font-family: 'SF Mono','Fira Code',monospace; font-size: 12px; }
+.code-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
 .copy-btn {
-  width: 22px; height: 22px; flex-shrink: 0; border: none; border-radius: 6px; cursor: pointer;
-  background: transparent; color: var(--pv-text-faint); font-size: 10.5px;
+  width: 22px; height: 22px; flex-shrink: 0; border: none; border-radius: 7px; cursor: pointer;
+  background: transparent; color: var(--pv-text-faint); font-size: 11px;
   display: inline-flex; align-items: center; justify-content: center;
   transition: background-color .15s, color .15s;
 }
@@ -681,50 +692,74 @@ html[data-theme="dark"] .low-stock-badge { background: rgba(245,158,11,.18); col
 .copy-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--pv-ring); }
 .copy-btn--done, .copy-btn--done:hover { background: rgba(16,185,129,.14); color: var(--pv-green); }
 
+.fact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 0 16px 14px; }
+.fact-tile {
+  display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; min-width: 0;
+  background: var(--pv-surface-sunken); border: 1px solid var(--pv-border); border-radius: 10px;
+}
+.fact-val { font-size: 13px; font-weight: 600; color: var(--pv-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .category-pill {
-  display: inline-flex; align-items: center;
+  display: inline-flex; align-items: center; max-width: 100%;
   background: rgba(99,102,241,.12); color: var(--pv-violet);
-  font-size: 11px; font-weight: 600; border-radius: 20px; padding: 2px 9px;
+  font-size: 11.5px; font-weight: 600; border-radius: 20px; padding: 1px 9px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   transition: background .22s;
 }
 html[data-theme="dark"] .category-pill { background: rgba(99,102,241,.20); color: #A5B4FC; }
 
 .returnable-pill {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 600; border-radius: 20px; padding: 2px 9px;
+  font-size: 11.5px; font-weight: 600; border-radius: 20px; padding: 1px 9px;
 }
 .returnable-pill--yes { background: rgba(16,185,129,.12); color: var(--pv-green); }
 .returnable-pill--no  { background: rgba(244,63,94,.10);  color: var(--pv-red);  }
 html[data-theme="dark"] .returnable-pill--yes { background: rgba(16,185,129,.18); color: #4ADE80; }
 html[data-theme="dark"] .returnable-pill--no  { background: rgba(244,63,94,.16);  color: #F87171; }
 
-/* ── SIZES / OFFCUTS TABLES ── */
-.size-table-wrap { overflow-x: auto; padding: 0 8px 6px; }
-.size-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* ── PRODUCT DETAILS ── */
+.desc-text { margin: 0; font-size: 13.5px; line-height: 1.7; color: var(--pv-text-secondary); white-space: pre-line; }
+.desc-text--empty { color: var(--pv-text-faint); font-style: italic; }
+.attr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 14px; border-top: 1px dashed var(--pv-border-strong); }
+.attr-tile {
+  display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; min-width: 0;
+  background: var(--pv-surface-sunken); border: 1px solid var(--pv-border); border-radius: 12px;
+}
+.attr-label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pv-text-muted); }
+.attr-val   { font-size: 13.5px; font-weight: 600; color: var(--pv-text-primary); overflow-wrap: anywhere; }
+
+/* ── SIZES / OFFCUTS TABLES ──
+   The card grows with its rows; after about 6 rows the table scrolls inside the card
+   and the header row stays pinned. */
+.size-table-wrap { overflow: auto; padding: 4px 10px 12px; scrollbar-width: thin; }
+.size-table-wrap--sizes   { max-height: 400px; }
+.size-table-wrap--offcuts { max-height: 260px; }
+.size-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .size-table th {
-  position: sticky; top: 0; z-index: 1; background: var(--pv-surface);
-  text-align: left; padding: 9px 10px;
-  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  text-align: left; padding: 10px 12px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
   color: var(--pv-text-faint); border-bottom: 1px solid var(--pv-border);
   white-space: nowrap;
+  position: sticky; top: 0; z-index: 1; background: var(--pv-surface);
 }
 .size-table td {
-  padding: 8px 10px; color: var(--pv-text-primary);
+  padding: 11px 12px; color: var(--pv-text-primary);
   border-bottom: 1px solid var(--pv-border);
   font-variant-numeric: tabular-nums;
   transition: border-color .22s;
 }
 .size-table .num { text-align: right; }
+.size-table th.num { text-align: right; }
 .size-table tbody tr:last-child td { border-bottom: none; }
 .size-table tbody tr:hover td { background: var(--pv-surface-raised); }
 .size-name { font-weight: 700; }
 .size-empty { text-align: center; color: var(--pv-text-faint); }
 .size-dash { color: var(--pv-text-faint); }
-.mono { font-family: 'SF Mono','Fira Code',monospace; font-size: 12px; }
+.mono { font-family: 'SF Mono','Fira Code',monospace; font-size: 12.5px; }
 
 .margin-pill {
-  display: inline-block; padding: 2px 8px; border-radius: 20px;
-  font-size: 11px; font-weight: 700;
+  display: inline-block; padding: 2px 9px; border-radius: 20px;
+  font-size: 11.5px; font-weight: 700;
   background: rgba(16,185,129,.12); color: var(--pv-green);
 }
 .margin-pill--loss { background: rgba(244,63,94,.12); color: var(--pv-red); }
@@ -732,8 +767,8 @@ html[data-theme="dark"] .margin-pill { background: rgba(16,185,129,.18); color: 
 html[data-theme="dark"] .margin-pill--loss { background: rgba(244,63,94,.16); color: #F87171; }
 
 .stock-chip {
-  display: inline-block; min-width: 32px; text-align: center;
-  padding: 2px 9px; border-radius: 20px; font-size: 11.5px; font-weight: 800;
+  display: inline-block; min-width: 34px; text-align: center;
+  padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 800;
 }
 .stock-chip--ok  { background: rgba(16,185,129,.12); color: #059669; }
 .stock-chip--low { background: rgba(245,158,11,.14); color: #d97706; }
@@ -742,55 +777,59 @@ html[data-theme="dark"] .stock-chip--ok  { background: rgba(16,185,129,.18); col
 html[data-theme="dark"] .stock-chip--low { background: rgba(245,158,11,.18); color: #FCD34D; }
 html[data-theme="dark"] .stock-chip--oos { background: rgba(244,63,94,.16);  color: #F87171; }
 
-/* ── SUPPLIERS ── */
-.supplier-grid { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+/* ── SUPPLIERS (list scrolls inside the card when there are many) ── */
+.supplier-grid { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto; scrollbar-width: thin; }
 .supplier-card {
-  display: flex; align-items: flex-start; gap: 10px;
+  display: flex; align-items: flex-start; gap: 12px;
   background: var(--pv-surface-sunken); border: 1px solid var(--pv-border);
-  border-radius: 12px; padding: 10px 12px;
+  border-radius: 12px; padding: 12px;
   transition: background-color .22s, border-color .22s;
 }
 .supplier-card:hover { border-color: var(--pv-accent-border); }
 .supplier-avatar {
-  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
   background: var(--pv-accent-soft); color: var(--pv-accent);
   border: 1px solid var(--pv-accent-border);
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 800;
+  font-size: 14px; font-weight: 800;
   transition: background-color .22s, border-color .22s;
 }
 .supplier-info  { flex: 1; min-width: 0; }
-.supplier-name  { font-size: 13px; font-weight: 700; color: var(--pv-text-primary); margin: 0 0 5px; transition: color .22s; overflow-wrap: anywhere; }
+.supplier-name  { font-size: 13.5px; font-weight: 700; color: var(--pv-text-primary); margin: 0 0 6px; transition: color .22s; overflow-wrap: anywhere; }
 .supplier-meta  { display: flex; flex-direction: column; gap: 3px; }
 .supplier-meta-row {
   display: flex; align-items: center; gap: 6px;
-  font-size: 11.5px; color: var(--pv-text-muted); overflow-wrap: anywhere;
+  font-size: 12px; color: var(--pv-text-muted); overflow-wrap: anywhere;
 }
 .supplier-meta-row i { font-size: 10px; color: var(--pv-text-faint); flex-shrink: 0; }
 
 .no-suppliers {
-  padding: 18px 16px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 8px; text-align: center; color: var(--pv-text-faint);
+  padding: 24px 20px; display: flex; flex-direction: column;
+  align-items: center; gap: 10px; text-align: center; color: var(--pv-text-faint);
 }
-.detail-card--fill > .no-suppliers { flex: 1 1 auto; }
-.no-suppliers i { font-size: 22px; }
-.no-suppliers p { font-size: 13px; color: var(--pv-text-muted); margin: 0; }
+.no-suppliers i { font-size: 26px; }
+.no-suppliers p { font-size: 13.5px; color: var(--pv-text-muted); margin: 0; }
 
-/* ── RESPONSIVE (normal scrolling page) ── */
-@media (max-width: 1100px) {
-  .prod-view-page { --pv-gap: 14px; padding: 12px 14px 32px; }
+/* ── RESPONSIVE ── */
+@media (max-width: 1099px) and (min-width: 801px) {
+  .supplier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .attr-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .prod-view-page { --pv-gap: 12px; }
 }
 @media (max-width: 800px) {
-  .prod-view-page { padding: 14px 14px 28px; }
-  .page-header { flex-direction: column; align-items: stretch; }
-  .header-main { flex-direction: column; align-items: flex-start; gap: 12px; }
-  .title-block { padding-left: 0; border-left: none; }
-  .page-title { white-space: normal; }
-  .header-actions .btn { flex: 1; justify-content: center; }
-  .supplier-grid { padding-left: 12px; padding-right: 12px; }
+  .prod-view-page { padding: 8px 16px 16px; }
+  .page-eyebrow, .page-title, .page-crumb-sep { font-size: 14px; }
+  .detail-card-header { flex-wrap: wrap; padding: 14px 16px 12px; }
+  .detail-card-body { padding: 16px; }
+  .count-pill { margin-left: 0; }
+  .action-bar { bottom: 10px; padding: 10px; border-radius: 14px; }
+  .action-bar-status { display: none; }
+  .action-bar-actions { width: 100%; }
+  .action-bar-actions .btn { flex: 1; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .skeleton-block, .skeleton-line { animation: none; }
-  .btn--back i { transition: none; }
 }
 </style>
