@@ -297,7 +297,10 @@ class ProductController extends Controller
             'Unit'         => $p->Unit,
             'Weight'       => $p->Weight,
             'WeightUnit'   => $p->WeightUnit,
-            'IsReturnable' => (bool) $p->IsReturnable,
+
+            // Only adjustable items get the "Adjust line" button at the POS.
+            'IsAdjustable' => (bool) $p->IsAdjustable,
+
             'created_at'   => $p->created_at,
             'updated_at'   => $p->updated_at,
         ];
@@ -317,7 +320,7 @@ class ProductController extends Controller
                 'Material', 'ProfileType', 'Color',
                 'Length', 'LengthUnit', 'Width', 'WidthUnit', 'Thickness',
                 'CategoryID', 'Unit', 'Weight', 'WeightUnit',
-                'IsReturnable', 'Product_Image',
+                'IsAdjustable', 'Product_Image',
                 'created_at', 'updated_at',
             ])
             ->with([
@@ -434,7 +437,7 @@ class ProductController extends Controller
 
             'SellingPrice'  => (float) $product->SellingPrice,
             'CostPrice'     => (float) $product->CostPrice,
-            'IsReturnable'  => (bool) $product->IsReturnable,
+            'IsAdjustable'  => (bool) $product->IsAdjustable,
 
             // SIZES & PRICES (full detail incl. Specs + stock, for the edit form)
             'variants' => $product->variants->map(fn ($v) => [
@@ -511,7 +514,7 @@ class ProductController extends Controller
                 'WeightUnit'    => $request->WeightUnit,
                 'SellingPrice'  => $firstSell,
                 'CostPrice'     => $firstCost,
-                'IsReturnable'  => $request->boolean('IsReturnable'),
+                'IsAdjustable'  => $request->boolean('IsAdjustable'),
 
                 'Product_Image' => $request->hasFile('Product_Image')
                     ? $request->file('Product_Image')->store('products', 'public')
@@ -612,7 +615,7 @@ class ProductController extends Controller
                 'WeightUnit'   => $request->has('WeightUnit') ? $request->WeightUnit : $product->WeightUnit,
                 'SellingPrice' => $variants[0]['SellingPrice'] ?? $request->SellingPrice,
                 'CostPrice'    => $variants[0]['CostPrice']    ?? $request->CostPrice,
-                'IsReturnable' => $request->boolean('IsReturnable'),
+                'IsAdjustable' => $request->boolean('IsAdjustable'),
             ]);
 
             if ($variants !== null) {

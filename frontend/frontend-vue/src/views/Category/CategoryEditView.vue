@@ -2,22 +2,21 @@
   <Layout title="Edit Category">
     <div class="cat-form-page">
 
-      <!-- PAGE HEADER: title on the left, actions on the right -->
+      <!-- PAGE HEADER (same compact row as Product List: INVENTORY / Edit Category) -->
       <header class="page-header">
-        <div>
-          <h1 class="page-title">Edit Category</h1>
-          <p class="page-sub">
-            <span v-if="pageLoading">Loading…</span>
-            <span v-else-if="originalName">Editing “{{ originalName }}”</span>
-            <span v-else>Update the name for this category.</span>
-          </p>
+        <div class="page-heading">
+          <div class="page-title-row">
+            <span class="page-eyebrow">Inventory</span>
+            <span class="page-crumb-sep" aria-hidden="true">/</span>
+            <h1 class="page-title">Edit Category</h1>
+          </div>
         </div>
         <div class="header-actions">
-          <RouterLink to="/categories" class="btn btn--ghost">Cancel</RouterLink>
+          <RouterLink to="/categories" class="btn btn--ghost btn--sm">Cancel</RouterLink>
           <button
             type="submit"
             form="category-form"
-            class="btn btn--primary"
+            class="btn btn--primary btn--sm"
             :disabled="pageLoading || saving || !isDirty"
           >
             <i v-if="saving" class="fa-solid fa-spinner fa-spin"></i>
@@ -61,9 +60,11 @@
         <form v-else id="category-form" @submit.prevent="updateCategory" class="form-card">
           <div class="form-card-header">
             <div class="form-card-icon"><i class="fa-solid fa-pen-to-square"></i></div>
-            <div>
+            <div class="form-card-text">
               <h2 class="form-card-title">Category information</h2>
-              <p class="form-card-sub">This name appears in product filters and reports.</p>
+              <p class="form-card-sub">
+                <template v-if="originalName">Editing “{{ originalName }}”. </template>This name appears in product filters and reports.
+              </p>
             </div>
           </div>
 
@@ -200,16 +201,31 @@ async function updateCategory() {
   --f-red:            #f43f5e;
   --radius: 16px;
 
-  /* Same space tuning as the Categories list: reclaim part of the app shell's padding on desktop. */
+  /* ── SPACE TUNING (identical to Home and the Categories list, on EVERY screen size) ──
+     The app shell (Layout.vue) pads the scrolling area. --bleed-x / --bleed-y
+     reclaim part of that padding on the left, right and top, and --bleed-b does
+     the same at the bottom. --pad-x is this page's own inner side padding.
+     Each breakpoint at the bottom of this file sets its own values.
+     Raise a bleed value to push content closer to the edge; lower it (or set
+     0px) if content ever touches the sidebar, top bar or screen edge. */
   --bleed-x: 30px;
   --bleed-y: 26px;
   --bleed-b: 26px;
+  --pad-x: 24px;
+  --f-gap: 16px;
 
   box-sizing: border-box;
   background: var(--f-bg);
-  padding: 16px 24px 24px;
+  padding:
+    16px
+    max(var(--pad-x), env(safe-area-inset-right))
+    24px
+    max(var(--pad-x), env(safe-area-inset-left));
+  margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) calc(-1 * var(--bleed-b));
   font-family: 'Inter', system-ui, sans-serif;
-  display: flex; flex-direction: column; gap: 16px;
+  display: flex; flex-direction: column; gap: var(--f-gap);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
   transition: background-color .22s;
 }
 .cat-form-page *, .cat-form-page *::before, .cat-form-page *::after { box-sizing: border-box; }
@@ -217,13 +233,13 @@ async function updateCategory() {
 .cat-form-page a:focus-visible,
 .cat-form-page input:focus-visible { outline: 2px solid var(--f-accent); outline-offset: 2px; }
 
-/* ── PAGE HEADER (title left, actions right) ── */
-.page-header {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 14px; flex-wrap: wrap;
-}
-.page-title { font-size: 26px; font-weight: 800; color: var(--f-text-primary); letter-spacing: -.03em; margin: 0; transition: color .22s; }
-.page-sub   { margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--f-text-secondary); }
+/* ── PAGE HEADER (matches Product List: INVENTORY / Edit Category, actions on the right) ── */
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page-heading { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.page-title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.page-eyebrow { font-size: 16px; font-weight: 700; letter-spacing: .12em; color: var(--f-accent); text-transform: uppercase; line-height: 1.2; margin: 0; }
+.page-crumb-sep { font-size: 16px; font-weight: 300; color: var(--f-text-faint); line-height: 1.2; }
+.page-title { font-size: 16px; font-weight: 800; color: var(--f-text-primary); letter-spacing: -.02em; line-height: 1.2; margin: 0; transition: color .22s; }
 .header-actions { display: flex; align-items: center; gap: 10px; }
 
 /* ── ALERTS ── */
@@ -232,7 +248,7 @@ async function updateCategory() {
   padding: 12px 16px; border-radius: 12px;
   font-size: 13.5px; font-weight: 500; border: 1px solid transparent;
 }
-.alert span { flex: 1; min-width: 0; }
+.alert span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .alert--success { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25); color: var(--f-green); }
 .alert--error   { background: rgba(244,63,94,.09);  border-color: rgba(244,63,94,.22);  color: var(--f-red); }
 html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); color: #4ADE80; }
@@ -245,7 +261,7 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 /* ── BODY: form + preview side by side ── */
 .form-layout {
   display: grid; grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 16px; align-items: start;
+  gap: var(--f-gap); align-items: start;
 }
 
 .form-card {
@@ -264,8 +280,9 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
   display: flex; align-items: center; justify-content: center; font-size: 16px;
   border: 1px solid var(--f-accent-border);
 }
+.form-card-text { min-width: 0; }
 .form-card-title { font-size: 15px; font-weight: 700; color: var(--f-text-primary); margin: 0 0 3px; }
-.form-card-sub   { font-size: 12.5px; color: var(--f-text-muted); margin: 0; }
+.form-card-sub   { font-size: 12.5px; color: var(--f-text-muted); margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
 
 .form-body  { padding: 24px; }
 .form-field { display: flex; flex-direction: column; gap: 7px; }
@@ -286,7 +303,6 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 }
 .form-input::placeholder { color: var(--f-text-faint); }
 .form-input:focus { border-color: var(--f-accent); box-shadow: 0 0 0 3px var(--f-ring); background: var(--f-surface); outline: none; }
-.form-hint { font-size: 11.5px; color: var(--f-text-faint); margin: 2px 0 0; }
 
 /* ── PREVIEW CARD ── */
 .preview-card {
@@ -334,33 +350,73 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
   font-size: 13px; font-weight: 600; font-family: inherit;
   border-radius: 11px; padding: 10px 18px; cursor: pointer;
   border: 1.5px solid transparent; text-decoration: none;
+  touch-action: manipulation;
   transition: background-color .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s, filter .18s;
 }
 .btn:active { transform: scale(.98); }
+.btn--sm { padding: 7px 14px; font-size: 12.5px; }
 .btn--ghost { background: var(--f-surface-sunken); border-color: var(--f-border-strong); color: var(--f-text-secondary); }
-.btn--ghost:hover { background: var(--f-surface-raised); border-color: var(--f-accent-border); color: var(--f-text-primary); }
 .btn--primary {
   background: linear-gradient(135deg, var(--f-accent) 0%, var(--c-accent-deep) 100%);
   color: #fff; box-shadow: var(--c-shadow-accent);
 }
-.btn--primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
 .btn--primary:disabled { opacity: .55; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
 
-/* ── RESPONSIVE (same breakpoints as the Categories list) ── */
-@media (min-width: 1001px) {
-  .cat-form-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) calc(-1 * var(--bleed-b)); }
+/* Hover effects: only on devices that really hover (no sticky hover on touch) */
+@media (hover: hover) and (pointer: fine) {
+  .btn--ghost:hover { background: var(--f-surface-raised); border-color: var(--f-accent-border); color: var(--f-text-primary); }
+  .btn--primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
+  .form-input:hover:not(:focus) { border-color: var(--f-accent-border); }
 }
+
+/* ══════════════════════════════════════════════════════
+   RESPONSIVE (same breakpoints and values as Home and the Categories list)
+══════════════════════════════════════════════════════ */
+
+/* Large screens: more breathing room */
+@media (min-width: 1500px) {
+  .cat-form-page { --f-gap: 20px; --pad-x: 32px; }
+}
+
+/* Tablets and below */
+@media (max-width: 1000px) {
+  .cat-form-page { --bleed-x: 22px; --bleed-y: 20px; --bleed-b: 20px; }
+}
+
+/* Tablets (portrait) and phones: preview drops under the form */
 @media (max-width: 900px) {
-  .cat-form-page { padding: 12px 14px 24px; gap: 14px; }
+  .cat-form-page { --pad-x: 16px; --f-gap: 14px; }
   .form-layout { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Phones */
 @media (max-width: 700px) {
-  .cat-form-page { padding: 16px 16px 32px; }
-  .page-header { flex-direction: column; align-items: stretch; }
-  .header-actions { flex-direction: column-reverse; align-items: stretch; }
-  .form-body { padding: 18px; }
+  .page-eyebrow, .page-title { font-size: 14px; }
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  /* Cancel and Save sit side by side, Save gets the wider button */
+  .header-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 10px; }
+  .header-actions .btn { height: 44px; font-size: 13px; }
   .form-card-header { padding: 16px 18px; }
+  .form-body { padding: 18px; }
+  .form-input { height: 46px; font-size: 16px; } /* 16px stops iOS zooming into the field */
+  .preview-card { padding: 16px 16px; }
 }
+
+/* Phones: spacing tokens */
+@media (max-width: 600px) {
+  .cat-form-page { --bleed-x: 16px; --bleed-y: 16px; --bleed-b: 16px; --pad-x: 12px; --f-gap: 12px; }
+  .form-card, .preview-card { border-radius: 14px; }
+  .alert { padding: 11px 12px; font-size: 13px; }
+}
+
+/* Very small phones */
+@media (max-width: 360px) {
+  .cat-form-page { --pad-x: 10px; }
+  .form-card-header { gap: 12px; padding: 14px; }
+  .form-body { padding: 14px; }
+  .preview-row { padding: 10px 12px; gap: 10px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cat-form-page * { transition: none !important; }
   .sk { animation: none; }

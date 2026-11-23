@@ -2,19 +2,16 @@
   <Layout title="Categories">
     <div ref="pageRef" class="cat-page">
 
-      <!-- ── PAGE HEADER ── -->
+      <!-- ── PAGE HEADER (same compact row as Product List: INVENTORY / Categories) ── -->
       <header ref="headerRef" class="page-header">
         <div class="page-heading">
-          <h1 class="page-title">Categories</h1>
-          <p class="page-sub">
-            <span v-if="loading">Loading…</span>
-            <span v-else>
-              {{ categories.length }} {{ categories.length === 1 ? 'category' : 'categories' }}
-              in your inventory
-            </span>
-          </p>
+          <div class="page-title-row">
+            <span class="page-eyebrow">Inventory</span>
+            <span class="page-crumb-sep" aria-hidden="true">/</span>
+            <h1 class="page-title">Categories</h1>
+          </div>
         </div>
-        <RouterLink to="/categories/create" class="btn btn--primary">
+        <RouterLink to="/categories/create" class="btn btn--primary btn--sm">
           <i class="fa-solid fa-plus"></i> Add Category
         </RouterLink>
       </header>
@@ -292,6 +289,9 @@
               >{{ p }}</button>
             </template>
 
+            <!-- Small phones swap the number buttons for this compact label -->
+            <span class="pg-status" aria-hidden="true">Page {{ page }} of {{ totalPages }}</span>
+
             <button
               type="button"
               class="pg-btn pg-btn--nav"
@@ -315,7 +315,7 @@
       <transition name="modal-fade">
         <div
           v-if="showDeleteModal"
-          class="modal-backdrop"
+          class="del-modal-backdrop"
           @click.self="cancelDelete"
         >
           <div class="del-modal" role="alertdialog" aria-modal="true" aria-labelledby="del-modal-title" aria-describedby="del-modal-desc">
@@ -711,32 +711,43 @@ onBeforeUnmount(() => {
   --radius:           16px;
   --s-ease:           cubic-bezier(.16, 1, .3, 1);
 
-  /* ── SPACE TUNING (same values as Home, Reports and Inventory Logs) ──
-     The app shell (Layout.vue) adds roughly 64px of its own padding around
-     every page. --bleed-* lets this page reclaim part of it on desktop.
-     Raise a value to push the content closer to the edge, lower it (or set
-     it to 0px) if content ever touches the sidebar or top bar.
-     --bleed-b reclaims the shell's bottom padding, which is what stops a
-     short page from showing a scrollbar. */
+  /* ── SPACE TUNING (identical to Home, on EVERY screen size) ──────────
+     The app shell (Layout.vue) pads the scrolling area. --bleed-x / --bleed-y
+     reclaim part of that padding on the left, right and top, and --bleed-b
+     does the same at the bottom (so a short page never shows a scrollbar).
+     --pad-x is this page's own inner side padding. Each breakpoint at the
+     bottom of this file sets its own values, exactly like Home does.
+     Raise a bleed value to push content closer to the edge; lower it (or
+     set 0px) if content ever touches the sidebar, top bar or screen edge. */
   --bleed-x: 30px;
   --bleed-y: 26px;
   --bleed-b: 26px;
-  /* --sticky-top: where the search bar sticks. The app shell pads the scrolling area,
-     and sticky elements stick at the inside edge of that padding, which left a gap
-     above the bar. The page measures that padding on load / resize and cancels it
-     (see syncStickyTop); -32px is only the starting value.
-     --toolbar-h: height of the search/selection bar; the column titles stick right below it. */
-  --sticky-top: -32px;
-  --toolbar-h: 67px;
+  --pad-x: 24px;
   --s-gap: 16px;
 
-  /* Height follows the content: no min-height, so a short list never forces a scrollbar.
-     border-box keeps the padding inside the width. */
+  /* --sticky-top: where the search bar sticks. The shell's scroll area has top
+     padding and sticky elements stick at the inside edge of it, which would
+     leave a gap above the bar. The page measures that padding on load / resize
+     and cancels it (see syncStickyTop); -32px is only the starting value.
+     --toolbar-h: height of the desktop search/selection bar; the column
+     titles stick right below it. */
+  --sticky-top: -32px;
+  --toolbar-h: 67px;
+
+  /* Height follows the content (no min-height), so a short list never forces a
+     scrollbar. border-box keeps the padding inside the width. */
   box-sizing: border-box;
   background: var(--s-bg);
-  padding: 16px 24px 24px;
+  padding:
+    16px
+    max(var(--pad-x), env(safe-area-inset-right))
+    24px
+    max(var(--pad-x), env(safe-area-inset-left));
+  margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) calc(-1 * var(--bleed-b));
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--s-gap);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
   transition: background-color .22s ease;
 }
 .cat-page *, .cat-page *::before, .cat-page *::after { box-sizing: border-box; }
@@ -745,23 +756,21 @@ onBeforeUnmount(() => {
 .cat-page a:focus-visible,
 .cat-page input:focus-visible { outline: 2px solid var(--s-accent); outline-offset: 2px; }
 
-/* ── PAGE HEADER ── */
-.page-header {
-  display: flex; align-items: flex-end;
-  justify-content: space-between; gap: 14px; flex-wrap: wrap;
-}
-.page-title {
-  font-size: 26px; font-weight: 800; color: var(--s-text-primary);
-  letter-spacing: -.03em; margin: 0; transition: color .22s;
-}
-.page-sub { margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--s-text-secondary); }
+/* ── PAGE HEADER (matches Product List: INVENTORY / Categories) ── */
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page-heading { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.page-title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.page-eyebrow { font-size: 16px; font-weight: 700; letter-spacing: .12em; color: var(--s-accent); text-transform: uppercase; line-height: 1.2; margin: 0; }
+.page-crumb-sep { font-size: 16px; font-weight: 300; color: var(--s-text-faint); line-height: 1.2; }
+.page-title { font-size: 16px; font-weight: 800; color: var(--s-text-primary); letter-spacing: -.02em; line-height: 1.2; margin: 0; transition: color .22s; }
 
 /* ── BUTTONS ── */
 .btn {
-  display: inline-flex; align-items: center; gap: 7px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   font-size: 13px; font-weight: 600; font-family: inherit;
   border-radius: 11px; padding: 10px 18px; cursor: pointer;
   border: 1.5px solid transparent; text-decoration: none;
+  touch-action: manipulation;
   transition: background .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s, filter .18s;
 }
 .btn:active { transform: scale(.98); }
@@ -769,16 +778,13 @@ onBeforeUnmount(() => {
   background: linear-gradient(135deg, var(--s-accent) 0%, var(--c-accent-deep) 100%);
   color: #fff; box-shadow: var(--c-shadow-accent);
 }
-.btn--primary:hover { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
 .btn--ghost {
   background: var(--s-surface-sunken); border-color: var(--s-border-strong); color: var(--s-text-secondary);
 }
-.btn--ghost:hover { background: var(--s-surface-raised); border-color: var(--s-accent-border); color: var(--s-text-primary); }
 .btn--danger {
   background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
   color: #fff; box-shadow: 0 2px 10px rgba(244,63,94,.30);
 }
-.btn--danger:hover { filter: brightness(1.08); box-shadow: 0 4px 16px rgba(244,63,94,.42); transform: translateY(-1px); }
 .btn--sm { padding: 7px 14px; font-size: 12.5px; }
 
 .link-btn {
@@ -793,7 +799,7 @@ onBeforeUnmount(() => {
   padding: 12px 16px; border-radius: 12px;
   font-size: 13.5px; font-weight: 500; border: 1px solid transparent;
 }
-.alert span { flex: 1; min-width: 0; }
+.alert span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .alert--success { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25); color: var(--s-green); }
 .alert--error   { background: rgba(244,63,94,.09);  border-color: rgba(244,63,94,.22);  color: var(--s-red); }
 html[data-theme="dark"] .alert--success { background: rgba(16,185,129,.14); color: #4ADE80; }
@@ -919,7 +925,6 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 .th-sort:hover { color: var(--s-text-primary); }
 
 .data-table tbody tr { transition: background-color .15s; }
-.data-table tbody tr:not(.row-empty):not(.skeleton-row):hover td { background: var(--s-surface-raised); }
 .data-table tbody td {
   padding: 14px 16px; border-bottom: 1px solid var(--s-border);
   vertical-align: middle; transition: background-color .15s, border-color .22s, box-shadow .15s;
@@ -929,7 +934,6 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 
 /* Selected rows */
 .data-table tbody tr.row--selected:not(.row-empty):not(.skeleton-row) td { background: var(--s-accent-soft); }
-.data-table tbody tr.row--selected:not(.row-empty):not(.skeleton-row):hover td { background: var(--s-accent-soft); filter: brightness(.98); }
 .data-table tbody tr.row--selected td:first-child { box-shadow: inset 3px 0 0 var(--s-accent); }
 
 /* ── CELLS ── */
@@ -955,7 +959,6 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
 .count-pill--zero { color: var(--s-text-faint); }
 .cell-primary  { font-weight: 600; color: var(--s-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; transition: color .22s; }
 
-
 /* ── ROW ACTIONS (direct buttons, no menu) ── */
 .td-actions { text-align: right; }
 .row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; }
@@ -964,14 +967,13 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
   height: 34px; padding: 0 11px; border-radius: 9px;
   font-family: inherit; font-size: 12.5px; font-weight: 700; line-height: 1;
   border: 1px solid transparent; cursor: pointer; text-decoration: none; white-space: nowrap;
+  touch-action: manipulation;
   transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .15s var(--s-ease);
 }
 .row-btn i { font-size: 11.5px; }
 .row-btn:active { transform: scale(.97); }
 .row-btn--edit { color: var(--s-blue); background: var(--s-blue-soft); border-color: rgba(59,130,246,.22); }
-.row-btn--edit:hover { background: rgba(59,130,246,.2); border-color: rgba(59,130,246,.4); }
 .row-btn--delete { color: var(--s-red); background: var(--s-red-soft); border-color: rgba(244,63,94,.22); }
-.row-btn--delete:hover { background: rgba(244,63,94,.2); border-color: rgba(244,63,94,.4); }
 html[data-theme="dark"] .row-btn--edit   { color: #93C5FD; }
 html[data-theme="dark"] .row-btn--delete { color: #F87171; }
 
@@ -985,7 +987,6 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
 .sk--chk { width: 18px; height: 18px; border-radius: 6px; }
 .sk--name { width: 70%; height: 36px; border-radius: 10px; }
 .sk--md { width: 75%; }
-.sk--lg { width: 90%; }
 .sk--btn { width: 120px; height: 34px; border-radius: 9px; margin-left: auto; }
 @keyframes sk-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
@@ -993,7 +994,7 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
 .td-empty { padding: 56px 24px !important; border-bottom: none !important; text-align: center; }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--s-text-faint); }
 .empty-state > i { font-size: 34px; margin-bottom: 4px; }
-.empty-title { font-size: 15px; font-weight: 700; color: var(--s-text-primary); margin: 0; }
+.empty-title { font-size: 15px; font-weight: 700; color: var(--s-text-primary); margin: 0; overflow-wrap: anywhere; }
 .empty-sub { font-size: 13px; color: var(--s-text-muted); margin: 0 0 6px; max-width: 360px; line-height: 1.5; }
 
 /* ── PAGINATION ── */
@@ -1012,22 +1013,42 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
   color: var(--s-text-secondary);
   background: var(--s-surface-sunken);
   border: 1px solid var(--s-border-strong); border-radius: 9px; cursor: pointer;
+  touch-action: manipulation;
   transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
 .pg-btn i { font-size: 10px; }
-.pg-btn:hover:not(:disabled):not(.pg-btn--active) { background: var(--s-accent-soft); border-color: var(--s-accent-border); color: var(--s-accent); }
 .pg-btn:disabled { opacity: .4; cursor: not-allowed; }
 .pg-btn--active { background: var(--s-accent); border-color: var(--s-accent); color: #fff; cursor: default; }
 .pg-btn--nav { padding: 0 12px; }
 .pg-gap { min-width: 22px; text-align: center; font-size: 13px; color: var(--s-text-faint); user-select: none; }
+/* Compact "Page 2 of 5" label: only used on small phones (see ≤480px) */
+.pg-status { display: none; font-size: 12.5px; font-weight: 700; color: var(--s-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-/* ── RESPONSIVE (same breakpoints as Home, Reports and Inventory Logs) ──
-   Desktop only: pull the page outward into the shell's padding (top, left, right, bottom). */
-@media (min-width: 1001px) {
-  .cat-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) calc(-1 * var(--bleed-b)); }
+/* ── HOVER EFFECTS: only on devices that really hover (no sticky hover on touch) ── */
+@media (hover: hover) and (pointer: fine) {
+  .btn--primary:hover { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
+  .btn--ghost:hover { background: var(--s-surface-raised); border-color: var(--s-accent-border); color: var(--s-text-primary); }
+  .btn--danger:hover { filter: brightness(1.08); box-shadow: 0 4px 16px rgba(244,63,94,.42); transform: translateY(-1px); }
+  .data-table tbody tr:not(.row-empty):not(.skeleton-row):hover td { background: var(--s-surface-raised); }
+  .data-table tbody tr.row--selected:not(.row-empty):not(.skeleton-row):hover td { background: var(--s-accent-soft); filter: brightness(.98); }
+  .row-btn--edit:hover { background: rgba(59,130,246,.2); border-color: rgba(59,130,246,.4); }
+  .row-btn--delete:hover { background: rgba(244,63,94,.2); border-color: rgba(244,63,94,.4); }
+  .pg-btn:hover:not(:disabled):not(.pg-btn--active) { background: var(--s-accent-soft); border-color: var(--s-accent-border); color: var(--s-accent); }
 }
-/* Sticky: the search / selection bar and the column titles stay visible while
-   the page scrolls. Desktop and tablet only (phones show rows as cards). */
+
+/* ══════════════════════════════════════════════════════
+   RESPONSIVE (same breakpoints and values as Home)
+   --bleed-* reclaim the shell's padding at every size, and
+   --pad-x is the page's own inner side padding.
+══════════════════════════════════════════════════════ */
+
+/* Large screens: more breathing room */
+@media (min-width: 1500px) {
+  .cat-page { --s-gap: 20px; --pad-x: 32px; }
+}
+
+/* Desktop + tablet: the search / selection bar and the column titles stay
+   visible while the page scrolls (phones show rows as cards, see below). */
 @media (min-width: 901px) {
   .toolbar {
     position: sticky; top: var(--sticky-top); z-index: 4;
@@ -1043,6 +1064,7 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
     box-shadow: 0 1px 0 var(--s-border); /* border-collapse drops the border on stuck cells */
   }
 }
+
 /* Medium screens: row buttons become icon-only so the table still fits */
 @media (min-width: 901px) and (max-width: 1180px) {
   .data-table thead th:nth-child(3) { width: 180px; }
@@ -1051,12 +1073,24 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
   .row-btn span { display: none; }
   .row-actions { gap: 6px; }
 }
+
+/* Tablets and below */
+@media (max-width: 1000px) {
+  .cat-page { --bleed-x: 22px; --bleed-y: 20px; --bleed-b: 20px; }
+}
+
+/* Tablets (portrait) and phones: each row becomes a card */
 @media (max-width: 900px) {
-  .cat-page { padding: 12px 14px 24px; --s-gap: 14px; }
+  .cat-page { --pad-x: 16px; --s-gap: 14px; }
 
   .mobile-select { display: inline-flex; }
 
-  /* Each row becomes a labelled card */
+  /* While rows are selected the bar stays pinned, so Delete is always in reach */
+  .toolbar--selecting {
+    position: sticky; top: var(--sticky-top); z-index: 4;
+    background: linear-gradient(var(--s-accent-soft), var(--s-accent-soft)), var(--s-surface);
+  }
+
   .data-table, .data-table tbody, .data-table tr, .data-table td { display: block; width: 100%; }
   .data-table { table-layout: auto; }
   .data-table thead { display: none; }
@@ -1064,45 +1098,77 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
   .data-table tbody tr:not(.row-empty) {
     position: relative;
     border: 1px solid var(--s-border); border-radius: 14px;
-    padding: 6px 4px; margin-bottom: 12px; background: var(--s-surface);
+    padding: 6px 0 12px; margin-bottom: 10px; background: var(--s-surface);
+    transition: border-color .15s ease, background-color .15s ease;
   }
   .data-table tbody tr.row--selected:not(.row-empty) { border-color: var(--s-accent); background: var(--s-accent-soft); }
   .data-table tbody tr:last-child { margin-bottom: 0; }
-  .data-table tbody td { border-bottom: none; padding: 8px 12px; }
+  .data-table tbody td { border-bottom: none; padding: 6px 14px; }
   .data-table tbody tr.row--selected:not(.row-empty):not(.skeleton-row) td { background: transparent; }
   .data-table tbody tr.row--selected td:first-child { box-shadow: none; }
-  .data-table tbody td[data-label]::before {
-    content: attr(data-label);
-    display: block; margin-bottom: 3px;
-    font-size: 10.5px; font-weight: 700; letter-spacing: .07em;
-    text-transform: uppercase; color: var(--s-text-faint);
-  }
-  .data-table tbody td.td-name::before { display: none; }
-  .data-table tbody td.td-name { padding-right: 52px; }
+
+  /* Name on top (room on the right for the checkbox) … */
+  .data-table tbody td.td-name { padding-top: 8px; padding-right: 56px; }
+  .data-table tbody td.td-name::before,
+  .data-table tbody td.td-count::before { display: none; }
+  /* … product count tucked under the name, lined up with the text … */
+  .data-table tbody td.td-count { padding-top: 0; padding-left: 61px; }
+  /* … and the checkbox pinned to the top-right corner of the card. */
   .data-table tbody td.td-select {
-    position: absolute; top: 12px; right: 8px; width: auto; padding: 0;
-    z-index: 1;
+    position: absolute; top: 6px; right: 6px; width: 44px; height: 44px; padding: 0;
+    display: flex; align-items: center; justify-content: center; z-index: 1;
   }
-  .data-table tbody td.td-select .chk { margin: 0; }
-  .data-table tbody tr:hover td { background: transparent !important; }
-  .td-actions { padding-top: 10px !important; border-top: 1px solid var(--s-border) !important; margin-top: 4px; }
-  .row-actions { display: flex; width: 100%; }
-  .row-btn { flex: 1; justify-content: center; height: 38px; }
+  .data-table tbody td.td-select .chk { margin: 0; width: 44px; height: 44px; }
+
+  .td-actions { margin-top: 6px; padding-top: 12px !important; border-top: 1px solid var(--s-border) !important; text-align: left; }
+  .row-actions { display: flex; width: 100%; gap: 10px; }
+  .row-btn { flex: 1; justify-content: center; height: 40px; font-size: 13px; }
+
   .skeleton-row td.td-select { display: none; }
   .skeleton-row td:nth-child(n+3) { display: none; }
   .sk--btn { margin-left: 0; width: 100%; }
 }
+
+/* Phones */
 @media (max-width: 700px) {
-  .cat-page { padding: 16px 16px 32px; }
-  .page-header { flex-direction: column; align-items: stretch; }
-  .page-header .btn { justify-content: center; }
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-eyebrow, .page-title { font-size: 14px; }
+  .page-header .btn { height: 44px; font-size: 13px; }
+
+  .toolbar { padding: 12px; gap: 10px; }
   .search { max-width: none; flex-basis: 100%; }
+  .search-input { height: 42px; font-size: 16px; } /* 16px stops iOS zooming into the field */
   .toolbar-right { width: 100%; justify-content: space-between; margin-left: 0; }
   .selbar-actions { width: 100%; margin-left: 0; }
-  .selbar-actions .btn { flex: 1; justify-content: center; }
-  .pager { flex-direction: column; align-items: stretch; text-align: center; }
+  .selbar-actions .btn { flex: 1; height: 44px; font-size: 13px; }
+
+  .pager { flex-direction: column; align-items: stretch; text-align: center; gap: 10px; }
   .pager-controls { justify-content: center; }
   .pg-nav-text { display: none; }
+}
+
+/* Phones: spacing tokens */
+@media (max-width: 600px) {
+  .cat-page { --bleed-x: 16px; --bleed-y: 16px; --bleed-b: 16px; --pad-x: 12px; --s-gap: 12px; }
+  .table-card { border-radius: 14px; }
+  .data-table tbody { padding: 10px; }
+  .alert { padding: 11px 12px; font-size: 13px; }
+}
+
+/* Small phones: page buttons collapse into "‹  Page 2 of 5  ›" */
+@media (max-width: 480px) {
+  .pager-controls { width: 100%; justify-content: space-between; gap: 8px; }
+  .pg-btn--num, .pg-gap { display: none; }
+  .pg-status { display: inline-block; }
+  .pg-btn--nav { min-width: 44px; height: 40px; }
+}
+
+/* Very small phones */
+@media (max-width: 360px) {
+  .cat-page { --pad-x: 10px; }
+  .data-table tbody td { padding-left: 12px; padding-right: 12px; }
+  .data-table tbody td.td-count { padding-left: 59px; }
+  .row-btn { font-size: 12.5px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1118,7 +1184,7 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
 <style>
 
 /* ─── DELETE MODAL BACKDROP ────────────────────────────── */
-.modal-backdrop {
+.del-modal-backdrop {
   position: fixed; inset: 0; z-index: 10000;
   background: rgba(0, 0, 0, 0.48);
   backdrop-filter: blur(8px);
@@ -1186,7 +1252,7 @@ html[data-theme="dark"] .del-modal-icon {
   padding: 20px 28px 24px;
   display: flex; flex-direction: column; align-items: center;
   gap: 10px; text-align: center;
-  min-height: 0;
+  min-height: 0; overflow-y: auto;
 }
 .del-modal-title {
   font-size: 18px; font-weight: 800;
@@ -1198,6 +1264,7 @@ html[data-theme="dark"] .del-modal-title { color: #E8EAF0; }
 .del-modal-desc {
   font-size: 13.5px; line-height: 1.65;
   color: #6B7280; margin: 0;
+  overflow-wrap: anywhere;
 }
 html[data-theme="dark"] .del-modal-desc { color: #8B90A8; }
 
@@ -1206,7 +1273,7 @@ html[data-theme="dark"] .del-modal-desc { color: #8B90A8; }
 }
 html[data-theme="dark"] .del-modal-name { color: #E8EAF0; }
 
-/* ─── SUPPLIER CHIP ── */
+/* ─── CATEGORY CHIP ── */
 .del-modal-chip {
   display: flex; align-items: center; gap: 12px;
   width: 100%; margin-top: 6px;
@@ -1245,7 +1312,7 @@ html[data-theme="dark"] .del-modal-chip-name { color: #E8EAF0; }
 }
 html[data-theme="dark"] .del-modal-chip-meta { color: #555B72; }
 
-/* ─── MULTI-SUPPLIER LIST ── */
+/* ─── MULTI-CATEGORY LIST ── */
 .del-modal-list {
   list-style: none; margin: 6px 0 0; padding: 4px;
   width: 100%; max-height: 176px; overflow-y: auto;
@@ -1286,6 +1353,7 @@ html[data-theme="dark"] .del-modal-list-name { color: #E8EAF0; }
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   font-size: 14px; font-weight: 600; font-family: 'Inter', system-ui, sans-serif;
   border-radius: 11px; cursor: pointer;
+  touch-action: manipulation;
   transition: background-color .18s, border-color .18s, color .18s, opacity .18s, transform .15s;
 }
 .del-modal-btn:focus-visible { outline: 2px solid #f43f5e; outline-offset: 2px; }
@@ -1324,5 +1392,19 @@ html[data-theme="dark"] .del-modal-btn--confirm {
 .modal-fade-enter-from, .modal-fade-leave-to {
   opacity: 0;
   transform: scale(.95) translateY(10px);
+}
+
+/* ─── SMALL PHONES ── */
+@media (max-width: 480px) {
+  .del-modal-backdrop { padding: 14px; }
+  .del-modal-icon-ring { padding-top: 24px; }
+  .del-modal-icon { width: 56px; height: 56px; font-size: 21px; }
+  .del-modal-body { padding: 16px 20px 20px; }
+  .del-modal-title { font-size: 17px; }
+  .del-modal-footer { padding: 0 20px 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-fade-enter-active, .modal-fade-leave-active { transition: none; }
 }
 </style>

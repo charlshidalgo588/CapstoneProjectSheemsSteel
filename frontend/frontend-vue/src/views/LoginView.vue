@@ -407,10 +407,6 @@
             <h3 class="lw-visit-title">Visit Shem Steel Construction Company</h3>
             <p class="lw-visit-sub">We're here to support your projects with quality materials and reliable service.</p>
           </div>
-          <span v-if="openNow !== null" class="lw-visit-status" :class="openNow ? 'lw-visit-status--open' : 'lw-visit-status--closed'">
-            <span class="lw-open-dot" :class="openNow ? 'lw-open-dot--open' : 'lw-open-dot--closed'"></span>
-            {{ openNow ? 'Open now' : 'Closed now' }}
-          </span>
         </div>
 
         <div class="lw-visit-grid">
@@ -666,37 +662,32 @@
           class="lw-modal-backdrop"
           tabindex="-1"
           @click.self="closeLoginModal"
-          @keydown.esc="closeLoginModal"
           @keydown="onLoginKeydown"
         >
-          <div class="lw-card lw-login-card" role="dialog" aria-modal="true" aria-labelledby="lw-login-title">
+          <div
+            class="lw-card lw-login-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lw-login-title"
+            aria-describedby="lw-login-sub"
+          >
             <button type="button" class="lw-login-modal-close" @click="closeLoginModal" aria-label="Close">
               <i class="fa-solid fa-xmark"></i>
             </button>
 
-            <!-- Card header -->
+            <!-- One compact, centered header: brand + what this is -->
             <div class="lw-card-head">
-              <div class="lw-card-brand">
-                <img src="@/assets/sheems_logo.png" alt="" class="lw-card-logo-img" aria-hidden="true" />
-                <div>
-                  <div class="lw-card-title" id="lw-login-title">Shem Steel</div>
-                  <div class="lw-card-title-sub">Management Portal</div>
-                </div>
-              </div>
+              <img src="@/assets/sheems_logo.png" alt="" class="lw-card-logo-img" aria-hidden="true" />
+              <h2 class="lw-card-title" id="lw-login-title">Welcome back</h2>
+              <p class="lw-card-title-sub" id="lw-login-sub">Sign in to the Shem Steel management portal.</p>
             </div>
 
-            <!-- Divider label -->
-            <div class="lw-card-divider">
-              <span>Sign in to your account</span>
-            </div>
-
-            <!-- Card body -->
             <div class="lw-card-body">
 
               <Transition name="lw-shake">
                 <div v-if="error" class="lw-error" role="alert">
                   <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
-                  {{ error }}
+                  <span>{{ error }}</span>
                 </div>
               </Transition>
 
@@ -711,6 +702,9 @@
                       ref="emailInputEl"
                       v-model="email"
                       type="email"
+                      inputmode="email"
+                      autocapitalize="off"
+                      spellcheck="false"
                       required
                       placeholder="you@sheems.example"
                       class="lw-inp"
@@ -729,9 +723,9 @@
                 </div>
 
                 <!--
-                  UX FIX: the "Forgot password?" button comes AFTER the password
-                  input in the DOM (positioned visually top-right with CSS) so Tab
-                  from the email field lands on the password field first.
+                  The "Forgot password?" button comes AFTER the password input in
+                  the DOM (positioned visually top-right with CSS) so Tab from the
+                  email field lands on the password field first.
                 -->
                 <div class="lw-field lw-field--pass">
                   <label for="lw-pass" class="lw-lbl">Password</label>
@@ -739,6 +733,7 @@
                     <i class="fa-solid fa-lock lw-ico" aria-hidden="true"></i>
                     <input
                       id="lw-pass"
+                      ref="passwordInputEl"
                       :type="showPassword ? 'text' : 'password'"
                       v-model="password"
                       placeholder="••••••••"
@@ -746,9 +741,11 @@
                       :class="{ 'lw-inp--error': fieldErrors.password }"
                       autocomplete="current-password"
                       :aria-invalid="!!fieldErrors.password"
-                      :aria-describedby="fieldErrors.password ? 'lw-pass-error' : undefined"
-                      @blur="validatePassword"
+                      :aria-describedby="fieldErrors.password ? 'lw-pass-error' : (capsOn ? 'lw-caps-hint' : undefined)"
+                      @blur="onPasswordBlur"
                       @input="fieldErrors.password = ''"
+                      @keydown="trackCapsLock"
+                      @keyup="trackCapsLock"
                     />
                     <!-- tabindex="-1" so Tab goes straight past the eye icon. Still clickable. -->
                     <button
@@ -765,8 +762,12 @@
                     <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
                     {{ fieldErrors.password }}
                   </p>
+                  <p v-else-if="capsOn" id="lw-caps-hint" class="lw-caps-hint">
+                    <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+                    Caps Lock is on
+                  </p>
 
-                  <button type="button" class="lw-forgot" @click="showForgotHelp = true">Forgot password?</button>
+                  <button ref="forgotLinkEl" type="button" class="lw-forgot" @click="showForgotHelp = true">Forgot password?</button>
                 </div>
 
                 <label class="lw-remember">
@@ -783,9 +784,7 @@
               </form>
             </div>
 
-            <!-- Card footer -->
             <div class="lw-card-foot">
-              <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
               Need access? Contact your system administrator.
             </div>
 
@@ -794,31 +793,40 @@
       </transition>
     </Teleport>
 
-    <!-- FORGOT-PASSWORD HELP MODAL — layered above the login modal -->
-    <transition name="fade">
-      <div v-if="showForgotHelp" class="lw-modal-backdrop lw-modal-backdrop--forgot" @click.self="showForgotHelp = false">
-        <div class="lw-modal" role="dialog" aria-modal="true" aria-labelledby="lw-forgot-title">
-          <div class="lw-modal-icon">
-            <i class="fa-solid fa-key" aria-hidden="true"></i>
+    <!-- FORGOT-PASSWORD HELP MODAL — teleported so it layers cleanly above the login modal -->
+    <Teleport to="body">
+      <transition name="fade">
+        <div
+          v-if="showForgotHelp"
+          ref="forgotBackdrop"
+          class="lw-modal-backdrop lw-modal-backdrop--forgot"
+          tabindex="-1"
+          @click.self="closeForgot"
+          @keydown="onForgotKeydown"
+        >
+          <div class="lw-modal" role="dialog" aria-modal="true" aria-labelledby="lw-forgot-title">
+            <div class="lw-modal-icon">
+              <i class="fa-solid fa-key" aria-hidden="true"></i>
+            </div>
+            <h2 id="lw-forgot-title" class="lw-modal-title">Password resets go through your administrator</h2>
+            <p class="lw-modal-desc">
+              This system doesn't have a self-service reset yet. Reach out and they'll get you back in.
+            </p>
+            <div class="lw-modal-contact">
+              <a :href="`mailto:${SHOP_EMAIL}`" class="lw-modal-contact-row">
+                <i class="fa-solid fa-envelope" aria-hidden="true"></i>
+                {{ SHOP_EMAIL }}
+              </a>
+              <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-modal-contact-row">
+                <i class="fa-solid fa-phone" aria-hidden="true"></i>
+                {{ SHOP_PHONE }}
+              </a>
+            </div>
+            <button ref="forgotCloseEl" type="button" class="lw-modal-close" @click="closeForgot">Got it</button>
           </div>
-          <h2 id="lw-forgot-title" class="lw-modal-title">Password resets go through your administrator</h2>
-          <p class="lw-modal-desc">
-            This system doesn't have a self-service reset yet. Reach out and they'll get you back in.
-          </p>
-          <div class="lw-modal-contact">
-            <a :href="`mailto:${SHOP_EMAIL}`" class="lw-modal-contact-row">
-              <i class="fa-solid fa-envelope" aria-hidden="true"></i>
-              {{ SHOP_EMAIL }}
-            </a>
-            <a :href="`tel:${SHOP_PHONE_TEL}`" class="lw-modal-contact-row">
-              <i class="fa-solid fa-phone" aria-hidden="true"></i>
-              {{ SHOP_PHONE }}
-            </a>
-          </div>
-          <button type="button" class="lw-modal-close" @click="showForgotHelp = false">Got it</button>
         </div>
-      </div>
-    </transition>
+      </transition>
+    </Teleport>
 
   </div>
 </template>
@@ -839,9 +847,13 @@ const password     = ref('')
 const remember     = ref(false)
 const showPassword = ref(false)
 const loading      = ref(false)
+const capsOn       = ref(false)
 
 /* Forgot-password help modal */
 const showForgotHelp = ref(false)
+const forgotBackdrop = ref<HTMLElement | null>(null)
+const forgotCloseEl  = ref<HTMLElement | null>(null)
+const forgotLinkEl   = ref<HTMLElement | null>(null)
 
 /*
  * `error` is reserved for problems that aren't tied to one specific input:
@@ -887,41 +899,12 @@ const visibleVariants = computed<ShopVariant[]>(() => {
   )
 })
 
-/* ─── LOGIN MODAL ────────────────────────── */
-const showLoginModal     = ref(false)
-const loginModalBackdrop = ref<HTMLElement | null>(null)
-const emailInputEl       = ref<HTMLInputElement | null>(null)
-const loginBtnEl         = ref<HTMLElement | null>(null)
-
-function openLoginModal() {
-  error.value = ''
-  fieldErrors.value = { email: '', password: '' }
-  showLoginModal.value = true
-  // Focus the email field right away so the user can start typing.
-  // Escape still works because the keydown bubbles up to the backdrop.
-  nextTick(() => {
-    if (emailInputEl.value) emailInputEl.value.focus()
-    else loginModalBackdrop.value?.focus()
-  })
-}
-function closeLoginModal() {
-  if (loading.value) return // don't let people dismiss mid-submit
-  showLoginModal.value = false
-  // Hand focus back to the Login button that opened the modal.
-  nextTick(() => loginBtnEl.value?.focus())
-}
-
-/*
- * Keep Tab / Shift+Tab inside the login card while it is open,
- * so focus never escapes to the page behind the modal.
- */
-function onLoginKeydown(e: KeyboardEvent) {
-  if (e.key !== 'Tab' || showForgotHelp.value) return
-  const card = loginModalBackdrop.value?.querySelector<HTMLElement>('.lw-login-card')
-  if (!card) return
+/* ─── FOCUS TRAP (shared by the login + forgot modals) ───── */
+function trapFocus(e: KeyboardEvent, root: HTMLElement | null, fallback: HTMLElement | null) {
+  if (e.key !== 'Tab' || !root) return
 
   const focusables = Array.from(
-    card.querySelectorAll<HTMLElement>('button, input, a[href]')
+    root.querySelectorAll<HTMLElement>('button, input, a[href]')
   ).filter(el => !el.hasAttribute('disabled') && el.tabIndex >= 0)
   if (!focusables.length) return
 
@@ -929,7 +912,7 @@ function onLoginKeydown(e: KeyboardEvent) {
   const last   = focusables[focusables.length - 1]
   const active = document.activeElement as HTMLElement | null
 
-  if (e.shiftKey && (active === first || active === loginModalBackdrop.value)) {
+  if (e.shiftKey && (active === first || active === fallback)) {
     e.preventDefault()
     last?.focus()
   } else if (!e.shiftKey && active === last) {
@@ -938,16 +921,74 @@ function onLoginKeydown(e: KeyboardEvent) {
   }
 }
 
-// Escape closes the top-most modal first.
+/* ─── LOGIN MODAL ────────────────────────── */
+const showLoginModal     = ref(false)
+const loginModalBackdrop = ref<HTMLElement | null>(null)
+const emailInputEl       = ref<HTMLInputElement | null>(null)
+const passwordInputEl    = ref<HTMLInputElement | null>(null)
+const loginBtnEl         = ref<HTMLElement | null>(null)
+
+function openLoginModal() {
+  error.value = ''
+  fieldErrors.value = { email: '', password: '' }
+  capsOn.value = false
+  showLoginModal.value = true
+  // Focus the email field right away so the user can start typing.
+  nextTick(() => {
+    if (emailInputEl.value) emailInputEl.value.focus()
+    else loginModalBackdrop.value?.focus()
+  })
+}
+function closeLoginModal() {
+  if (loading.value) return // don't let people dismiss mid-submit
+  showLoginModal.value = false
+  showPassword.value = false
+  capsOn.value = false
+  // Hand focus back to the Login button that opened the modal.
+  nextTick(() => loginBtnEl.value?.focus())
+}
+
+// Keep Tab / Shift+Tab inside the login card while it is open.
+function onLoginKeydown(e: KeyboardEvent) {
+  if (showForgotHelp.value) return
+  const card = loginModalBackdrop.value?.querySelector<HTMLElement>('.lw-login-card') ?? null
+  trapFocus(e, card, loginModalBackdrop.value)
+}
+
+/* Forgot-password modal: focus moves in on open, returns to the link on close */
+function closeForgot() {
+  showForgotHelp.value = false
+  nextTick(() => forgotLinkEl.value?.focus())
+}
+function onForgotKeydown(e: KeyboardEvent) {
+  const card = forgotBackdrop.value?.querySelector<HTMLElement>('.lw-modal') ?? null
+  trapFocus(e, card, forgotBackdrop.value)
+}
+watch(showForgotHelp, (open) => {
+  if (open) nextTick(() => forgotCloseEl.value?.focus())
+})
+
+// Escape closes the top-most modal first (one handler, so nothing closes twice).
 function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (catOpen.value) { catOpen.value = false; return }
-  if (showForgotHelp.value) { showForgotHelp.value = false; return }
+  if (showForgotHelp.value) { closeForgot(); return }
   if (showLoginModal.value) { closeLoginModal(); return }
   if (selectedProduct.value) { selectedProduct.value = null; return }
 }
 onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
+
+/* Warn when Caps Lock is on while typing the password */
+function trackCapsLock(e: KeyboardEvent) {
+  if (typeof e.getModifierState === 'function') {
+    capsOn.value = e.getModifierState('CapsLock')
+  }
+}
+function onPasswordBlur() {
+  capsOn.value = false
+  validatePassword()
+}
 
 /* ─── VALIDATION ─────────────────────────── */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -978,12 +1019,26 @@ function validateForm() {
   return emailOk && passwordOk
 }
 
+// After a failed attempt, put the cursor where the fix is needed.
+// The password text is selected so retyping simply replaces it.
+function focusFirstProblem() {
+  if (fieldErrors.value.email) {
+    emailInputEl.value?.focus()
+  } else if (fieldErrors.value.password || error.value) {
+    passwordInputEl.value?.focus()
+    passwordInputEl.value?.select()
+  }
+}
+
 /* ─── SUBMIT ─────────────────────────────── */
 async function submitLogin() {
   error.value = ''
   fieldErrors.value = { email: '', password: '' }
 
-  if (!validateForm()) return
+  if (!validateForm()) {
+    focusFirstProblem()
+    return
+  }
 
   loading.value = true
   try {
@@ -995,6 +1050,8 @@ async function submitLogin() {
     }
   } catch (err: any) {
     applyLoginError(err)
+    await nextTick()
+    focusFirstProblem()
   } finally {
     loading.value = false
   }
@@ -1298,15 +1355,15 @@ function clearFilters() {
 /* ─── NAV: smooth scroll + back-to-top ───────────────────── */
 const pageEl  = ref<HTMLElement | null>(null)
 const showTop = ref(false)
+// The nav (with its section links) sits outside the scrolling area, so it is always
+// visible. Scroll-spy highlights the section the visitor is currently reading.
+const SECTION_IDS = ['lw-catalog', 'lw-how', 'lw-visit']
+const activeSection = ref('')
 function scrollToId(id: string) {
   activeSection.value = id
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 function scrollToTop() { pageEl.value?.scrollTo({ top: 0, behavior: 'smooth' }) }
-// The nav (with its section links) sits outside the scrolling area, so it is always
-// visible. Scroll-spy highlights the section the visitor is currently reading.
-const SECTION_IDS = ['lw-catalog', 'lw-how', 'lw-visit']
-const activeSection = ref('')
 function updateActiveSection() {
   const root = pageEl.value
   if (!root) return
@@ -2216,16 +2273,6 @@ html[data-theme="dark"] .lw-shop-nav:hover:not(:disabled) {
   letter-spacing: -0.01em; margin-bottom: 2px;
 }
 .lw-visit-sub { font-size: 12px; color: var(--lw-text-secondary); }
-.lw-visit-status {
-  display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
-  height: 30px; padding: 0 13px; border-radius: 999px;
-  font-size: 11.5px; font-weight: 700; white-space: nowrap;
-  border: 1px solid transparent;
-}
-.lw-visit-status--open   { color: #047857; background: rgba(16, 185, 129, 0.10); border-color: rgba(16, 185, 129, 0.30); }
-.lw-visit-status--closed { color: #BE123C; background: rgba(244, 63, 94, 0.09);  border-color: rgba(244, 63, 94, 0.28); }
-html[data-theme="dark"] .lw-visit-status--open   { color: #34D399; }
-html[data-theme="dark"] .lw-visit-status--closed { color: #FB7185; }
 
 .lw-visit-grid {
   display: grid;
@@ -2374,9 +2421,9 @@ html[data-theme="dark"] .lw-trust-icon { background: linear-gradient(145deg, rgb
   .lw-visit-grid { grid-template-columns: 1fr; }
 }
 
-/* ─── CARD (login modal) ─────────────────── */
+/* ─── LOGIN MODAL ────────────────────────── */
 .lw-card {
-  width: 100%; max-width: 392px;
+  width: 100%; max-width: 400px;
   background: var(--lw-card-bg);
   border-radius: 20px; border: 1px solid var(--lw-card-border);
   overflow: hidden; position: relative; z-index: 1;
@@ -2390,42 +2437,51 @@ html[data-theme="dark"] .lw-trust-icon { background: linear-gradient(145deg, rgb
 .lw-login-card { max-height: calc(100vh - 40px); overflow-y: auto; }
 .lw-login-modal-close {
   position: absolute; top: 12px; right: 12px; z-index: 2;
-  width: 28px; height: 28px; border: none; border-radius: 8px;
-  background: var(--lw-input-bg); color: var(--lw-text-faint);
-  display: flex; align-items: center; justify-content: center; font-size: 11px;
+  width: 30px; height: 30px; border: none; border-radius: 8px;
+  background: transparent; color: var(--lw-text-faint);
+  display: flex; align-items: center; justify-content: center; font-size: 12px;
   cursor: pointer; transition: background-color 0.15s, color 0.15s;
 }
-.lw-login-modal-close:hover { background: var(--lw-input-bg-focus); color: var(--lw-accent); }
+.lw-login-modal-close:hover { background: var(--lw-input-bg); color: var(--lw-accent); }
+.lw-login-modal-close:focus-visible { outline: 2px solid rgba(240, 112, 32, 0.45); outline-offset: 1px; }
+
+/* Single centered header (brand + purpose) */
 .lw-card-head {
-  padding: 18px 22px 15px;
-  background: linear-gradient(180deg, var(--lw-card-head-bg1), var(--lw-card-head-bg2));
-  border-bottom: 1px solid var(--lw-card-head-border);
-  display: flex; align-items: center; justify-content: space-between;
-  transition: background-color 0.22s ease, border-color 0.22s ease;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 30px 28px 4px;
 }
-.lw-card-brand { display: flex; align-items: center; gap: 10px; }
-.lw-card-logo-img { width: 38px; height: 38px; object-fit: contain; flex-shrink: 0; border: solid white 1px; border-radius: 100px;}
-.lw-card-title { font-size: 14px; font-weight: 700; color: var(--lw-text-primary); letter-spacing: -0.01em; line-height: 1.25; }
-.lw-card-title-sub { font-size: 10.5px; color: var(--lw-text-faint); margin-top: 2px; }
-.lw-card-divider { display: flex; align-items: center; padding: 0 22px; margin-top: 18px; }
-.lw-card-divider::before, .lw-card-divider::after { content: ''; flex: 1; height: 1px; background: var(--lw-border-soft); }
-.lw-card-divider span { font-size: 9.5px; font-weight: 700; color: var(--lw-text-faint-3); text-transform: uppercase; letter-spacing: 0.12em; padding: 0 12px; white-space: nowrap; }
-.lw-card-body { padding: 16px 22px 20px; }
+.lw-card-logo-img {
+  width: 52px; height: 52px; object-fit: contain; flex-shrink: 0;
+  border: solid white 1px; border-radius: 100px;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
+}
+.lw-card-title {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  font-size: 20px; font-weight: 700; color: var(--lw-text-primary);
+  letter-spacing: -0.02em; line-height: 1.25;
+}
+.lw-card-title-sub { font-size: 12.5px; line-height: 1.5; color: var(--lw-text-secondary); margin-top: 4px; }
+
+.lw-card-body { padding: 20px 28px 22px; }
 .lw-error {
-  display: flex; align-items: center; gap: 7px;
+  display: flex; align-items: flex-start; gap: 8px;
   padding: 10px 13px; background: var(--lw-error-bg); border: 1px solid var(--lw-error-border);
-  border-left: 3px solid var(--lw-accent); border-radius: 10px;
-  font-size: 12px; color: var(--lw-error-text); margin-bottom: 13px;
+  border-left: 3px solid var(--lw-error-text); border-radius: 10px;
+  font-size: 12px; line-height: 1.45; color: var(--lw-error-text); margin-bottom: 14px;
   transition: background-color 0.22s ease, border-color 0.22s ease, color 0.22s ease;
 }
+.lw-error i { margin-top: 2px; flex-shrink: 0; }
 .lw-shake-enter-active { animation: lw-shake 0.36s ease; }
 @keyframes lw-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
-.lw-field-error { display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 500; color: var(--lw-error-text); margin-top: 4px; padding-left: 1px; }
-.lw-field-error i { font-size: 9.5px; }
-.lw-form { display: flex; flex-direction: column; gap: 12px; }
-.lw-field { display: flex; flex-direction: column; gap: 5px; }
-.lw-lbl-row { display: flex; align-items: center; justify-content: space-between; }
-.lw-lbl { font-size: 9px; font-weight: 700; color: var(--lw-text-label); text-transform: uppercase; letter-spacing: 0.12em; }
+.lw-field-error { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--lw-error-text); margin-top: 4px; padding-left: 1px; }
+.lw-field-error i { font-size: 10px; }
+.lw-caps-hint { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: #C2410C; margin-top: 4px; padding-left: 1px; }
+.lw-caps-hint i { font-size: 10px; }
+html[data-theme="dark"] .lw-caps-hint { color: #FDBA74; }
+.lw-form { display: flex; flex-direction: column; gap: 14px; }
+.lw-field { display: flex; flex-direction: column; gap: 6px; }
+.lw-lbl { font-size: 12.5px; font-weight: 600; color: var(--lw-text-label); letter-spacing: 0; }
 
 /*
  * "Forgot password?" lives after the password input in the DOM (so Tab
@@ -2435,19 +2491,20 @@ html[data-theme="dark"] .lw-trust-icon { background: linear-gradient(145deg, rgb
 .lw-field--pass { position: relative; }
 .lw-forgot {
   position: absolute; top: -1px; right: 0;
-  font-size: 11px; font-weight: 600; color: var(--lw-accent);
+  font-size: 12px; font-weight: 600; color: var(--lw-accent);
   background: none; border: none; cursor: pointer; font-family: inherit;
   padding: 0; line-height: 1.2; border-radius: 4px;
   transition: opacity 0.15s;
 }
-.lw-forgot:hover { opacity: 0.65; }
+.lw-forgot:hover { opacity: 0.65; text-decoration: underline; }
 .lw-forgot:focus-visible { outline: 2px solid rgba(240, 112, 32, 0.45); outline-offset: 2px; }
 
 .lw-input-wrap { position: relative; display: flex; align-items: center; }
-.lw-ico { position: absolute; left: 0; width: 38px; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--lw-icon-muted); pointer-events: none; z-index: 1; }
+.lw-ico { position: absolute; left: 0; width: 38px; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--lw-icon-muted); pointer-events: none; z-index: 1; transition: color 0.13s; }
+.lw-input-wrap:focus-within .lw-ico { color: var(--lw-accent); }
 .lw-inp {
-  width: 100%; height: 41px; border: 1.5px solid var(--lw-input-border); border-radius: 10px;
-  padding: 0 38px 0 36px; font-size: 13px; color: var(--lw-text-primary); background: var(--lw-input-bg);
+  width: 100%; height: 44px; border: 1.5px solid var(--lw-input-border); border-radius: 10px;
+  padding: 0 40px 0 38px; font-size: 13.5px; color: var(--lw-text-primary); background: var(--lw-input-bg);
   outline: none; font-family: inherit;
   transition: border-color 0.13s, box-shadow 0.13s, background-color 0.13s, color 0.22s ease;
 }
@@ -2456,14 +2513,14 @@ html[data-theme="dark"] .lw-trust-icon { background: linear-gradient(145deg, rgb
 .lw-inp:focus { border-color: var(--lw-accent); background: var(--lw-input-bg-focus); box-shadow: 0 0 0 3.5px rgba(240, 112, 32, 0.13); }
 .lw-inp--error { border-color: var(--lw-error-text); }
 .lw-inp--error:focus { border-color: var(--lw-error-text); box-shadow: 0 0 0 3.5px rgba(185, 28, 28, 0.13); }
-.lw-eye { position: absolute; right: 10px; background: none; border: none; cursor: pointer; color: var(--lw-icon-muted); font-size: 12px; padding: 4px; transition: color 0.13s; line-height: 1; }
-.lw-eye:hover { color: var(--lw-accent); }
-.lw-remember { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--lw-text-secondary); cursor: pointer; user-select: none; }
-.lw-chk { width: 14px; height: 14px; accent-color: var(--lw-accent); cursor: pointer; flex-shrink: 0; }
+.lw-eye { position: absolute; right: 6px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 8px; cursor: pointer; color: var(--lw-icon-muted); font-size: 12px; transition: color 0.13s, background-color 0.13s; line-height: 1; }
+.lw-eye:hover { color: var(--lw-accent); background: rgba(240, 112, 32, 0.08); }
+.lw-remember { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--lw-text-secondary); cursor: pointer; user-select: none; width: fit-content; }
+.lw-chk { width: 15px; height: 15px; accent-color: var(--lw-accent); cursor: pointer; flex-shrink: 0; }
 .lw-btn {
   position: relative; display: flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; height: 43px; border: none; border-radius: 11px; cursor: pointer;
-  font-family: inherit; font-size: 13px; font-weight: 700; letter-spacing: 0.015em; color: #FFFFFF;
+  width: 100%; height: 46px; border: none; border-radius: 11px; cursor: pointer;
+  font-family: inherit; font-size: 13.5px; font-weight: 700; letter-spacing: 0.015em; color: #FFFFFF;
   background: linear-gradient(135deg, #F58330 0%, #F07020 45%, #D9640F 100%);
   overflow: hidden; transition: transform 0.1s, box-shadow 0.13s, opacity 0.13s;
   box-shadow: 0 1px 2px rgba(120, 50, 0, 0.14), 0 4px 14px rgba(240, 112, 32, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -2477,15 +2534,13 @@ html[data-theme="dark"] .lw-trust-icon { background: linear-gradient(145deg, rgb
 .lw-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(120, 50, 0, 0.18), 0 8px 22px rgba(240, 112, 32, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
 .lw-btn:hover:not(:disabled)::after { left: 130%; }
 .lw-btn:active:not(:disabled) { transform: translateY(0); }
-.lw-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.lw-btn:disabled { opacity: 0.6; cursor: progress; }
 .lw-btn:focus-visible { outline: 3px solid rgba(240, 112, 32, 0.4); outline-offset: 2px; }
 .lw-card-foot {
-  padding: 11px 22px 13px; background: var(--lw-card-foot-bg); border-top: 1px solid var(--lw-card-head-border);
-  font-size: 10.5px; color: var(--lw-text-faint-4); text-align: center;
-  display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 13px 28px 15px; background: var(--lw-card-foot-bg); border-top: 1px solid var(--lw-card-head-border);
+  font-size: 11.5px; color: var(--lw-text-faint); text-align: center;
   transition: background-color 0.22s ease, border-color 0.22s ease, color 0.22s ease;
 }
-.lw-card-foot i { font-size: 10px; }
 
 /* ─── FOOTER ─────────────────────────────── */
 .lw-footer {
@@ -2544,6 +2599,7 @@ html[data-theme="dark"] .lw-modal-icon { background: linear-gradient(145deg, rgb
   font-family: inherit; cursor: pointer; transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .lw-modal-close:hover { background: var(--lw-input-bg-focus); border-color: var(--lw-input-border-h); color: var(--lw-text-primary); }
+.lw-modal-close:focus-visible { outline: 3px solid rgba(240, 112, 32, 0.4); outline-offset: 2px; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
@@ -2566,7 +2622,7 @@ html[data-theme="dark"] .lw-modal-icon { background: linear-gradient(145deg, rgb
   content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; z-index: 3;
   background: linear-gradient(90deg, var(--lw-accent-dark) 0%, var(--lw-accent-light) 50%, var(--lw-accent-dark) 100%);
 }
-.lw-pm-close { top: 16px; right: 16px; width: 32px; height: 32px; font-size: 13px; border-radius: 10px; z-index: 4; border: 1px solid var(--lw-border-soft); }
+.lw-pm-close { top: 16px; right: 16px; width: 32px; height: 32px; font-size: 13px; border-radius: 10px; z-index: 4; border: 1px solid var(--lw-border-soft); background: var(--lw-input-bg); }
 
 .lw-pm-layout {
   display: grid;
@@ -2844,7 +2900,9 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
   .lw-nav-right { gap: 6px; }
   .lw-signin-btn span { display: none; }
   .lw-signin-btn { width: 34px; height: 34px; padding: 0; justify-content: center; }
-  .lw-card-head, .lw-card-body, .lw-card-foot, .lw-card-divider { padding-left: 16px; padding-right: 16px; }
+  .lw-card-head { padding-left: 20px; padding-right: 20px; }
+  .lw-card-body { padding-left: 20px; padding-right: 20px; }
+  .lw-card-foot { padding-left: 20px; padding-right: 20px; }
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -3039,8 +3097,6 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
 
   /* Visit */
   .lw-visit { padding-top: 20px; padding-bottom: 20px; }
-  .lw-visit-head { flex-wrap: wrap; row-gap: 8px; }
-  .lw-visit-status { order: 3; margin-left: 50px; height: 26px; font-size: 11px; }
   .lw-visit-title { font-size: 16px; }
   .lw-visit-map { min-height: 220px; }
   .lw-trust { min-height: 0; }
@@ -3055,9 +3111,6 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
   /* Login modal */
   .lw-modal-backdrop { padding: 12px; }
   .lw-login-card { max-height: calc(100dvh - 24px); }
-  .lw-inp { height: 46px; font-size: 16px; }
-  .lw-btn { height: 46px; }
-  .lw-eye { padding: 8px; }
 }
 
 /* ─── 6. PRODUCT MODAL → BOTTOM SHEET (≤ 720px) ─ */
@@ -3102,7 +3155,6 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
   .lw-signin-btn { padding: 0 12px; }
   .lw-shop-grid--groups .lw-shop-card:not(.lw-skel) .lw-shop-card-img { flex-basis: 80px; width: 80px; min-height: 80px; }
   .lw-shop-grid--groups .lw-shop-card:not(.lw-skel) { min-height: 80px; }
-  .lw-visit-status { margin-left: 0; }
 }
 
 /* ─── 8. LARGE SCREENS (≥ 1440px) ────────── */
@@ -3276,15 +3328,8 @@ html[data-theme="dark"] .lw-pm-lowhint { color: #FDBA74; }
 html[data-theme="dark"] .lw-pm-row--ok  .lw-pm-status { color: #34D399; }
 html[data-theme="dark"] .lw-pm-row--oos .lw-pm-status { color: #FB7185; }
 
-/* ─── PHONES: calmer input sizes (login, search, filters) ─ */
+/* ─── PHONES: calmer search / filter sizes ─ */
 @media (max-width: 640px) {
-  /* Login form */
-  .lw-inp { height: 42px; font-size: 13px; padding-left: 36px; }
-  .lw-inp::placeholder { font-size: 13px; }
-  .lw-btn { height: 44px; font-size: 13px; }
-  .lw-remember { font-size: 12px; }
-
-  /* Catalog search + category filter */
   .lw-shop-search input { height: 42px; font-size: 13px; }
   .lw-shop-search input::placeholder { font-size: 13px; }
   .lw-dd-trigger { height: 42px; font-size: 12.5px; }

@@ -106,6 +106,7 @@ class ReportsController extends Controller
             ['label' => $w['profit'], 'value' => '₱' . number_format($profit, 2)],
         ];
 
+        // Per product: units, sales AND profit (profit uses the same rule as the report total).
         $topSelling = $this->itemsQuery($p)
             ->join('products', 'sales_items.ProductID', '=', 'products.ProductID')
             ->leftJoin('categories', 'products.CategoryID', '=', 'categories.CategoryID')
@@ -114,7 +115,8 @@ class ReportsController extends Controller
                 'products.ProductName',
                 DB::raw("COALESCE(categories.CategoryName, 'Uncategorized') as CategoryName"),
                 DB::raw('SUM(sales_items.Quantity) as total_quantity'),
-                DB::raw('SUM(sales_items.Quantity * sales_items.PriceAtSale) as total_sales')
+                DB::raw('SUM(sales_items.Quantity * sales_items.PriceAtSale) as total_sales'),
+                DB::raw(self::PROFIT_SQL . ' as total_profit')
             )
             ->groupBy('products.ProductID', 'products.ProductName', 'categories.CategoryName')
             ->orderByDesc('total_quantity')
@@ -142,12 +144,21 @@ class ReportsController extends Controller
             ->get()
             ->keyBy(fn ($r) => (string) $r->bucket);
 
+        // Number of transactions per bucket (drives the "busiest" heatmap).
+        $rawTx = DB::table('sales')
+            ->whereBetween('sales.SaleDate', [$p['start'], $p['end']])
+            ->selectRaw("$bucket as bucket, COUNT(*) as tx")
+            ->groupBy('bucket')
+            ->get()
+            ->keyBy(fn ($r) => (string) $r->bucket);
+
         // Only buckets that actually have a transaction, in chronological order.
         // Hour buckets are numeric ("9", "10") so they are sorted as numbers;
         // day / month buckets ("2026-11-08", "2026-11") sort correctly as strings.
         $keys = $rawSales->keys()
             ->merge($rawItemProfit->keys())
             ->merge($rawServiceProfit->keys())
+            ->merge($rawTx->keys())
             ->unique()
             ->sort(fn ($a, $b) => $mode === 'day'
                 ? ((int) $a <=> (int) $b)
@@ -161,8 +172,9 @@ class ReportsController extends Controller
             $label = $mode === 'day' ? sprintf('%02d:00', (int) $key) : $key;
 
             $monthlySales[] = [
-                'date'  => $label,
-                'total' => round((float) ($rawSales[$key]->total ?? 0), 2),
+                'date'         => $label,
+                'total'        => round((float) ($rawSales[$key]->total ?? 0), 2),
+                'transactions' => (int) ($rawTx[$key]->tx ?? 0),
             ];
 
             $profitSeries[] = [
@@ -184,6 +196,7 @@ class ReportsController extends Controller
             'monthly_profit'    => $profitSeries,
             'daily_profit'      => $profitSeries,   // kept for older callers
             'monthly_total'     => $totalSales,
+            'service_profit'    => round($serviceProfit, 2), // shop's share of extra services
         ];
 
         if ($request->boolean('include_sales', true)) {

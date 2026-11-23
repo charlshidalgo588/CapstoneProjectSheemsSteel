@@ -45,7 +45,7 @@
               </div>
               <div>
                 <h2 class="form-card-title">Basic Information</h2>
-                <p class="form-card-sub">Name, SKU, barcode, unit and return policy.</p>
+                <p class="form-card-sub">Name, SKU, barcode, unit and price adjustment.</p>
               </div>
             </div>
             <div class="form-card-body">
@@ -118,21 +118,21 @@
                 </div>
               </div>
 
-              <div class="toggle-row toggle-row--card" @click="form.IsReturnable = !form.IsReturnable">
+              <div class="toggle-row toggle-row--card" @click="form.IsAdjustable = !form.IsAdjustable">
                 <button
                   type="button"
                   role="switch"
                   class="toggle-track"
-                  :class="{ 'toggle-track--on': form.IsReturnable }"
-                  :aria-checked="form.IsReturnable"
-                  aria-label="Returnable item"
-                  @click.stop="form.IsReturnable = !form.IsReturnable"
+                  :class="{ 'toggle-track--on': form.IsAdjustable }"
+                  :aria-checked="form.IsAdjustable"
+                  aria-label="Adjustable item"
+                  @click.stop="form.IsAdjustable = !form.IsAdjustable"
                 >
-                  <span class="toggle-thumb" :class="{ 'toggle-thumb--on': form.IsReturnable }"></span>
+                  <span class="toggle-thumb" :class="{ 'toggle-thumb--on': form.IsAdjustable }"></span>
                 </button>
                 <div>
-                  <p class="toggle-label">Returnable Item</p>
-                  <p class="toggle-sub">Allow this product to be returned after sale.</p>
+                  <p class="toggle-label">Adjustable Item</p>
+                  <p class="toggle-sub">Lets the cashier use "Adjust line" at the POS (cut piece or custom price). Leave off if this item can't be adjusted.</p>
                 </div>
               </div>
             </div>
@@ -624,8 +624,9 @@ const fileInput = ref(null)
 
 // NOTE: OpeningStock and ReorderLevel are no longer product-level fields.
 // They now live on each size (see `variants` below).
+// IsAdjustable: only adjustable items get the "Adjust line" button at the POS.
 const form = ref({
-  ProductName: '', SKU: '', Barcode: '', Unit: '', IsReturnable: false,
+  ProductName: '', SKU: '', Barcode: '', Unit: '', IsAdjustable: false,
   CategoryID: '', SupplierID: '', Brand: '', Description: '',
   Material: '', ProfileType: '', Color: '',
 })
@@ -1276,7 +1277,7 @@ async function saveProduct() {
   try {
     const fd = new FormData()
     for (const key in form.value) {
-      fd.append(key, key === 'IsReturnable' ? (form.value[key] ? 1 : 0) : (form.value[key] ?? ''))
+      fd.append(key, key === 'IsAdjustable' ? (form.value[key] ? 1 : 0) : (form.value[key] ?? ''))
     }
 
     // Each size carries its own price AND its own stock.
@@ -1327,29 +1328,34 @@ async function saveProduct() {
   --p-ring:           var(--c-accent-ring);
   --radius: 16px;
 
-  /* ── SPACE TUNING (same values as the Product List) ──
-     The app shell (Layout.vue) adds roughly 64px of its own padding around every page.
-     --bleed-* reclaims part of it on desktop, on the top AND on both sides.
-     The page was pulled up: --bleed-y is larger and the page's own top padding is smaller.
-     Lower a value (or set it to 0px) if content ever touches the sidebar or top bar. */
+  /* ── SPACE TUNING (identical to Home and the Categories pages, on EVERY screen size) ──
+     The app shell (Layout.vue) pads the scrolling area. --bleed-x / --bleed-y
+     reclaim part of that padding on the left, right and top, and --pad-x is this
+     page's own inner side padding. Each breakpoint at the bottom of this file
+     sets its own values.
+     Raise a bleed value to push content closer to the edge; lower it (or set
+     0px) if content ever touches the sidebar, top bar or screen edge. */
   --bleed-x: 30px;
-  --bleed-y: 30px;
+  --bleed-y: 26px;
+  --pad-x: 24px;
   --p-gap: 14px;
 
   min-height: 100%;
   overflow-x: clip;             /* the page never scrolls sideways (clip, so sticky keeps working) */
   background: var(--p-bg);
-  padding: 8px 24px 40px;
+  padding:
+    16px
+    max(var(--pad-x), env(safe-area-inset-right))
+    40px
+    max(var(--pad-x), env(safe-area-inset-left));
+  margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0;
   font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
   display: flex; flex-direction: column; gap: var(--p-gap);
   transition: background-color .22s ease;
 }
 .prod-page > * { min-width: 0; }
-
-/* Desktop only: pull the page outward into the shell's padding (top, left AND right). */
-@media (min-width: 1001px) {
-  .prod-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
-}
 
 /* ── FORM LAYOUT ──
    Narrow screens: one column, cards ordered by the .o-* classes (the two column
@@ -1400,26 +1406,31 @@ async function saveProduct() {
   font-size: 13px; font-weight: 600; font-family: inherit;
   border-radius: 10px; padding: 10px 18px; cursor: pointer;
   border: 1.5px solid transparent; text-decoration: none;
+  touch-action: manipulation;
   transition: background .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s;
 }
 .btn:active { transform: scale(.98); }
 .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--p-ring); }
 .btn--ghost   { background: var(--p-surface); border-color: var(--p-border-strong); color: var(--p-text-secondary); }
-.btn--ghost:hover { background: var(--p-surface-raised); border-color: var(--p-accent-border); color: var(--p-text-primary); }
 .btn--primary {
   background: linear-gradient(135deg, var(--p-accent) 0%, var(--c-accent-deep) 100%);
   color: #fff; box-shadow: var(--c-shadow-accent);
 }
-.btn--primary:hover { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
 .btn--primary:disabled { opacity: .6; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
 .kbd {
   font-family: inherit; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
   background: rgba(255,255,255,.22); color: #fff; margin-left: 2px;
 }
 
+/* Hover effects: only on devices that really hover (no sticky hover on touch) */
+@media (hover: hover) and (pointer: fine) {
+  .btn--ghost:hover { background: var(--p-surface-raised); border-color: var(--p-accent-border); color: var(--p-text-primary); }
+  .btn--primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: var(--c-shadow-accent-h); transform: translateY(-1px); }
+}
+
 /* TOASTS: fixed to the screen so they are never scrolled out of view */
 .toast-stack {
-  position: fixed; top: 16px; right: 16px; z-index: 10001;
+  position: fixed; top: calc(env(safe-area-inset-top, 0px) + 16px); right: 16px; z-index: 10001;
   display: flex; flex-direction: column; gap: 10px;
   width: min(420px, calc(100vw - 32px)); pointer-events: none;
 }
@@ -1429,6 +1440,7 @@ async function saveProduct() {
   font-size: 13.5px; font-weight: 500; border: 1px solid transparent;
   box-shadow: 0 10px 30px rgba(0,0,0,.18);
 }
+.alert span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .alert--success {
   background: linear-gradient(rgba(16,185,129,.12), rgba(16,185,129,.12)), var(--p-surface);
   border-color: rgba(16,185,129,.35); color: #059669;
@@ -1924,15 +1936,31 @@ html[data-theme="dark"] .margin-hint--loss { color: #F87171; }
 .modal-fade-leave-active { transition: opacity .16s ease, transform .16s ease; }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; transform: scale(.97) translateY(8px); }
 
-/* RESPONSIVE */
+/* ══════════════════════════════════════════════════════
+   RESPONSIVE (same breakpoints and values as Home and the Categories pages)
+══════════════════════════════════════════════════════ */
+
+/* Large screens: more breathing room */
+@media (min-width: 1500px) {
+  .prod-page { --pad-x: 32px; }
+}
+
+/* Tablets and below */
+@media (max-width: 1000px) {
+  .prod-page { --bleed-x: 22px; --bleed-y: 20px; }
+}
+
 @media (max-width: 1359px) and (min-width: 801px) {
   .summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
+
 @media (max-width: 900px) {
-  .prod-page { padding: 8px 14px 32px; --p-gap: 12px; }
+  .prod-page { --pad-x: 16px; --p-gap: 12px; padding-bottom: 32px; }
 }
+
+/* Phones */
 @media (max-width: 800px) {
-  .prod-page { padding: 8px 16px 24px; }
+  .prod-page { padding-bottom: 24px; }
   .page-eyebrow, .page-title, .page-crumb-sep { font-size: 14px; }
   .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
   .spec-row { grid-template-columns: 1fr 1fr; }
@@ -1941,13 +1969,33 @@ html[data-theme="dark"] .margin-hint--loss { color: #F87171; }
   .form-card-body { padding: 18px 16px; }
   .form-card-tools { margin-left: 0; width: 100%; justify-content: space-between; }
   .variant-mini { display: none; }
-  .save-bar { bottom: 10px; padding: 10px; border-radius: 14px; }
+
+  /* 16px text stops iOS zooming into a field; taller fields are easier to tap */
+  .form-input, .form-select, .form-textarea, .barcode-hidden-input { font-size: 16px; }
+  .form-input, .form-select { height: 44px; }
+
+  .save-bar { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding: 10px; border-radius: 14px; }
   .save-bar-status { display: none; }
   .save-bar-actions { width: 100%; }
-  .save-bar-actions .btn { flex: 1; justify-content: center; }
+  .save-bar-actions .btn { flex: 1; justify-content: center; height: 44px; }
   .save-bar-actions .btn--ghost { flex: 0 0 auto; }
   .kbd, .page-sub { display: none; }
+
+  .toast-stack { right: 10px; width: min(420px, calc(100vw - 20px)); }
 }
+
+/* Phones: spacing tokens */
+@media (max-width: 600px) {
+  .prod-page { --bleed-x: 16px; --bleed-y: 16px; --pad-x: 12px; }
+  .form-card { border-radius: 14px; }
+}
+
+/* Very small phones */
+@media (max-width: 360px) {
+  .prod-page { --pad-x: 10px; }
+  .form-card-body { padding: 16px 14px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .save-dot--dirty { animation: none; }
   .variant-toggle i, .ready-bar span { transition: none; }

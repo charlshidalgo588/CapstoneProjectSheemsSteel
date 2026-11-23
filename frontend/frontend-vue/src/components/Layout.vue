@@ -2,7 +2,7 @@
   <div
     class="app-shell"
     v-bind="shellAttrs"
-    :style="{ '--sw': sidebarOpen ? '260px' : '68px' }"
+    :style="{ '--sw': sidebarWidth, '--sw-open': SIDEBAR_WIDTH_OPEN + 'px' }"
     @mouseover="onTipOver"
     @focusin="onTipOver"
     @mouseleave="hideTip"
@@ -69,7 +69,16 @@
           <span class="bline bline--mid" :class="{ 'bline--mid-hidden': !sidebarOpen }" />
           <span class="bline" />
         </button>
-        <router-link v-show="sidebarOpen" to="/home" class="brand-wrap">
+
+        <!-- Brand: fades in/out instead of popping (v-show) so it never
+             appears squashed inside a half-open sidebar. -->
+        <router-link
+          to="/home"
+          class="brand-wrap"
+          :class="{ 'brand-wrap--hidden': !sidebarOpen }"
+          :aria-hidden="!sidebarOpen"
+          :tabindex="sidebarOpen ? 0 : -1"
+        >
           <img :src="logo" class="brand-logo" alt="" />
           <div class="brand-text">
             <span class="brand-name">Sheem Steel</span>
@@ -78,18 +87,36 @@
         </router-link>
       </div>
 
-      <!-- Only the links this role is allowed to open are rendered. -->
+      <!-- Only the links this role is allowed to open are rendered.
+           The page you're currently on is highlighted (see the
+           "ACTIVE PAGE HIGHLIGHT" block in the styles). -->
       <nav class="sidebar-nav">
         <NavLink to="/home" icon="fa-solid fa-house" label="Home" :collapsed="!sidebarOpen" />
 
         <div v-if="showInventoryMenu || showSalesMenu" class="nav-divider" role="separator" />
 
-        <SidebarDropdown v-if="showInventoryMenu" label="Inventory" icon="fa-solid fa-boxes-stacked" :open="inventoryOpen" :collapsed="!sidebarOpen" @toggle="inventoryOpen = !inventoryOpen">
+        <SidebarDropdown
+          v-if="showInventoryMenu"
+          label="Inventory"
+          icon="fa-solid fa-boxes-stacked"
+          :open="inventoryOpen"
+          :collapsed="!sidebarOpen"
+          :class="{ 'nav-group--active': inventoryActive }"
+          @toggle="inventoryOpen = !inventoryOpen"
+        >
           <NavLink v-if="can('/products')"   to="/products"        menu-item label="Product List" icon="fa-solid fa-list"        :collapsed="false" />
           <NavLink v-if="can('/products')"   to="/products/create" menu-item label="Add Item"     icon="fa-solid fa-plus"        :collapsed="false" />
           <NavLink v-if="can('/categories')" to="/categories"      menu-item label="Categories"   icon="fa-solid fa-layer-group" :collapsed="false" />
         </SidebarDropdown>
-        <SidebarDropdown v-if="showSalesMenu" label="Sales" icon="fa-solid fa-cart-shopping" :open="salesOpen" :collapsed="!sidebarOpen" @toggle="salesOpen = !salesOpen">
+        <SidebarDropdown
+          v-if="showSalesMenu"
+          label="Sales"
+          icon="fa-solid fa-cart-shopping"
+          :open="salesOpen"
+          :collapsed="!sidebarOpen"
+          :class="{ 'nav-group--active': salesActive }"
+          @toggle="salesOpen = !salesOpen"
+        >
           <NavLink v-if="can('/point-of-sale')"     to="/point-of-sale"     menu-item label="POS"         icon="fa-solid fa-cash-register" :collapsed="false" />
           <NavLink v-if="can('/sales-transaction')" to="/sales-transaction" menu-item label="Transaction" icon="fa-solid fa-receipt"       :collapsed="false" />
           <NavLink v-if="can('/customers')"         to="/customers"         menu-item label="Customers"   icon="fa-solid fa-users"         :collapsed="false" />
@@ -103,7 +130,8 @@
       </nav>
 
       <!-- SIDEBAR FOOTER — live clock (the account menu now lives in the
-           topbar, to the right of the notification bell). -->
+           topbar, to the right of the notification bell). The two layouts
+           crossfade instead of snapping while the width animates. -->
       <div class="sidebar-footer">
         <div
           class="sidebar-clock"
@@ -111,17 +139,19 @@
           role="timer"
           aria-label="Current time"
         >
-          <template v-if="sidebarOpen">
-            <span class="sidebar-clock-icon" aria-hidden="true"><i class="fa-regular fa-clock"></i></span>
-            <div class="sidebar-clock-info">
-              <p class="sidebar-clock-time">{{ clockLabel }}</p>
-              <p class="sidebar-clock-date">{{ shortDateLabel }}</p>
+          <transition name="clock-swap" mode="out-in">
+            <div v-if="sidebarOpen" key="full" class="sidebar-clock-row">
+              <span class="sidebar-clock-icon" aria-hidden="true"><i class="fa-regular fa-clock"></i></span>
+              <div class="sidebar-clock-info">
+                <p class="sidebar-clock-time">{{ clockLabel }}</p>
+                <p class="sidebar-clock-date">{{ shortDateLabel }}</p>
+              </div>
             </div>
-          </template>
-          <template v-else>
-            <span class="sidebar-clock-mini-time">{{ clockParts.time }}</span>
-            <span class="sidebar-clock-mini-period">{{ clockParts.period }}</span>
-          </template>
+            <div v-else key="mini" class="sidebar-clock-mini">
+              <span class="sidebar-clock-mini-time">{{ clockParts.time }}</span>
+              <span class="sidebar-clock-mini-period">{{ clockParts.period }}</span>
+            </div>
+          </transition>
         </div>
       </div>
     </aside>
@@ -235,17 +265,19 @@
         <!-- GREETING — the logo only shows here while the sidebar is
              collapsed (it's hidden inside the sidebar in that state). -->
         <div class="topbar-greeting">
-          <router-link
-            v-if="!sidebarOpen"
-            to="/home"
-            class="greeting-logo-link"
-            aria-label="Sheem Steel home"
-          >
-            <img :src="logo" class="greeting-logo" alt="" />
-          </router-link>
+          <transition name="fade">
+            <router-link
+              v-if="!sidebarOpen"
+              to="/home"
+              class="greeting-logo-link"
+              aria-label="Sheem Steel home"
+            >
+              <img :src="logo" class="greeting-logo" alt="" />
+            </router-link>
+          </transition>
           <div class="greeting-text">
             <p class="greeting-name">{{ greetingPhrase }}, <span>{{ user?.name || 'User' }}</span></p>
-            <p class="greeting-sub">{{ todayLabel }}</p>
+            <p class="greeting-sub"><i class="fa-regular fa-calendar" aria-hidden="true"></i> {{ todayLabel }}</p>
           </div>
         </div>
 
@@ -475,6 +507,22 @@ const showInventoryMenu = computed(() => can('/products') || can('/categories'))
 const showSalesMenu     = computed(() => can('/point-of-sale') || can('/sales-transaction') || can('/customers'))
 const showManagement    = computed(() => can('/suppliers') || can('/reports') || can('/inventory-logs'))
 
+/* ─────────────────────────────────────────────────────────
+   ACTIVE PAGE — which sidebar group the current route belongs to.
+   Used to highlight a dropdown's header (even while it's closed) and to
+   auto-open the dropdown that contains the page you're on.
+───────────────────────────────────────────────────────── */
+const INVENTORY_PATHS = ['/products', '/categories']
+const SALES_PATHS     = ['/point-of-sale', '/sales-transaction', '/customers']
+
+// True when the current path IS the base path or a sub-path of it
+// (so "/products/create" and "/products/12/edit" both match "/products").
+const pathMatches = (base) =>
+  route.path === base || route.path.startsWith(base + '/')
+
+const inventoryActive = computed(() => INVENTORY_PATHS.some(pathMatches))
+const salesActive     = computed(() => SALES_PATHS.some(pathMatches))
+
 // Notification state lives in a Pinia store (a singleton for the whole
 // app session) instead of local refs here — Layout.vue remounts on every
 // navigation, so local refs couldn't survive a route change.
@@ -563,7 +611,7 @@ function onPageScroll(e) {
 /* ─────────────────────────────────────────────────────────
    RESPONSIVE BREAKPOINT — drives the sidebar's mode.
    >768px:  sidebar lives in normal flow; `sidebarOpen` toggles between
-            the 260px expanded / 68px icon-only widths.
+            the expanded / 68px icon-only widths.
             DEFAULT: collapsed (icon-only) — the user expands it on demand.
    ≤768px:  sidebar becomes a fixed off-canvas drawer; `sidebarOpen`
             means "drawer open/closed", and a backdrop appears behind it.
@@ -573,6 +621,16 @@ const MOBILE_BREAKPOINT = 768
 const isMobile    = ref(window.innerWidth <= MOBILE_BREAKPOINT)
 // Minimized is the main state on every screen size.
 const sidebarOpen = ref(false)
+
+// Sidebar widths (px). Change these two numbers to resize everything.
+//   240 = the "usual" sidebar size
+//   220 = a smaller, more compact sidebar
+const SIDEBAR_WIDTH_OPEN      = 240
+const SIDEBAR_WIDTH_COLLAPSED = 68
+
+const sidebarWidth = computed(() =>
+  (sidebarOpen.value ? SIDEBAR_WIDTH_OPEN : SIDEBAR_WIDTH_COLLAPSED) + 'px'
+)
 
 function onWindowResize() {
   const mobile = window.innerWidth <= MOBILE_BREAKPOINT
@@ -587,6 +645,20 @@ function onWindowResize() {
 watch(() => route.path, () => {
   if (isMobile.value) sidebarOpen.value = false
 })
+
+/* Auto-open the dropdown that contains the current page, so you can see
+   exactly which item you're on without hunting for it. Only while the
+   sidebar is expanded — when it's collapsed the dropdowns act as flyouts
+   and we don't want one popping open by itself. Never force a dropdown
+   CLOSED, so the user's own open/close choices are respected. */
+function syncOpenGroups() {
+  if (!sidebarOpen.value) return
+  if (inventoryActive.value) inventoryOpen.value = true
+  if (salesActive.value)     salesOpen.value = true
+}
+watch(() => route.path, syncOpenGroups, { immediate: true })
+// Expanding the sidebar (or opening the mobile drawer) reveals the group too.
+watch(sidebarOpen, syncOpenGroups)
 
 /* ─────────────────────────────────────────────────────────
    GLOBAL "GO TO POS" BUTTON VISIBILITY
@@ -831,10 +903,14 @@ function onTipOver(e) {
     el.getAttribute('data-tip-desc') ||
     TIP_DESCRIPTIONS[label.toLowerCase()] ||
     ''
+  // "You're here" — same rule as the sidebar highlight: dropdown menu
+  // items need an EXACT match (so Product List isn't "current" on
+  // /products/create), top-level links also count sub-pages.
+  const isTopLevel = !!el.closest('.sidebar-nav') && !el.closest('.sidebar-nav > div, .sidebar-nav [class*="dropdown"], .sidebar-nav [class*="menu"]')
   const current =
     el.getAttribute('aria-current') === 'page' ||
-    el.classList.contains('router-link-active') ||
-    el.classList.contains('router-link-exact-active')
+    el.classList.contains('router-link-exact-active') ||
+    (isTopLevel && el.classList.contains('router-link-active'))
 
   tipEl = el
   if (tipTimer) clearTimeout(tipTimer)
@@ -1399,23 +1475,24 @@ const confirmLogout = async () => {
 }
 
 /* ─── SIDEBAR ─────────────────────────────────────────── */
+/* Optimized transition: a single `width` transition (the old duplicate
+   `min-width` one is gone) with a smoother ease-out curve. */
 .sidebar {
   width: var(--sw, 68px);
-  min-width: var(--sw, 68px);
   height: 100vh;
   background: var(--c-sidebar-bg);
   border-right: 1px solid var(--c-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition:
-    width 0.26s cubic-bezier(.4,0,.2,1),
-    min-width 0.26s cubic-bezier(.4,0,.2,1),
-    transform 0.28s cubic-bezier(.4,0,.2,1),
-    background-color 0.22s ease,
-    border-color 0.22s ease;
   flex-shrink: 0;
   z-index: 50;
+  will-change: width;
+  transition:
+    width 0.3s cubic-bezier(.22, 1, .36, 1),
+    transform 0.28s cubic-bezier(.22, 1, .36, 1),
+    background-color 0.22s ease,
+    border-color 0.22s ease;
 }
 .sidebar::before {
   content: '';
@@ -1431,11 +1508,12 @@ const confirmLogout = async () => {
   position: fixed;
   top: 0;
   left: 0;
-  width: 260px !important;
-  min-width: 260px !important;
+  width: var(--sw-open, 240px) !important;
+  min-width: var(--sw-open, 240px) !important;
   transform: translateX(-100%);
   box-shadow: var(--c-shadow-xl);
   z-index: 500;
+  will-change: transform;
 }
 .sidebar--mobile.sidebar--open {
   transform: translateX(0);
@@ -1477,6 +1555,18 @@ const confirmLogout = async () => {
   display: flex; align-items: center; gap: 10px;
   text-decoration: none; overflow: hidden; white-space: nowrap; flex: 1;
   border-radius: 8px;
+  /* Fades in slightly AFTER the width starts opening, so it never
+     appears squashed inside a half-open sidebar. */
+  opacity: 1;
+  visibility: visible;
+  transition: opacity .2s ease .1s, visibility 0s;
+}
+.brand-wrap--hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* Fades out fast on collapse. */
+  transition: opacity .1s ease, visibility 0s .1s;
 }
 .brand-logo { width: 32px; height: 32px; object-fit: fill; border: solid rgb(255, 255, 255) 1px; border-radius: 50px; flex-shrink: 0; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
@@ -1490,6 +1580,107 @@ const confirmLogout = async () => {
   scrollbar-width: none;
 }
 .sidebar-nav::-webkit-scrollbar { display: none; }
+
+/* ═══════════════════════════════════════════════════════
+   ACTIVE PAGE HIGHLIGHT
+   Shows the user which page they're on.
+
+   NavLink / SidebarDropdown are child components, so scoped styles
+   can't reach inside them without :deep(). vue-router puts these
+   classes on the rendered <a>:
+     .router-link-active        → this path OR any sub-path
+     .router-link-exact-active  → this exact path only
+
+   • Dropdown items (Product List, Add Item, POS …)  → EXACT match only,
+     otherwise "Product List" would also light up on /products/create.
+   • Top-level links (Home, Suppliers, Reports …)    → prefix match, so
+     e.g. /suppliers/12 still highlights "Suppliers".
+   • Dropdown HEADERS (Inventory / Sales)            → highlighted via
+     the .nav-group--active class when any child page is open.
+════════════════════════════════════════════════════════ */
+/* Keep labels on one line so they never wrap (and jump) mid-animation. */
+.sidebar-nav :deep(a),
+.sidebar-nav :deep(button) {
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sidebar-nav :deep(a) {
+  position: relative; /* anchor for the left accent bar */
+}
+
+/* The accent bar — hidden by default, grows in when the link is active */
+.sidebar-nav :deep(a)::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  width: 3px; height: 0;
+  border-radius: 0 3px 3px 0;
+  background: var(--c-accent);
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: height .22s cubic-bezier(.4,0,.2,1), opacity .18s ease;
+  pointer-events: none;
+}
+
+/* 1) Any link that matches the current page EXACTLY (all links) */
+.sidebar-nav :deep(a.router-link-exact-active),
+/* 2) Top-level links: also stay highlighted on their sub-pages */
+.sidebar-nav > :deep(a.router-link-active) {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--c-accent-border);
+}
+.sidebar-nav :deep(a.router-link-exact-active)::after,
+.sidebar-nav > :deep(a.router-link-active)::after {
+  height: 60%;
+  opacity: 1;
+}
+
+/* Make the icon + label follow the accent colour too */
+.sidebar-nav :deep(a.router-link-exact-active i),
+.sidebar-nav :deep(a.router-link-exact-active span),
+.sidebar-nav > :deep(a.router-link-active i),
+.sidebar-nav > :deep(a.router-link-active span) {
+  color: var(--c-accent);
+}
+
+/* Hover on the active link keeps the highlight (no flicker back to grey) */
+.sidebar-nav :deep(a.router-link-exact-active:hover),
+.sidebar-nav > :deep(a.router-link-active:hover) {
+  background: var(--c-accent-soft-hover, var(--c-accent-soft));
+}
+
+/* Dropdown HEADER (Inventory / Sales): the group that contains the
+   current page gets a softer highlight, so it's clear where you are even
+   when the dropdown is collapsed or the sidebar is icon-only. */
+.sidebar-nav :deep(.nav-group--active > button) {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  font-weight: 700;
+  position: relative;
+}
+.sidebar-nav :deep(.nav-group--active > button i),
+.sidebar-nav :deep(.nav-group--active > button span) {
+  color: var(--c-accent);
+}
+.sidebar-nav :deep(.nav-group--active > button)::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  width: 3px; height: 60%;
+  border-radius: 0 3px 3px 0;
+  background: var(--c-accent);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* Collapsed (icon-only) sidebar: keep the highlight tight around the icon */
+.sidebar:not(.sidebar--open):not(.sidebar--mobile) .sidebar-nav :deep(a.router-link-exact-active),
+.sidebar:not(.sidebar--open):not(.sidebar--mobile) .sidebar-nav > :deep(a.router-link-active) {
+  box-shadow: inset 0 0 0 1px var(--c-accent-border);
+}
 
 /* Divider between nav groups (overview / daily work / management) */
 .nav-divider {
@@ -1516,11 +1707,25 @@ const confirmLogout = async () => {
   user-select: none;
 }
 .sidebar-clock--collapsed {
-  flex-direction: column;
-  justify-content: center;
-  gap: 1px;
   padding: 8px 0;
 }
+.sidebar-clock-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-width: 0;
+}
+.sidebar-clock-mini {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 1px;
+  width: 100%;
+}
+
+/* Crossfade between the full clock and the mini clock */
+.clock-swap-enter-active { transition: opacity .16s ease .08s; }
+.clock-swap-leave-active { transition: opacity .08s ease; }
+.clock-swap-enter-from,
+.clock-swap-leave-to { opacity: 0; }
+
 .sidebar-clock-icon {
   width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -1642,9 +1847,15 @@ const confirmLogout = async () => {
 .greeting-name span { color: var(--c-text-primary); font-weight: 700; }
 
 .greeting-sub {
-  font-size: 12px; color: var(--c-text-faint);
-  margin-top: 1px; white-space: nowrap; font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text-secondary);
+  margin-top: 2px;
+  white-space: nowrap;
+  letter-spacing: 0;
 }
+
+.greeting-sub i { color: var(--c-accent); font-size: 11.5px; margin-right: 4px; }
 
 /* ─── SEARCH ──────────────────────────────────────────── */
 .search-wrap { flex: 1; min-width: 0; max-width: 440px; margin: 0 auto; position: relative; }
@@ -2326,8 +2537,10 @@ html[data-theme="dark"] .toast--supplier_delivery { --t-accent: #60a5fa; --t-tit
 /* Respect reduced-motion: no sliding, pulsing, bouncing or flying */
 @media (prefers-reduced-motion: reduce) {
   .sidebar, .pos-fab, .pos-fab-label, .dropdown-enter-active, .dropdown-leave-active,
-  .fade-enter-active, .fade-leave-active, .skip-link, .topbar, .tip-enter-active, .tip-leave-active {
+  .fade-enter-active, .fade-leave-active, .skip-link, .topbar, .tip-enter-active, .tip-leave-active,
+  .brand-wrap, .clock-swap-enter-active, .clock-swap-leave-active {
     transition-duration: .01ms !important;
+    transition-delay: 0s !important;
   }
   .loading-bar-fill, .top-progress-fill, .loading-logo, .dot,
   .toast, .bell-ring, .notif-badge--pop {

@@ -293,7 +293,7 @@
           </div>
         </section>
 
-        <!-- ── 3. HEATMAP (adapts: Day/Week → week strip, Month → calendar, Year → months) ── -->
+        <!-- ── 3. BUSIEST HEATMAP (adapts: Day/Week → week strip, Month → calendar, Year → months) ── -->
         <section class="card" aria-labelledby="rp-heat">
           <header class="card-head">
             <div>
@@ -302,17 +302,12 @@
             </div>
             <div class="seg seg--sm" role="group" aria-label="Heatmap metric">
               <button type="button" class="seg-btn" :class="{ 'seg-btn--active': calMetric === 'total' }" :aria-pressed="calMetric === 'total'" @click="calMetric = 'total'">Sales</button>
-              <button type="button" class="seg-btn" :class="{ 'seg-btn--active': calMetric === 'profit' }" :aria-pressed="calMetric === 'profit'" @click="calMetric = 'profit'">Profit</button>
+              <button type="button" class="seg-btn" :class="{ 'seg-btn--active': calMetric === 'tx' }" :aria-pressed="calMetric === 'tx'" @click="calMetric = 'tx'">Transactions</button>
             </div>
           </header>
 
-          <p v-if="mode === 'day' && weekFailed" class="heat-note heat-note--warn">
-            <i class="fa-solid fa-triangle-exclamation"></i>
-            Couldn't load the other days of this week. Change the period and come back to try again.
-          </p>
-
           <div class="heat-layout">
-            <div class="heat" :class="[`heat--${heatShape}`, { 'heat--profit': calMetric === 'profit' }]">
+            <div class="heat" :class="[`heat--${heatShape}`, { 'heat--tx': calMetric === 'tx' }]">
               <template v-if="mode === 'month'">
                 <span v-for="(w, i) in weekdays" :key="'w' + i" class="heat-dow">{{ w }}</span>
               </template>
@@ -323,36 +318,41 @@
                   v-else
                   type="button"
                   class="heat-cell"
-                  :class="[`lv${c.level}`, { 'heat-cell--sel': heatActive && c.key === heatActive.key, 'heat-cell--today': c.today }]"
+                  :class="[`lv${c.level}`, { 'heat-cell--sel': heatActive && c.key === heatActive.key, 'heat-cell--today': c.today, 'heat-cell--peak': c.key === heatPeakKey }]"
                   :disabled="c.future"
                   :aria-pressed="!!heatActive && c.key === heatActive.key"
-                  :aria-label="`${c.title}: ₱${price(c.v)}`"
+                  :aria-label="`${c.title}: ${heatValueText(c)}`"
                   v-bind="tipBind(() => heatTip(c))"
                   @click="selectHeat(c.key)"
                 >
-                  <template v-if="heatShape === 'day'">
+                  <template v-if="heatShape === 'hour'">
+                    <span class="hc-hour">{{ c.label }}</span>
+                    <span class="hc-amt">{{ c.future ? '' : heatShort(c) }}</span>
+                  </template>
+                  <template v-else-if="heatShape === 'day'">
                     <span class="hc-dow">{{ c.label }}</span>
                     <span class="hc-num">{{ c.num }}</span>
-                    <span class="hc-amt">{{ c.future ? '' : '₱' + compact(c.v) }}</span>
+                    <span class="hc-amt">{{ c.future ? '' : heatShort(c) }}</span>
                   </template>
                   <template v-else-if="mode === 'year'">
                     <span class="hc-month">{{ c.label }}</span>
-                    <span class="hc-amt">{{ c.future ? '' : '₱' + compact(c.v) }}</span>
+                    <span class="hc-amt">{{ c.future ? '' : heatShort(c) }}</span>
                   </template>
                   <template v-else>{{ c.label }}</template>
                 </button>
               </template>
 
-              <div class="heat-scale"><span>Less</span><i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>More</span></div>
+              <div class="heat-scale"><span>{{ calMetric === 'tx' ? 'Quieter' : 'Less' }}</span><i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>{{ calMetric === 'tx' ? 'Busier' : 'More' }}</span></div>
             </div>
 
             <div v-if="heatDetail" class="heat-day" aria-live="polite">
               <div class="heat-day-head">
                 <h3 class="heat-day-title">{{ heatDetail.cell.title }}</h3>
-                <span v-if="heatDetail.cell.today" class="chip chip--accent">{{ mode === 'year' ? 'This month' : 'Today' }}</span>
+                <span v-if="heatDetail.cell.today" class="chip chip--accent">{{ mode === 'year' ? 'This month' : mode === 'day' ? 'This hour' : 'Today' }}</span>
+                <span v-if="heatDetail.isBusiest" class="chip chip--live">Busiest {{ heatCellWord }}</span>
                 <button v-if="canOpenHeat" type="button" class="link-btn" @click="openHeatCell">{{ openHeatLabel }}</button>
               </div>
-              <p class="heat-day-value">₱{{ price(heatDetail.cell.total) }}</p>
+              <p class="heat-day-value">{{ calMetric === 'tx' ? formatNumber(heatDetail.cell.tx) + (heatDetail.cell.tx === 1 ? ' transaction' : ' transactions') : '₱' + price(heatDetail.cell.total) }}</p>
 
               <div v-if="heatDetail.cell.total > 0" class="split-wrap">
                 <div class="split-bar" role="img" :aria-label="`Profit ${heatDetail.margin} percent of sales`">
@@ -364,10 +364,12 @@
               <p v-else class="heat-muted">No sales in this {{ heatCellWord }}.</p>
 
               <dl class="facts">
+                <div><dt>Transactions</dt><dd>{{ formatNumber(heatDetail.cell.tx) }}</dd></div>
+                <div><dt>Sales</dt><dd>₱{{ price(heatDetail.cell.total) }}</dd></div>
                 <div><dt>Profit</dt><dd class="pos">₱{{ price(heatDetail.cell.profit) }}</dd></div>
                 <div><dt>Cost of goods</dt><dd>₱{{ price(heatDetail.cost) }}</dd></div>
                 <div><dt>Margin</dt><dd>{{ heatDetail.margin }}%</dd></div>
-                <div><dt>Share of {{ heatRangeWord }}</dt><dd>{{ heatDetail.share }}%</dd></div>
+                <div><dt>Share of {{ heatRangeWord }} {{ heatMetricNoun }}</dt><dd>{{ heatDetail.share }}%</dd></div>
                 <div><dt>Vs {{ heatCellWord }}ly average</dt><dd :class="heatDetail.vsAvg >= 0 ? 'pos' : 'neg'">{{ heatDetail.vsAvg >= 0 ? '+' : '' }}{{ heatDetail.vsAvg.toFixed(1) }}%</dd></div>
               </dl>
             </div>
@@ -386,10 +388,11 @@
             <header class="card-head">
               <div>
                 <h2 id="rp-mix" class="card-title">Where sales come from</h2>
-                <p class="card-sub">Share of {{ periodLabel || 'this period' }} {{ topMetric === 'qty' ? 'units sold' : 'sales' }} by product</p>
+                <p class="card-sub">Share of {{ periodLabel || 'this period' }} {{ mixNoun }} by product</p>
               </div>
               <div class="seg seg--sm" role="group" aria-label="Measure by">
                 <button type="button" class="seg-btn" :class="{ 'seg-btn--active': topMetric === 'sales' }" :aria-pressed="topMetric === 'sales'" @click="setTopMetric('sales')">By sales</button>
+                <button type="button" class="seg-btn" :class="{ 'seg-btn--active': topMetric === 'profit' }" :aria-pressed="topMetric === 'profit'" @click="setTopMetric('profit')">By profit</button>
                 <button type="button" class="seg-btn" :class="{ 'seg-btn--active': topMetric === 'qty' }" :aria-pressed="topMetric === 'qty'" @click="setTopMetric('qty')">By units</button>
               </div>
             </header>
@@ -427,7 +430,7 @@
                     </template>
                     <template v-else>
                       <strong>{{ topMetric === 'qty' ? formatNumber(mixBase) : '₱' + compact(mixBase) }}</strong>
-                      <span class="dc-name">{{ topMetric === 'qty' ? 'Units sold' : 'Total sales' }}</span>
+                      <span class="dc-name">{{ mixTotalLabel }}</span>
                       <span class="dc-sub">Hover or tap a slice</span>
                     </template>
                   </div>
@@ -455,7 +458,9 @@
                     </button>
                     <dl v-if="mixSel === i" class="mix-detail">
                       <div><dt>Sales</dt><dd>₱{{ price(r.sales) }}</dd></div>
+                      <div v-if="r.profit != null"><dt>Profit</dt><dd>₱{{ price(r.profit) }}</dd></div>
                       <template v-if="!r.isOther">
+                        <div><dt>Margin</dt><dd>{{ r.sales ? ((r.profit / r.sales) * 100).toFixed(1) : '0.0' }}%</dd></div>
                         <div><dt>Units sold</dt><dd>{{ formatNumber(r.qty) }}</dd></div>
                         <div><dt>Average price</dt><dd>₱{{ price(r.qty ? r.sales / r.qty : 0) }}</dd></div>
                         <div v-if="r.category"><dt>Category</dt><dd>{{ r.category }}</dd></div>
@@ -604,7 +609,7 @@
 
         <!-- 03 Top selling items -->
         <section class="ps-section">
-          <h2 class="ps-h2"><span class="ps-num">03</span>Top selling items <small>ranked by {{ topMetric === 'sales' ? 'sales amount' : 'units sold' }}</small></h2>
+          <h2 class="ps-h2"><span class="ps-num">03</span>Top selling items <small>ranked by {{ rankedByText }}</small></h2>
           <table v-if="rankedTopItems.length" class="ps-table">
             <thead>
               <tr>
@@ -614,6 +619,7 @@
                 <th class="num">Qty</th>
                 <th class="num">Avg. price</th>
                 <th class="num">Sales</th>
+                <th class="num">Profit</th>
                 <th class="c-share">Share</th>
               </tr>
             </thead>
@@ -625,6 +631,7 @@
                 <td class="num">{{ formatNumber(item.total_quantity) }}</td>
                 <td class="num">₱{{ price(avgPrice(item)) }}</td>
                 <td class="num ps-strong">₱{{ price(item.total_sales) }}</td>
+                <td class="num" :class="item.total_profit >= 0 ? 'ps-pos' : 'ps-neg'">₱{{ price(item.total_profit) }}</td>
                 <td class="c-share">
                   <span class="ps-share">
                     <span class="ps-share-bar"><i :class="{ 'ps-share-bar--lead': item.rank === 1 }" :style="{ width: item.barPct + '%' }"></i></span>
@@ -638,6 +645,7 @@
                 <td class="num">{{ formatNumber(printTopRest.qty) }}</td>
                 <td></td>
                 <td class="num">₱{{ price(printTopRest.sales) }}</td>
+                <td class="num">₱{{ price(printTopRest.profit) }}</td>
                 <td></td>
               </tr>
             </tbody>
@@ -648,6 +656,7 @@
                 <td class="num">{{ formatNumber(topTotals.qty) }}</td>
                 <td></td>
                 <td class="num">₱{{ price(topTotals.sales) }}</td>
+                <td class="num">₱{{ price(topTotals.profit) }}</td>
                 <td></td>
               </tr>
             </tfoot>
@@ -1324,7 +1333,7 @@ const trendPlain = computed(() => {
   return `${sym} ${t.percent}% vs ${comparisonLabel.value}`
 })
 
-// Sales + profit merged by bucket (hour / day / month).
+// Sales + profit + transactions merged by bucket (hour / day / month).
 const chartRows = computed(() => {
   const profitMap = {}
   monthlyProfitSeries.value.forEach((p) => { profitMap[p.date] = num(p.profit ?? p.total) })
@@ -1333,6 +1342,7 @@ const chartRows = computed(() => {
       date: s.date,
       total: num(s.total),
       profit: profitMap[s.date] ?? num(s.profit),
+      tx: num(s.transactions),
     }))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)))
 })
@@ -1459,7 +1469,8 @@ const stockCoverage = computed(() => {
   return { total: num(total.value), active: num(active.value), pct }
 })
 
-/* ── Product ranking (feeds the print table, Copy, CSV and the sales mix) ── */
+/* ── Product ranking (feeds the print table, Copy, CSV and the sales mix) ──
+   topMetric: 'sales' | 'profit' | 'qty' */
 const topMetric = ref('sales')
 const barsReady = ref(false)
 
@@ -1467,28 +1478,40 @@ const rowKey = (item) => item.ProductID ?? item.ProductName
 
 const rankedTopItems = computed(() => {
   const metric  = topMetric.value
-  const valueOf = (i) => (metric === 'sales' ? i.total_sales : i.total_quantity)
+  const valueOf = (i) => (metric === 'sales' ? i.total_sales : metric === 'profit' ? i.total_profit : i.total_quantity)
 
   const items = topSellingItems.value
-    .map((i) => ({ ...i, total_sales: num(i.total_sales), total_quantity: num(i.total_quantity) }))
+    .map((i) => ({
+      ...i,
+      total_sales: num(i.total_sales),
+      total_quantity: num(i.total_quantity),
+      total_profit: num(i.total_profit),
+    }))
     .sort((a, b) => valueOf(b) - valueOf(a))
 
   const maxVal   = Math.max(...items.map(valueOf), 1)
-  const totalVal = items.reduce((s, i) => s + valueOf(i), 0) || 1
+  // Only positive values count toward the total so a loss-making product can't distort the shares.
+  const totalVal = items.reduce((s, i) => s + Math.max(valueOf(i), 0), 0) || 1
 
   return items.map((i, idx) => ({
     ...i,
     rank: idx + 1,
     barPct: Math.max((valueOf(i) / maxVal) * 100, 2),
-    sharePct: ((valueOf(i) / totalVal) * 100).toFixed(1),
+    sharePct: ((Math.max(valueOf(i), 0) / totalVal) * 100).toFixed(1),
   }))
 })
 const topTotals = computed(() => ({
-  qty:   rankedTopItems.value.reduce((s, i) => s + i.total_quantity, 0),
-  sales: rankedTopItems.value.reduce((s, i) => s + i.total_sales, 0),
+  qty:    rankedTopItems.value.reduce((s, i) => s + i.total_quantity, 0),
+  sales:  rankedTopItems.value.reduce((s, i) => s + i.total_sales, 0),
+  profit: rankedTopItems.value.reduce((s, i) => s + i.total_profit, 0),
 }))
 
 const avgPrice = (item) => (item && item.total_quantity ? item.total_sales / item.total_quantity : 0)
+
+// Words for the active product metric (card subtitle, donut centre, print / copy / CSV headings).
+const mixNoun       = computed(() => ({ sales: 'sales', qty: 'units sold', profit: 'profit' }[topMetric.value]))
+const mixTotalLabel = computed(() => ({ sales: 'Total sales', qty: 'Units sold', profit: 'Total profit' }[topMetric.value]))
+const rankedByText  = computed(() => ({ sales: 'sales amount', qty: 'units sold', profit: 'profit' }[topMetric.value]))
 
 /* ── Print-only helpers ── */
 const PRINT_TOP_LIMIT = 15
@@ -1517,6 +1540,7 @@ const printTopRest = computed(() => {
     count: rest.length,
     qty: rest.reduce((a, i) => a + i.total_quantity, 0),
     sales: rest.reduce((a, i) => a + i.total_sales, 0),
+    profit: rest.reduce((a, i) => a + i.total_profit, 0),
   }
 })
 
@@ -1564,6 +1588,7 @@ function animateBarsIn() {
    The donut shows the top MIX_SLICES products plus one grey
    "Other" slice. The list beside it shows MIX_PREVIEW products and
    expands (scrollable) to every product in the period.
+   Measured by sales, profit or units (topMetric).
 ════════════════════════════════════════════════════════════ */
 const MIX_SLICES  = 7
 const MIX_PREVIEW = 8
@@ -1577,17 +1602,25 @@ const showAllMix  = ref(false)
 
 // Owner's share of extra services (API: service_sales). null = the API didn't send it.
 const serviceSales = ref(null)
+// Owner's share of extra services counted as profit (API: service_profit).
+const serviceProfit = ref(0)
 
 const mixBase = computed(() => {
-  const byQty = topMetric.value === 'qty'
-  const sum = rankedTopItems.value.reduce((a, i) => a + (byQty ? i.total_quantity : i.total_sales), 0)
-  return byQty ? sum : Math.max(num(salesTotal.value), sum + num(serviceSales.value))
+  const m = topMetric.value
+  const items = rankedTopItems.value
+  if (m === 'qty') return items.reduce((a, i) => a + i.total_quantity, 0)
+  if (m === 'profit') {
+    return items.reduce((a, i) => a + Math.max(i.total_profit, 0), 0) + Math.max(num(serviceProfit.value), 0)
+  }
+  const sum = items.reduce((a, i) => a + i.total_sales, 0)
+  return Math.max(num(salesTotal.value), sum + num(serviceSales.value))
 })
 
 const mixList = computed(() => {
   const byQty = topMetric.value === 'qty'
+  const byProfit = topMetric.value === 'profit'
   const base  = mixBase.value || 1
-  const valueOf = (i) => (byQty ? i.total_quantity : i.total_sales)
+  const valueOf = (i) => (byQty ? i.total_quantity : byProfit ? i.total_profit : i.total_sales)
 
   const rows = rankedTopItems.value
     .filter((i) => valueOf(i) > 0)
@@ -1597,6 +1630,7 @@ const mixList = computed(() => {
       category: i.CategoryName || '',
       sales: i.total_sales,
       qty: i.total_quantity,
+      profit: i.total_profit,
       value: valueOf(i),
       pct: (valueOf(i) / base) * 100,
       color: idx < MIX_SLICES ? MIX_PALETTE[idx] : MIX_OTHER,
@@ -1604,11 +1638,17 @@ const mixList = computed(() => {
       isOther: false,
     }))
 
-  if (!byQty) {
+  if (byProfit) {
+    // Shop's share of extra services is pure profit (worker pay is already excluded by the API).
+    const svc = num(serviceProfit.value)
+    if (svc > 0.5) {
+      rows.push({ key: '__services', name: 'Extra services', category: '', sales: svc, profit: svc, qty: null, value: svc, pct: (svc / base) * 100, color: '#8B5CF6', rank: null, isOther: true, isService: true })
+    }
+  } else if (!byQty) {
     // Shop's share of extra services (worker pay is already excluded by the API).
     const svc = num(serviceSales.value)
     if (svc > 0.5) {
-      rows.push({ key: '__services', name: 'Extra services', category: '', sales: svc, qty: null, value: svc, pct: (svc / base) * 100, color: '#8B5CF6', rank: null, isOther: true, isService: true })
+      rows.push({ key: '__services', name: 'Extra services', category: '', sales: svc, profit: svc, qty: null, value: svc, pct: (svc / base) * 100, color: '#8B5CF6', rank: null, isOther: true, isService: true })
     }
     // Anything still unexplained (rounding, adjustments) stays visible instead of being hidden.
     const rest = base - rows.reduce((a, r) => a + r.value, 0)
@@ -1619,7 +1659,7 @@ const mixList = computed(() => {
       rows.push({
         key: legacy ? '__services' : '__other',
         name: legacy ? 'Extra services' : 'Other sales',
-        category: '', sales: rest, qty: null, value: rest, pct: (rest / base) * 100,
+        category: '', sales: rest, profit: legacy ? rest : null, qty: null, value: rest, pct: (rest / base) * 100,
         color: legacy ? '#8B5CF6' : MIX_OTHER, rank: null, isOther: true, isService: legacy,
       })
     }
@@ -1640,6 +1680,7 @@ const mixDonut = computed(() => {
       name: products ? 'Other products' : tail.map((t) => t.name).join(' & '),
       category: '',
       sales: tail.reduce((a, r) => a + r.sales, 0),
+      profit: tail.reduce((a, r) => a + num(r.profit), 0),
       qty: topMetric.value === 'qty' ? tail.reduce((a, r) => a + (r.qty || 0), 0) : null,
       value: tail.reduce((a, r) => a + r.value, 0),
       pct: tail.reduce((a, r) => a + r.pct, 0),
@@ -1683,14 +1724,16 @@ const centerRow = computed(() => {
 
 const visibleMix = computed(() => (showAllMix.value ? mixList.value : mixList.value.slice(0, MIX_PREVIEW)))
 
+// r.value is the active metric (sales, profit or units), so this works for all three.
 const mixValueText = (r) => (topMetric.value === 'qty' ? formatNumber(r.value) + ' units' : '₱' + price(r.value))
 
 const mixInsight = computed(() => {
   const lead = mixList.value.find((r) => !r.isOther && r.rank === 1)
   if (!lead) return ''
-  return topMetric.value === 'qty'
-    ? `${lead.name} is ${lead.pct.toFixed(1)}% of the units sold in ${periodLabel.value || 'this period'}.`
-    : `${lead.name} brings in ${lead.pct.toFixed(1)}% of ${periodLabel.value || 'this period'} sales.`
+  const p = periodLabel.value || 'this period'
+  if (topMetric.value === 'qty') return `${lead.name} is ${lead.pct.toFixed(1)}% of the units sold in ${p}.`
+  if (topMetric.value === 'profit') return `${lead.name} earns ${lead.pct.toFixed(1)}% of ${p} profit.`
+  return `${lead.name} brings in ${lead.pct.toFixed(1)}% of ${p} sales.`
 })
 const mixConcentrated = computed(() => {
   const lead = mixList.value.find((r) => !r.isOther && r.rank === 1)
@@ -1718,16 +1761,16 @@ function setTopMetric(metric) {
 }
 
 /* ════════════════════════════════════════════════════════════
-   HEATMAP  (adapts to the period: Day/Week → 7-day strip, Month → calendar, Year → months)
+   HEATMAP: BUSIEST DAYS / MONTHS
+   (adapts to the period: Day/Week → 7-day strip, Month → calendar, Year → months)
+   Cells are shaded by Sales or by Transactions (calMetric). The side
+   panel always keeps the profit / cost split and the sales + profit numbers.
 ════════════════════════════════════════════════════════════ */
 const weekdays   = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
-const calMetric  = ref('total') // 'total' | 'profit'
+const calMetric  = ref('total') // 'total' (sales) | 'tx' (transactions)
 const heatSelKey = ref(null)
-const weekMap    = ref({})      // 'YYYY-MM-DD' -> { total, profit }  (Day mode only)
-const weekFailed = ref(false)
-
-// Day and Week both render the same 7-day strip layout.
-const heatShape = computed(() => (mode.value === 'week' ? 'day' : mode.value))
+// Day → 24 hourly cells, Week → 7-day strip, Month → calendar, Year → 12 months.
+const heatShape = computed(() => (mode.value === 'week' ? 'day' : mode.value === 'day' ? 'hour' : mode.value))
 
 // Sunday-start week that contains the given YYYY-MM-DD.
 function weekStartOf(dayStr) {
@@ -1736,43 +1779,9 @@ function weekStartOf(dayStr) {
   return d
 }
 
-// Day mode only has hourly data, so the week strip pulls daily totals from
-// the month report(s) the week touches (two months when it crosses a boundary).
-async function fetchWeekMap() {
-  try {
-    const start = weekStartOf(selectedDay.value)
-    const end = new Date(start)
-    end.setDate(end.getDate() + 6)
-
-    const months = new Map()
-    ;[start, end].forEach((d) => months.set(toMonthStr(d), { year: d.getFullYear(), month: d.getMonth() + 1 }))
-
-    const results = await Promise.all(
-      [...months.values()].map((p) => api.get('/api/reports', { params: { mode: 'month', ...p, include_sales: 0 } }))
-    )
-
-    const map = {}
-    results.forEach((res) => {
-      const d = res.data || {}
-      const profit = {}
-      ;(d.monthly_profit ?? d.daily_profit ?? []).forEach((p) => {
-        profit[String(p.date || '').slice(0, 10)] = num(p.profit ?? p.total)
-      })
-      ;(d.monthly_sales ?? []).forEach((s) => {
-        const k = String(s.date || '').slice(0, 10)
-        map[k] = { total: num(s.total), profit: profit[k] ?? num(s.profit) }
-      })
-    })
-    return map
-  } catch (err) {
-    console.error('Week heatmap fetch error:', err)
-    return null
-  }
-}
-
-// Month / week / year buckets come straight from the main report.
+// Hour / day / month buckets come straight from the main report.
 const rowMap = computed(() => {
-  const len = mode.value === 'year' ? 7 : 10
+  const len = mode.value === 'year' ? 7 : mode.value === 'day' ? 5 : 10
   const m = {}
   chartRows.value.forEach((r) => { m[String(r.date).slice(0, len)] = r })
   return m
@@ -1793,6 +1802,7 @@ const heatCells = computed(() => {
         title: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
         total: r ? r.total : 0,
         profit: r ? r.profit : 0,
+        tx: r ? r.tx : 0,
         future: key > currentMonthValue,
         today: key === currentMonthValue,
       })
@@ -1813,17 +1823,36 @@ const heatCells = computed(() => {
         title: dt.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
         total: r ? r.total : 0,
         profit: r ? r.profit : 0,
+        tx: r ? r.tx : 0,
         future: key > currentDayValue,
         today: key === currentDayValue,
       })
     }
+  } else if (mode.value === 'day') {
+    // Day mode: one cell per hour, using the same hourly buckets as the line graph.
+    const isToday = selectedDay.value === currentDayValue
+    const nowHour = new Date().getHours()
+    const hourName = (h) => new Date(2000, 0, 1, h % 24).toLocaleTimeString('en-US', { hour: 'numeric' })
+    for (let h = 0; h < 24; h++) {
+      const key = `${pad(h)}:00`
+      const r = rowMap.value[key]
+      out.push({
+        key,
+        label: hourName(h),
+        title: `${hourName(h)} – ${hourName(h + 1)}`,
+        total: r ? r.total : 0,
+        profit: r ? r.profit : 0,
+        tx: r ? r.tx : 0,
+        future: isToday && h > nowHour,
+        today: isToday && h === nowHour,
+      })
+    }
   } else {
-    // Day and Week mode: a Sun–Sat strip. Week mode reads the main report; Day mode uses weekMap.
-    const isWeekMode = mode.value === 'week'
-    const anchor = isWeekMode ? selectedWeek.value : selectedDay.value
+    // Week mode: a Sun–Sat strip read from the main report.
+    const anchor = selectedWeek.value
     if (!anchor) return []
-    const start = isWeekMode ? new Date(`${anchor}T00:00:00`) : weekStartOf(anchor)
-    const source = isWeekMode ? rowMap.value : weekMap.value
+    const start = new Date(`${anchor}T00:00:00`)
+    const source = rowMap.value
     for (let i = 0; i < 7; i++) {
       const dt = new Date(start)
       dt.setDate(start.getDate() + i)
@@ -1836,6 +1865,7 @@ const heatCells = computed(() => {
         title: dt.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
         total: r ? r.total : 0,
         profit: r ? r.profit : 0,
+        tx: r ? r.tx : 0,
         future: key > currentDayValue,
         today: key === currentDayValue,
       })
@@ -1843,7 +1873,7 @@ const heatCells = computed(() => {
   }
 
   const metric = calMetric.value
-  const valueOf = (c) => (metric === 'profit' ? c.profit : c.total)
+  const valueOf = (c) => (metric === 'tx' ? c.tx : c.total)
   const max = Math.max(0, ...out.filter(Boolean).map(valueOf))
   return out.map((c) => {
     if (!c) return null
@@ -1854,28 +1884,45 @@ const heatCells = computed(() => {
 })
 
 const heatReal    = computed(() => heatCells.value.filter(Boolean))
-const heatHasData = computed(() => heatReal.value.some((c) => c.total > 0 || c.profit > 0))
-const heatSum     = computed(() => heatReal.value.reduce((a, c) => a + c.total, 0))
+const heatHasData = computed(() => heatReal.value.some((c) => c.total > 0 || c.profit > 0 || c.tx > 0))
+// Total of the active metric across the visible cells (denominator for "share of week / month / year").
+const heatSum     = computed(() => heatReal.value.reduce((a, c) => a + c.v, 0))
 
-const heatRangeWord = computed(() => ({ day: 'week', week: 'week', month: 'month', year: 'year' }[mode.value]))
-const heatCellWord  = computed(() => (mode.value === 'year' ? 'month' : 'day'))
+const heatMetricNoun = computed(() => (calMetric.value === 'tx' ? 'transactions' : 'sales'))
+const heatShort      = (c) => (calMetric.value === 'tx' ? formatNumber(c.v) : '₱' + compact(c.v))
+const heatValueText  = (c) => (calMetric.value === 'tx' ? `${formatNumber(c.v)} transactions` : '₱' + price(c.v))
+
+// The busiest cell by the active metric (gets the ★ marker).
+const heatPeakKey = computed(() => {
+  let best = null
+  for (const c of heatReal.value) {
+    if (c.v > 0 && (!best || c.v > best.v)) best = c
+  }
+  return best ? best.key : null
+})
+
+const heatRangeWord = computed(() => ({ day: 'day', week: 'week', month: 'month', year: 'year' }[mode.value]))
+const heatCellWord  = computed(() => ({ day: 'hour', week: 'day', month: 'day', year: 'month' }[mode.value]))
 
 const heatTitle = computed(() => {
-  if (mode.value === 'day' || mode.value === 'week') return 'Week at a glance'
-  return `${periodLabel.value || (mode.value === 'year' ? 'Year' : 'Month')} at a glance`
+  if (mode.value === 'day') return 'Busiest hours of the day'
+  if (mode.value === 'week') return 'Busiest day of the week'
+  if (mode.value === 'year') return `Busiest months of ${periodLabel.value || 'the year'}`
+  return `Busiest days in ${periodLabel.value || 'the month'}`
 })
 const heatSub = computed(() => {
-  const what = mode.value === 'year' ? 'months' : 'days'
-  const pick = `Hover or tap a ${heatCellWord.value} for its numbers.`
-  const anchor = mode.value === 'week' ? selectedWeek.value : mode.value === 'day' ? selectedDay.value : ''
-  if (anchor) {
-    const s = mode.value === 'week' ? new Date(`${anchor}T00:00:00`) : weekStartOf(anchor)
+  const what = { day: 'hours', week: 'days', month: 'days', year: 'months' }[mode.value]
+  const by = calMetric.value === 'tx' ? 'more transactions' : 'higher sales'
+  const art = mode.value === 'day' ? 'an' : 'a'
+  const pick = `Hover or tap ${art} ${heatCellWord.value} for its numbers.`
+  if (mode.value === 'week' && selectedWeek.value) {
+    const s = new Date(`${selectedWeek.value}T00:00:00`)
     const e = new Date(s)
     e.setDate(e.getDate() + 6)
     const f = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    return `${f(s)} – ${f(e)}. Darker ${what} sold more. ${pick}`
+    return `${f(s)} – ${f(e)}. Darker ${what} had ${by}. ${pick}`
   }
-  return `Darker ${what} sold more. ${pick}`
+  return `Darker ${what} had ${by}. ${pick}`
 })
 
 const heatActive = computed(() => {
@@ -1883,10 +1930,9 @@ const heatActive = computed(() => {
   if (!real.length) return null
   const byKey = (k) => real.find((c) => c.key === k)
   let c = heatSelKey.value ? byKey(heatSelKey.value) : null
-  if (!c && mode.value === 'day') c = byKey(selectedDay.value)
   if (!c) {
-    // Otherwise open on the strongest cell so the panel is never empty.
-    c = real.reduce((best, r) => (r.total > 0 && (!best || r.total > best.total) ? r : best), null)
+    // Otherwise open on the busiest cell so the panel is never empty.
+    c = real.reduce((best, r) => (r.v > 0 && (!best || r.v > best.v) ? r : best), null)
   }
   return c || real[0]
 })
@@ -1894,15 +1940,16 @@ const heatActive = computed(() => {
 const heatDetail = computed(() => {
   const c = heatActive.value
   if (!c) return null
-  const withSales = heatReal.value.filter((r) => r.total > 0)
-  const avg = withSales.length ? withSales.reduce((a, r) => a + r.total, 0) / withSales.length : 0
+  const active = heatReal.value.filter((r) => r.v > 0)
+  const avg = active.length ? active.reduce((a, r) => a + r.v, 0) / active.length : 0
   return {
     cell: c,
     cost: Math.max(c.total - c.profit, 0),
     margin: c.total ? ((c.profit / c.total) * 100).toFixed(1) : '0.0',
     profitPct: c.total ? Math.min(100, Math.max(0, (c.profit / c.total) * 100)) : 0,
-    share: heatSum.value ? ((c.total / heatSum.value) * 100).toFixed(1) : '0.0',
-    vsAvg: avg ? ((c.total - avg) / avg) * 100 : 0,
+    share: heatSum.value ? ((c.v / heatSum.value) * 100).toFixed(1) : '0.0',
+    vsAvg: avg ? ((c.v - avg) / avg) * 100 : 0,
+    isBusiest: active.length > 1 && heatPeakKey.value === c.key,
   }
 })
 
@@ -1910,7 +1957,8 @@ const heatDetail = computed(() => {
 const canOpenHeat = computed(() => {
   const c = heatActive.value
   if (!c || c.future) return false
-  return mode.value === 'day' ? c.key !== selectedDay.value : true
+  if (mode.value === 'day') return false // an hour has no report of its own
+  return true
 })
 const openHeatLabel = computed(() => (mode.value === 'year' ? 'Open this month' : 'Open this day'))
 
@@ -2121,17 +2169,18 @@ function statTip(key) {
 function heatTip(c) {
   if (!c) return { title: '' }
   const title = c.title
-  if (!(c.total > 0)) return { title, note: `No sales in this ${heatCellWord.value}.` }
-  const withSales = heatReal.value.filter((r) => r.total > 0)
-  const avg = withSales.length ? withSales.reduce((a, r) => a + r.total, 0) / withSales.length : 0
-  const vs = avg ? ((c.total - avg) / avg) * 100 : 0
-  const share = heatSum.value ? ((c.total / heatSum.value) * 100).toFixed(1) : '0.0'
+  if (!(c.total > 0 || c.tx > 0)) return { title, note: `No sales in this ${heatCellWord.value}.` }
+  const active = heatReal.value.filter((r) => r.v > 0)
+  const avg = active.length ? active.reduce((a, r) => a + r.v, 0) / active.length : 0
+  const vs = avg ? ((c.v - avg) / avg) * 100 : 0
+  const share = heatSum.value ? ((c.v / heatSum.value) * 100).toFixed(1) : '0.0'
   const margin = c.total ? ((c.profit / c.total) * 100).toFixed(1) : '0.0'
   return { title, rows: [
+    { k: 'Transactions', v: formatNumber(c.tx) },
     { k: 'Sales', v: peso(c.total) },
     { k: 'Profit', v: peso(c.profit), tone: 'good' },
     { k: 'Margin', v: margin + '%' },
-    { k: `Share of ${heatRangeWord.value}`, v: share + '%' },
+    { k: `Share of ${heatRangeWord.value} ${heatMetricNoun.value}`, v: share + '%' },
     { k: `Vs ${heatCellWord.value}ly average`, v: `${vs >= 0 ? '+' : ''}${vs.toFixed(1)}%`, tone: vs >= 0 ? 'good' : 'bad' },
   ] }
 }
@@ -2153,12 +2202,17 @@ function splitTip(kind) {
 }
 function mixTip(r) {
   if (!r) return { title: '' }
+  const shareLabel = { sales: 'Share of sales', qty: 'Share of units', profit: 'Share of profit' }[topMetric.value]
   const rows = [
-    { k: topMetric.value === 'qty' ? 'Share of units' : 'Share of sales', v: r.pct.toFixed(1) + '%' },
+    { k: shareLabel, v: r.pct.toFixed(1) + '%' },
     { k: 'Sales', v: peso(r.sales) },
   ]
+  if (r.profit !== null && r.profit !== undefined) {
+    rows.push({ k: 'Profit', v: peso(r.profit), tone: r.profit >= 0 ? 'good' : 'bad' })
+  }
   let note = ''
   if (!r.isOther) {
+    if (r.sales) rows.push({ k: 'Margin', v: ((r.profit / r.sales) * 100).toFixed(1) + '%' })
     rows.push({ k: 'Units sold', v: formatNumber(r.qty) })
     rows.push({ k: 'Average price', v: peso(r.qty ? r.sales / r.qty : 0) })
     if (r.category) rows.push({ k: 'Category', v: r.category })
@@ -2201,6 +2255,8 @@ function invTip(box) {
      { mode: 'week', start: 'YYYY-MM-DD', end: 'YYYY-MM-DD' }
    (start = Sunday, end = Saturday) and expects the same response shape
    as month mode, with monthly_sales / monthly_profit dated per day.
+   monthly_sales rows also carry `transactions`; top_selling rows carry
+   `total_profit`; the payload carries `service_profit`.
 ════════════════════════════════════════════════════════════ */
 // Guards against out-of-order responses when the person clicks quickly.
 let requestSeq = 0
@@ -2226,10 +2282,9 @@ async function loadReports() {
   try {
     const { params, label } = periodParams(0)
 
-    const [res, prev, week] = await Promise.all([
+    const [res, prev] = await Promise.all([
       api.get('/api/reports', { params: { ...params, include_sales: 0 } }),
       fetchPrevious(),
-      mode.value === 'day' ? fetchWeekMap() : Promise.resolve({}),
     ])
     if (seq !== requestSeq) return
 
@@ -2241,10 +2296,8 @@ async function loadReports() {
     monthlyProfitSeries.value  = d.monthly_profit    ?? d.daily_profit ?? []
     salesTotal.value           = num(d.monthly_total)
     serviceSales.value         = d.service_sales === undefined || d.service_sales === null ? null : num(d.service_sales)
+    serviceProfit.value        = num(d.service_profit)
     periodLabel.value          = d.selected_period?.label ?? label
-
-    weekMap.value    = week || {}
-    weekFailed.value = week === null
 
     previousTotal.value   = prev ? prev.total : null
     comparisonLabel.value = prev ? prev.label : ''
@@ -2316,19 +2369,20 @@ function buildReportText() {
   if (bestSeller.value) L.push(kv('Best seller', `${bestSeller.value.ProductName}  (${bestSeller.value.sharePct}% of sales)`))
 
   /* Top sellers */
-  L.push(...section(`Top selling items — by ${topMetric.value === 'sales' ? 'sales amount' : 'units sold'}`))
+  L.push(...section(`Top selling items — by ${rankedByText.value}`))
   if (rankedTopItems.value.length) {
     const items = rankedTopItems.value
     const nameW = Math.min(30, Math.max(7, ...items.map((i) => String(i.ProductName).length)))
     const qtyW  = Math.max(3, ...items.map((i) => formatNumber(i.total_quantity).length))
     const salW  = Math.max(5, ...items.map((i) => peso(i.total_sales).length))
-    L.push(`  ${'#'.padStart(3)}  ${'Product'.padEnd(nameW)}  ${'Qty'.padStart(qtyW)}  ${'Sales'.padStart(salW)}  Share`)
+    const proW  = Math.max(6, ...items.map((i) => peso(i.total_profit).length))
+    L.push(`  ${'#'.padStart(3)}  ${'Product'.padEnd(nameW)}  ${'Qty'.padStart(qtyW)}  ${'Sales'.padStart(salW)}  ${'Profit'.padStart(proW)}  Share`)
     items.forEach((i) => {
       L.push(
-        `  ${String(i.rank).padStart(3)}  ${clip(i.ProductName, nameW).padEnd(nameW)}  ${formatNumber(i.total_quantity).padStart(qtyW)}  ${peso(i.total_sales).padStart(salW)}  ${i.sharePct}%`
+        `  ${String(i.rank).padStart(3)}  ${clip(i.ProductName, nameW).padEnd(nameW)}  ${formatNumber(i.total_quantity).padStart(qtyW)}  ${peso(i.total_sales).padStart(salW)}  ${peso(i.total_profit).padStart(proW)}  ${i.sharePct}%`
       )
     })
-    L.push(`  ${' '.repeat(3)}  ${'TOTAL'.padEnd(nameW)}  ${formatNumber(topTotals.value.qty).padStart(qtyW)}  ${peso(topTotals.value.sales).padStart(salW)}`)
+    L.push(`  ${' '.repeat(3)}  ${'TOTAL'.padEnd(nameW)}  ${formatNumber(topTotals.value.qty).padStart(qtyW)}  ${peso(topTotals.value.sales).padStart(salW)}  ${peso(topTotals.value.profit).padStart(proW)}`)
   } else {
     L.push('  No sales recorded for this period.')
   }
@@ -2408,23 +2462,23 @@ function buildReportCSV() {
   rows.push(['Best seller', bestSeller.value ? bestSeller.value.ProductName : '', bestSeller.value ? `${bestSeller.value.sharePct}% of sales` : ''])
 
   /* Top sellers */
-  head(`Top selling items (ranked by ${topMetric.value === 'sales' ? 'sales amount' : 'units sold'})`)
-  rows.push(['Rank', 'Product', 'Category', 'Quantity sold', 'Avg. price (PHP)', 'Total sales (PHP)', 'Share (%)'])
+  head(`Top selling items (ranked by ${rankedByText.value})`)
+  rows.push(['Rank', 'Product', 'Category', 'Quantity sold', 'Avg. price (PHP)', 'Total sales (PHP)', 'Profit (PHP)', 'Share (%)'])
   rankedTopItems.value.forEach((i) => {
-    rows.push([i.rank, i.ProductName, i.CategoryName || '', i.total_quantity, round2(avgPrice(i)), round2(i.total_sales), Number(i.sharePct)])
+    rows.push([i.rank, i.ProductName, i.CategoryName || '', i.total_quantity, round2(avgPrice(i)), round2(i.total_sales), round2(i.total_profit), Number(i.sharePct)])
   })
   if (rankedTopItems.value.length) {
-    rows.push(['', 'TOTAL', '', topTotals.value.qty, '', round2(topTotals.value.sales), ''])
+    rows.push(['', 'TOTAL', '', topTotals.value.qty, '', round2(topTotals.value.sales), round2(topTotals.value.profit), ''])
   }
 
   /* Breakdown */
   head(`${seriesWord.value} breakdown`)
-  rows.push([bucketWord.value, 'Sales (PHP)', 'Profit (PHP)', 'Margin (%)', 'Share of period sales (%)'])
+  rows.push([bucketWord.value, 'Sales (PHP)', 'Profit (PHP)', 'Transactions', 'Margin (%)', 'Share of period sales (%)'])
   chartRows.value.forEach((r) => {
-    rows.push([formatPointTitle(r.date), round2(r.total), round2(r.profit), Number(rowMargin(r)), Number(rowShare(r))])
+    rows.push([formatPointTitle(r.date), round2(r.total), round2(r.profit), Math.round(r.tx), Number(rowMargin(r)), Number(rowShare(r))])
   })
   if (chartRows.value.length) {
-    rows.push(['TOTAL', round2(salesTotal.value), round2(profitTotal.value), Number(profitMarginPct.value), 100])
+    rows.push(['TOTAL', round2(salesTotal.value), round2(profitTotal.value), Math.round(txCount.value), Number(profitMarginPct.value), 100])
   }
 
   /* Inventory */
@@ -2513,10 +2567,11 @@ function chartColors(forceLight = false) {
   return {
     grid:     dark ? 'rgba(255,255,255,0.05)' : forceLight ? '#E2E8F0' : 'rgba(168,162,158,0.12)',
     tick:     dark ? '#8B90A8'                : forceLight ? '#475569' : '#78716C',
-    ttBg:     dark ? '#1E2130'                : '#1C1917',
-    ttTitle:  dark ? '#8B90A8'                : '#A8A29E',
-    ttBody:   dark ? '#E8EAF0'                : '#F5F5F4',
-    ttBorder: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.06)',
+    // Tooltip: white card in light mode, dark card in dark mode
+    ttBg:     dark ? '#1E2130'                : '#FFFFFF',
+    ttTitle:  dark ? '#8B90A8'                : '#64748B',
+    ttBody:   dark ? '#E8EAF0'                : '#0F172A',
+    ttBorder: dark ? 'rgba(255,255,255,0.08)' : '#CBD5E1',
   }
 }
 
@@ -3208,13 +3263,15 @@ html[data-theme="dark"] .reports {
 }
 .chart-empty i { font-size: 22px; color: var(--rp-text-faint); }
 
-/* ── HEATMAP ── */
-.heat-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+/* ── HEATMAP (busiest days / months) ── */
+.heat-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 22px; align-items: start; }
 
-.heat { --lv: 234,88,12; display: grid; gap: 7px; min-width: 0; }
-.heat--profit { --lv: 16,185,129; }
+.heat { --lv: 234,88,12; display: grid; gap: 6px; min-width: 0; }
+/* Transactions view is blue so it reads as a different measure from sales (orange) */
+.heat--tx { --lv: 59,130,246; }
 .heat--month, .heat--day { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.heat--year { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.heat--year { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.heat--hour { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
 
 .heat-dow { text-align: center; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--rp-text-faint); padding-bottom: 4px; }
 
@@ -3226,17 +3283,22 @@ html[data-theme="dark"] .reports {
   color: var(--rp-text-secondary);
   transition: transform .15s var(--rp-ease), border-color .15s ease, box-shadow .15s ease, background-color .3s ease;
 }
-.heat--month .heat-cell { aspect-ratio: 1.15; }
-.heat--day .heat-cell   { min-height: 124px; gap: 4px; }
-.heat--year .heat-cell  { min-height: 88px; gap: 4px; }
+.heat--month .heat-cell { aspect-ratio: 1.4; }
+.heat--day .heat-cell   { min-height: 96px; gap: 3px; }
+.heat--year .heat-cell  { min-height: 70px; gap: 3px; }
+.heat--hour .heat-cell  { min-height: 62px; gap: 3px; }
 .heat-cell:disabled { cursor: default; opacity: .35; }
 .heat-cell--today { border-color: var(--rp-text-secondary); }
 .heat-cell--sel { border-color: rgb(var(--lv)); box-shadow: 0 0 0 3px rgba(var(--lv), .28); color: var(--rp-text-primary); }
+/* ★ marks the busiest cell for the metric that is selected */
+.heat-cell--peak { position: relative; }
+.heat-cell--peak::after { content: '★'; position: absolute; top: 3px; right: 5px; font-size: 10px; line-height: 1; color: currentColor; }
 
 .hc-dow   { font-size: 11px; font-weight: 600; letter-spacing: .03em; opacity: .85; }
-.hc-num   { font-size: 24px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
-.hc-month { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
-.hc-amt   { font-size: 11.5px; font-weight: 600; opacity: .9; white-space: nowrap; }
+.hc-num   { font-size: 20px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.hc-month { font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
+.hc-hour  { font-size: 12px; font-weight: 700; letter-spacing: -.01em; }
+.hc-amt   { font-size: 11px; font-weight: 600; opacity: .9; white-space: nowrap; }
 
 .lv0 { background: var(--rp-surface-sunken); }
 .lv1 { background: rgba(var(--lv), .16); }
@@ -3249,11 +3311,11 @@ html[data-theme="dark"] .reports {
 .heat-scale span:first-child { margin-right: 3px; }
 .heat-scale span:last-child { margin-left: 3px; }
 
-.heat-day { padding: 20px; background: var(--rp-surface-raised); border: 1px solid var(--rp-border); border-radius: 16px; min-width: 0; }
+.heat-day { padding: 16px; background: var(--rp-surface-raised); border: 1px solid var(--rp-border); border-radius: 16px; min-width: 0; }
 .heat-day-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 28px; }
 .heat-day-title { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--rp-text-primary); }
 .heat-day-head .link-btn { margin-left: auto; font-size: 12.5px; }
-.heat-day-value { margin: 8px 0 14px; font-size: 30px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.035em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.heat-day-value { margin: 6px 0 12px; font-size: 24px; font-weight: 800; color: var(--rp-text-primary); letter-spacing: -.035em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .heat-muted { margin: 0; font-size: 12.5px; color: var(--rp-text-muted); }
 
 .split-bar { display: flex; gap: 3px; height: 10px; border-radius: 10px; overflow: hidden; }
@@ -3266,11 +3328,11 @@ html[data-theme="dark"] .reports {
 .sl--profit { background: var(--rp-green); }
 .sl--cost { background: var(--rp-accent); }
 
-.facts { margin: 16px 0 0; border-top: 1px solid var(--rp-border); }
-.facts > div { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--rp-border); }
+.facts { margin: 12px 0 0; border-top: 1px solid var(--rp-border); }
+.facts > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--rp-border); }
 .facts > div:last-child { border-bottom: none; padding-bottom: 0; }
-.facts dt { font-size: 12.5px; color: var(--rp-text-muted); }
-.facts dd { margin: 0; font-size: 13px; font-weight: 700; color: var(--rp-text-primary); font-variant-numeric: tabular-nums; text-align: right; }
+.facts dt { font-size: 12px; color: var(--rp-text-muted); }
+.facts dd { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--rp-text-primary); font-variant-numeric: tabular-nums; text-align: right; }
 .facts dd.pos { color: var(--rp-green); }
 .facts dd.neg { color: var(--rp-red); }
 
@@ -3360,32 +3422,59 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
 .coverage-track { height: 6px; border-radius: 6px; background: var(--rp-surface-sunken); overflow: hidden; }
 .coverage-fill { height: 100%; border-radius: 6px; background: var(--rp-green); transition: width .6s ease; }
 
-/* ── SHARED TOOLTIP ── */
+/* ── shared tooltip (light by default, dark in dark mode) ── */
 .tip {
+  /* light mode tokens */
+  --tip-bg: rgba(255, 255, 255, .98);
+  --tip-text: #0f172a;
+  --tip-label: #64748b;
+  --tip-note: #475569;
+  --tip-border: var(--c-border-strong, #e2e8f0);
+  --tip-divider: rgba(15, 23, 42, .09);
+  --tip-dot-ring: rgba(15, 23, 42, .12);
+  --tip-good: #059669;
+  --tip-warn: #b45309;
+  --tip-bad: #e11d48;
+  --tip-shadow: 0 12px 32px -10px rgba(15, 23, 42, .28), 0 2px 6px rgba(15, 23, 42, .08);
+
   position: fixed; z-index: 80; pointer-events: none;
   width: max-content; min-width: 150px; max-width: min(250px, calc(100vw - 16px));
   padding: 10px 12px 11px; border-radius: 12px;
-  background: rgba(15, 23, 42, .96); color: #f8fafc;
-  border: 1px solid rgba(255,255,255,.08);
-  box-shadow: 0 12px 32px -8px rgba(2,6,23,.5), 0 2px 6px rgba(2,6,23,.25);
+  background: var(--tip-bg); color: var(--tip-text);
+  border: 1px solid var(--tip-border);
+  box-shadow: var(--tip-shadow);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   opacity: 0; transform: translate(-50%, -100%) translateY(4px);
   transition: opacity .14s ease, transform .14s ease;
   font-size: 12px; line-height: 1.4;
 }
+/* dark mode tokens */
+html[data-theme="dark"] .tip {
+  --tip-bg: rgba(15, 23, 42, .96);
+  --tip-text: #f8fafc;
+  --tip-label: #94a3b8;
+  --tip-note: #cbd5e1;
+  --tip-border: rgba(255, 255, 255, .08);
+  --tip-divider: rgba(255, 255, 255, .12);
+  --tip-dot-ring: rgba(255, 255, 255, .14);
+  --tip-good: #34d399;
+  --tip-warn: #fbbf24;
+  --tip-bad: #fb7185;
+  --tip-shadow: 0 12px 32px -8px rgba(2, 6, 23, .5), 0 2px 6px rgba(2, 6, 23, .25);
+}
 .tip--on { opacity: 1; transform: translate(-50%, -100%); }
 .tip--below { transform: translate(-50%, 0) translateY(-4px); }
 .tip--below.tip--on { transform: translate(-50%, 0); }
 .tip-title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; font-weight: 700; letter-spacing: -.005em; overflow-wrap: anywhere; }
-.tip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(255,255,255,.14); }
-.tip-rows { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; gap: 5px; }
+.tip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px var(--tip-dot-ring); }
+.tip-rows { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--tip-divider); display: flex; flex-direction: column; gap: 5px; }
 .tip-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-.tip-row dt { color: #94a3b8; font-weight: 500; }
+.tip-row dt { color: var(--tip-label); font-weight: 500; }
 .tip-row dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
-.tip-good { color: #34d399; }
-.tip-warn { color: #fbbf24; }
-.tip-bad { color: #fb7185; }
-.tip-note { margin: 8px 0 0; color: #cbd5e1; font-size: 11.5px; line-height: 1.45; }
+.tip-good { color: var(--tip-good); }
+.tip-warn { color: var(--tip-warn); }
+.tip-bad { color: var(--tip-bad); }
+.tip-note { margin: 8px 0 0; color: var(--tip-note); font-size: 11.5px; line-height: 1.45; }
 .tip-title + .tip-note { margin-top: 5px; }
 
 /* ── Hover effects: only on devices that really hover (no sticky hover after a tap) ── */
@@ -3430,9 +3519,10 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
 @media (max-width: 860px) {
   .heat-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   /* Stacked, the calendar would otherwise get huge cells */
-  .heat--month .heat-cell { aspect-ratio: auto; min-height: 52px; }
-  .heat--day .heat-cell { min-height: 100px; }
-  .heat--year .heat-cell { min-height: 76px; }
+  .heat--month .heat-cell { aspect-ratio: auto; min-height: 44px; }
+  .heat--day .heat-cell { min-height: 82px; }
+  .heat--year .heat-cell { min-height: 62px; }
+  .heat--hour .heat-cell { min-height: 54px; }
 }
 
 /* ── Phone ──
@@ -3542,12 +3632,15 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
   /* Heatmap */
   .heat { gap: 5px; }
   .heat-cell { border-radius: 9px; }
-  .heat--day .heat-cell { min-height: 92px; }
-  .hc-num { font-size: 18px; }
+  .heat--day .heat-cell { min-height: 76px; }
+  .hc-num { font-size: 16px; }
   .hc-amt { font-size: 10px; }
   .heat--year { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .heat-day { padding: 16px 14px; }
-  .heat-day-value { font-size: 26px; }
+  .heat--hour { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .heat--hour .heat-cell { min-height: 50px; }
+  .hc-hour { font-size: 12px; }
+  .heat-day { padding: 14px 12px; }
+  .heat-day-value { font-size: 21px; }
   .heat-day-head .link-btn { padding: 8px 10px; }
 
   /* Mix + inventory */
@@ -3580,7 +3673,7 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
   .heat--day .hc-dow { width: 36px; text-align: left; font-size: 12px; }
   .heat--day .hc-num { font-size: 18px; min-width: 26px; }
   .heat--day .hc-amt { margin-left: auto; font-size: 13px; }
-  .heat--year .heat-cell { min-height: 70px; }
+  .heat--year .heat-cell { min-height: 58px; }
   .mix-amt { font-size: 11.5px; }
 }
 
@@ -3592,7 +3685,7 @@ a.inv-link:hover .inv-go { transform: translateX(3px); color: var(--rp-accent); 
   .stat:not(.stat--hero) { padding: 12px; }
   .seg-btn { font-size: 12.5px; }
   .picker-trigger { font-size: 13px; }
-  .heat-day-value { font-size: 23px; }
+  .heat-day-value { font-size: 19px; }
 }
 
 /* ── Landscape phones: keep the sticky bar short so content still fits ── */

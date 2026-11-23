@@ -1280,6 +1280,8 @@ function normalizeProduct(p) {
     image: p.ImageURL ?? p.image ?? null,
     category: p.CategoryID ?? p.category ?? null,
     pricingType: pricingTypeRaw === 'sqm' ? 'sqm' : 'piece',
+    // Only adjustable items get the "Adjust line" button.
+    isAdjustable: !!(p.IsAdjustable ?? p.isAdjustable),
     minDimension: Number(p.MinDimension ?? MIN_DIM),
     maxDimension: Number(p.MaxDimension ?? MAX_DIM),
   }
@@ -2436,7 +2438,8 @@ function canAdjustLine(item) {
   if (item.remnantId || item.origPrice != null) return true
   if (item.variantId == null) return false
   const product = products.value.find(p => p.id === item.id)
-  const variant = product?.variants?.find(v => v.id === item.variantId)
+  if (!product?.isAdjustable) return false
+  const variant = product.variants?.find(v => v.id === item.variantId)
   return hasSpecLabel(variant?.label)
 }
 

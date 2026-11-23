@@ -25,6 +25,7 @@ class Product extends Model
         'ProductName',
         'Unit',
         'IsReturnable',
+        'IsAdjustable', // only adjustable items get "Adjust line" at the POS
 
         // CLASSIFICATION
         'CategoryID',
@@ -58,6 +59,15 @@ class Product extends Model
 
         // IMAGE
         'Product_Image',
+    ];
+
+    /**
+     * ============================
+     * ATTRIBUTE CASTS
+     * ============================
+     */
+    protected $casts = [
+        'IsAdjustable' => 'boolean',
     ];
 
     /**
@@ -127,10 +137,9 @@ class Product extends Model
         );
     }
 
-     public function variants()
+    public function variants()
     {
         return $this->hasMany(ProductVariant::class, 'ProductID', 'ProductID')
                     ->orderBy('VariantID');
     }
 }
-

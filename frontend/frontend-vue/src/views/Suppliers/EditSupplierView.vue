@@ -192,11 +192,11 @@
             </p>
 
             <div class="form-actions">
-              <RouterLink to="/suppliers" class="btn btn--ghost">Cancel</RouterLink>
-              <button type="button" class="btn btn--ghost" :disabled="!isDirty || saving" @click="resetForm">
+              <RouterLink to="/suppliers" class="btn btn--ghost btn--cancel">Cancel</RouterLink>
+              <button type="button" class="btn btn--ghost btn--reset" :disabled="!isDirty || saving" @click="resetForm">
                 <i class="fa-solid fa-rotate-left"></i> Reset
               </button>
-              <button type="submit" class="btn btn--primary" :disabled="!isDirty || saving" :title="isMac ? '⌘S' : 'Ctrl+S'">
+              <button type="submit" class="btn btn--primary btn--save" :disabled="!isDirty || saving" :title="isMac ? '⌘S' : 'Ctrl+S'">
                 <i class="fa-solid" :class="saving ? 'fa-spinner fa-spin' : 'fa-floppy-disk'"></i>
                 {{ saving ? 'Saving…' : 'Update Supplier' }}
               </button>
@@ -466,24 +466,31 @@ onBeforeUnmount(() => {
   --s-amber:          #f59e0b;
   --radius: 16px;
 
-  /* ── SPACE TUNING (identical in Add Supplier and Edit Supplier) ──
+  /* ── SPACE TUNING (same values as Settings, Suppliers and Add Supplier) ──
      --bleed-*  : how much of the app shell's own padding this page reclaims
                   on desktop (top / sides / bottom). Lower a value if content
                   ever touches the sidebar or top bar.
+     --bleed-*m : the same for tablet and phone (below 1001px). Lower them
+                  (or use 0px) if content gets cut off at the screen edge.
      --fit-offset : total height of everything ABOVE and BELOW the page
                   (top bar + shell padding − the bleeds). The page is exactly
                   100vh minus this, so the form fits the screen with no page
                   scrollbar. If a scrollbar appears, raise it by a few px;
-                  if there's a gap at the bottom, lower it. */
-  --bleed-x: 30px;
-  --bleed-y: 26px;
-  --bleed-b: 26px;
-  --fit-offset: 84px;
+                  if there's a gap at the bottom, lower it.
+                  (Was 84px with the old 26px bleeds; the bigger 30px bleeds
+                  give back 8px, so it is now 76px.) */
+  --bleed-x: 32px;
+  --bleed-y: 30px;
+  --bleed-b: 30px;
+  --bleed-xm: 12px;
+  --bleed-ym: 12px;
+  --bleed-bm: 12px;
+  --fit-offset: 76px;
   --s-gap: 12px;
 
   box-sizing: border-box;
   background: var(--s-bg);
-  padding: 10px 20px 14px;
+  padding: 10px 16px 14px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--s-gap);
   transition: background-color .22s;
@@ -608,7 +615,7 @@ html[data-theme="dark"] .field-error { color: #F87171; }
   display: inline-flex; align-items: center; gap: 7px;
   font-size: 13px; font-weight: 600; font-family: inherit;
   border-radius: 10px; padding: 7px 14px; cursor: pointer;
-  border: 1.5px solid transparent; text-decoration: none;
+  border: 1.5px solid transparent; text-decoration: none; white-space: nowrap;
   transition: background-color .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s, filter .18s;
 }
 .btn:active:not(:disabled) { transform: scale(.98); }
@@ -709,6 +716,10 @@ kbd {
 @media (min-width: 1001px) {
   .sup-form-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) calc(-1 * var(--bleed-b)); }
 }
+/* Tablet and phone: pull out into the shell's smaller padding as well */
+@media (max-width: 1000px) {
+  .sup-form-page { margin: calc(-1 * var(--bleed-ym)) calc(-1 * var(--bleed-xm)) calc(-1 * var(--bleed-bm)); }
+}
 
 /* Fit-to-screen mode: two columns and enough height → no page scrolling.
    The form card stretches to the page height and the Address box takes
@@ -726,18 +737,28 @@ kbd {
   .side-card--grow { overflow: visible; }
 }
 @media (max-width: 900px) {
-  .sup-form-page { padding: 12px 14px 24px; --s-gap: 14px; }
+  .sup-form-page { padding: 10px 12px 20px; --s-gap: 12px; }
 }
 @media (max-width: 700px) {
-  .sup-form-page { padding: 14px 16px 32px; }
-  .page-title { font-size: 22px; }
+  .sup-form-page { padding: 8px 10px 20px; --s-gap: 10px; }
+  .page-title { font-size: 20px; }
+  .page-sub { font-size: 12.5px; }
   .form-grid { grid-template-columns: 1fr; }
   .form-textarea { min-height: 110px; }
-  .form-card-header, .form-body, .form-footer { padding-left: 18px; padding-right: 18px; }
-  .form-footer { flex-direction: column; align-items: stretch; }
+  .form-card-header { padding: 12px 14px; }
+  .form-body { padding: 14px; }
+  .form-footer { padding: 12px 14px; flex-direction: column; align-items: stretch; }
   .form-status { justify-content: center; }
-  .form-actions { flex-direction: column-reverse; align-items: stretch; margin-left: 0; }
-  .btn { justify-content: center; }
+  .side-card { padding: 12px 14px; }
+
+  /* 16px stops iOS from zooming the page when a field is focused */
+  .form-input { font-size: 16px; height: 44px; }
+  .form-textarea { height: auto; }
+
+  /* Buttons: Update on top, Cancel + Reset side by side below */
+  .form-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-left: 0; }
+  .btn { justify-content: center; height: 42px; }
+  .btn--save { grid-column: 1 / -1; order: -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

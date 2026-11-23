@@ -94,23 +94,15 @@ class SaleController extends Controller
 
             DB::beginTransaction();
 
-            // 1. Find or create the customer
-            $customer = null;
-            if ($request->filled('customer_id')) {
-                $customer = Customer::find($request->customer_id);
-            }
-            if (!$customer) {
-                $name = trim($request->customer_name);
-                $customer = Customer::firstOrCreate(
-                    ['CustomerCode' => $name],
-                    ['CustomerCode' => $name]
-                );
-            }
+            // 1. Find or create the customer (null = walk-in, not tracked).
+            //    A typed name is saved in CustomerName and found again on the next sale.
+            $customerId = Customer::resolveForSale($request->customer_id, $request->customer_name);
+            $customer   = $customerId ? Customer::find($customerId) : null;
 
             // 2. Sale header
             $sale = Sale::create([
                 'SaleDate'       => now(),
-                'CustomerID'     => $customer->CustomerID,
+                'CustomerID'     => $customerId,
                 'TotalAmount'    => $request->total_amount,
                 'DiscountAmount' => $request->discount_amount ?? 0,
                 'AmountPaid'     => $request->amount_paid,
@@ -183,7 +175,7 @@ class SaleController extends Controller
 
             SaleService::record($sale->SaleID, $request->services ?? []);
 
-            $this->notifySale($sale, $customer);
+            $this->notifySale($sale, $customer, (string) $request->customer_name);
 
             DB::commit();
 
@@ -223,12 +215,15 @@ class SaleController extends Controller
         }
     }
 
-    private function notifySale(Sale $sale, Customer $customer): void
+    /** Notification for a new sale. $customer is null for walk-ins (not tracked). */
+    private function notifySale(Sale $sale, ?Customer $customer, string $typedName = ''): void
     {
+        $who = $customer?->CustomerName ?: (trim($typedName) ?: 'Walk-in');
+
         Notification::create([
             'type'            => 'sale',
             'title'           => 'New sale',
-            'description'     => "Sale #{$sale->SaleID} for {$customer->CustomerCode} — ₱" . number_format($sale->TotalAmount, 2),
+            'description'     => "Sale #{$sale->SaleID} for {$who} — ₱" . number_format($sale->TotalAmount, 2),
             'notifiable_type' => Sale::class,
             'notifiable_id'   => $sale->SaleID,
             'user_id'         => null,
@@ -434,7 +429,7 @@ class SaleController extends Controller
                 return [
                     'SaleID'        => $sale->SaleID,
                     'SaleDate'      => $sale->SaleDate->format('M d, Y'),
-                    'CustomerName'  => $sale->customer->CustomerCode ?? 'Walk-in',
+                    'CustomerName'  => $sale->customer->CustomerName ?? 'Walk-in',
                     'TotalAmount'   => $sale->TotalAmount,
                     'WorkerPayout'  => round($payouts[$sale->SaleID] ?? 0, 2),
                     'PaymentMethod' => $sale->PaymentMethod ?? 'Cash',
@@ -474,7 +469,9 @@ class SaleController extends Controller
 
         return response()->json($data);
     }
-     /* PUBLIC: BEST SELLERS (login page)
+
+    /**
+     * PUBLIC: BEST SELLERS (login page)
      * Returns the SAFE public shape (no cost price, sizes included).
      * Only filters on `sales.Status` when that column exists.
      */

@@ -719,16 +719,22 @@ onBeforeUnmount(() => {
   --radius:           16px;
   --s-ease:           cubic-bezier(.16, 1, .3, 1);
 
-  /* ── SPACE TUNING (same values as Home, Reports and Inventory Logs) ──
+  /* ── SPACE TUNING (same values as Settings, Home, Reports and Inventory Logs) ──
      The app shell (Layout.vue) adds roughly 64px of its own padding around
      every page. --bleed-* lets this page reclaim part of it on desktop.
      Raise a value to push the content closer to the edge, lower it (or set
      it to 0px) if content ever touches the sidebar or top bar.
      --bleed-b reclaims the shell's bottom padding, which is what stops a
      short page from showing a scrollbar. */
-  --bleed-x: 30px;
-  --bleed-y: 26px;
-  --bleed-b: 26px;
+  --bleed-x: 32px;
+  --bleed-y: 30px;
+  --bleed-b: 30px;
+  /* Same idea for tablet and phone (below 1001px). The shell pads those screens
+     too, so the page pulls out into that padding. Raise these to use more space,
+     lower them (or use 0px) if content gets cut off at the screen edge. */
+  --bleed-xm: 12px;
+  --bleed-ym: 12px;
+  --bleed-bm: 12px;
   /* --sticky-top: where the search bar sticks. The app shell pads the scrolling area,
      and sticky elements stick at the inside edge of that padding, which left a gap
      above the bar. The page measures that padding on load / resize and cancels it
@@ -736,13 +742,13 @@ onBeforeUnmount(() => {
      --toolbar-h: height of the search/selection bar; the column titles stick right below it. */
   --sticky-top: -32px;
   --toolbar-h: 67px;
-  --s-gap: 16px;
+  --s-gap: 14px;
 
   /* Height follows the content: no min-height, so a short list never forces a scrollbar.
      border-box keeps the padding inside the width. */
   box-sizing: border-box;
   background: var(--s-bg);
-  padding: 16px 24px 24px;
+  padding: 12px 16px 20px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--s-gap);
   transition: background-color .22s ease;
@@ -758,6 +764,7 @@ onBeforeUnmount(() => {
   display: flex; align-items: flex-end;
   justify-content: space-between; gap: 14px; flex-wrap: wrap;
 }
+.page-heading { min-width: 0; }
 .page-title {
   font-size: 26px; font-weight: 800; color: var(--s-text-primary);
   letter-spacing: -.03em; margin: 0; transition: color .22s;
@@ -769,7 +776,7 @@ onBeforeUnmount(() => {
   display: inline-flex; align-items: center; gap: 7px;
   font-size: 13px; font-weight: 600; font-family: inherit;
   border-radius: 11px; padding: 10px 18px; cursor: pointer;
-  border: 1.5px solid transparent; text-decoration: none;
+  border: 1.5px solid transparent; text-decoration: none; white-space: nowrap;
   transition: background .18s, border-color .18s, color .18s, box-shadow .18s, transform .15s, filter .18s;
 }
 .btn:active { transform: scale(.98); }
@@ -968,7 +975,8 @@ html[data-theme="dark"] .alert--error   { background: rgba(244,63,94,.14);  colo
   overflow: hidden;
   line-height: 1.45;
   overflow-wrap: anywhere;
-}.cell-empty { color: var(--s-text-faint); font-size: 13px; }
+}
+.cell-empty { color: var(--s-text-faint); font-size: 13px; }
 
 /* ── ROW ACTIONS (direct buttons, no menu) ── */
 .td-actions { text-align: right; }
@@ -1035,10 +1043,14 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
 .pg-btn--nav { padding: 0 12px; }
 .pg-gap { min-width: 22px; text-align: center; font-size: 13px; color: var(--s-text-faint); user-select: none; }
 
-/* ── RESPONSIVE (same breakpoints as Home, Reports and Inventory Logs) ──
+/* ── RESPONSIVE (same breakpoints as Settings, Home, Reports and Inventory Logs) ──
    Desktop only: pull the page outward into the shell's padding (top, left, right, bottom). */
 @media (min-width: 1001px) {
   .sup-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) calc(-1 * var(--bleed-b)); }
+}
+/* Tablet and phone: pull out into the shell's smaller padding as well */
+@media (max-width: 1000px) {
+  .sup-page { margin: calc(-1 * var(--bleed-ym)) calc(-1 * var(--bleed-xm)) calc(-1 * var(--bleed-bm)); }
 }
 /* Sticky: the search / selection bar and the column titles stay visible while
    the page scrolls. Desktop and tablet only (phones show rows as cards). */
@@ -1066,19 +1078,20 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
   .row-actions { gap: 6px; }
 }
 @media (max-width: 900px) {
-  .sup-page { padding: 12px 14px 24px; --s-gap: 14px; }
+  .sup-page { padding: 10px 12px 20px; --s-gap: 12px; }
 
   .mobile-select { display: inline-flex; }
+  .toolbar { padding: 12px; }
 
   /* Each row becomes a labelled card */
   .data-table, .data-table tbody, .data-table tr, .data-table td { display: block; width: 100%; }
   .data-table { table-layout: auto; }
   .data-table thead { display: none; }
-  .data-table tbody { padding: 12px; }
+  .data-table tbody { padding: 10px; }
   .data-table tbody tr:not(.row-empty) {
     position: relative;
     border: 1px solid var(--s-border); border-radius: 14px;
-    padding: 6px 4px; margin-bottom: 12px; background: var(--s-surface);
+    padding: 6px 4px; margin-bottom: 10px; background: var(--s-surface);
   }
   .data-table tbody tr.row--selected:not(.row-empty) { border-color: var(--s-accent); background: var(--s-accent-soft); }
   .data-table tbody tr:last-child { margin-bottom: 0; }
@@ -1107,14 +1120,22 @@ html[data-theme="dark"] .row-btn--delete { color: #F87171; }
   .sk--btn { margin-left: 0; width: 100%; }
 }
 @media (max-width: 700px) {
-  .sup-page { padding: 16px 16px 32px; }
-  .page-header { flex-direction: column; align-items: stretch; }
-  .page-header .btn { justify-content: center; }
+  .sup-page { padding: 8px 10px 20px; --s-gap: 10px; }
+
+  /* Header stays on one row: title left, compact Add button right */
+  .page-header { flex-wrap: nowrap; align-items: center; gap: 10px; }
+  .page-title { font-size: 22px; }
+  .page-sub { font-size: 13px; margin-top: 3px; }
+  .page-header .btn { flex-shrink: 0; padding: 9px 14px; justify-content: center; }
+
+  .toolbar { padding: 10px; }
   .search { max-width: none; flex-basis: 100%; }
+  .search-input { height: 42px; font-size: 16px; } /* 16px stops iOS from zooming on focus */
   .toolbar-right { width: 100%; justify-content: space-between; margin-left: 0; }
   .selbar-actions { width: 100%; margin-left: 0; }
   .selbar-actions .btn { flex: 1; justify-content: center; }
-  .pager { flex-direction: column; align-items: stretch; text-align: center; }
+  .data-table tbody { padding: 8px; }
+  .pager { flex-direction: column; align-items: stretch; text-align: center; padding: 10px 12px; }
   .pager-controls { justify-content: center; }
   .pg-nav-text { display: none; }
 }
@@ -1338,5 +1359,12 @@ html[data-theme="dark"] .del-modal-btn--confirm {
 .modal-fade-enter-from, .modal-fade-leave-to {
   opacity: 0;
   transform: scale(.95) translateY(10px);
+}
+
+/* Phones: a little less padding so the dialog uses the screen */
+@media (max-width: 600px) {
+  .modal-backdrop { padding: 12px; }
+  .del-modal-body { padding: 16px 20px 20px; }
+  .del-modal-footer { padding: 0 20px 20px; }
 }
 </style>

@@ -80,7 +80,7 @@
               <div class="form-card-icon form-card-icon--blue"><i class="fa-solid fa-tag"></i></div>
               <div>
                 <h2 class="form-card-title">Basic Information</h2>
-                <p class="form-card-sub">Name, SKU, barcode, unit and return policy.</p>
+                <p class="form-card-sub">Name, SKU, barcode, unit and price adjustment.</p>
               </div>
             </div>
             <div class="form-card-body">
@@ -129,21 +129,21 @@
                 </div>
               </div>
 
-              <div class="toggle-row toggle-row--card" @click="form.IsReturnable = !form.IsReturnable">
+              <div class="toggle-row toggle-row--card" @click="form.IsAdjustable = !form.IsAdjustable">
                 <button
                   type="button"
                   role="switch"
                   class="toggle-track"
-                  :class="{ 'toggle-track--on': form.IsReturnable }"
-                  :aria-checked="form.IsReturnable"
-                  aria-label="Returnable item"
-                  @click.stop="form.IsReturnable = !form.IsReturnable"
+                  :class="{ 'toggle-track--on': form.IsAdjustable }"
+                  :aria-checked="form.IsAdjustable"
+                  aria-label="Adjustable item"
+                  @click.stop="form.IsAdjustable = !form.IsAdjustable"
                 >
-                  <span class="toggle-thumb" :class="{ 'toggle-thumb--on': form.IsReturnable }"></span>
+                  <span class="toggle-thumb" :class="{ 'toggle-thumb--on': form.IsAdjustable }"></span>
                 </button>
                 <div>
-                  <p class="toggle-label">Returnable Item</p>
-                  <p class="toggle-sub">Allow this product to be returned after sale.</p>
+                  <p class="toggle-label">Adjustable Item</p>
+                  <p class="toggle-sub">Lets the cashier use "Adjust line" at the POS (cut piece or custom price). Leave off if this item can't be adjusted.</p>
                 </div>
               </div>
             </div>
@@ -504,8 +504,9 @@ const fileInput = ref(null)
 
 // Price, dimension AND stock fields now live per size in the
 // "Sizes, Prices & Stock" section (variants).
+// IsAdjustable: only adjustable items get the "Adjust line" button at the POS.
 const form = ref({
-  ProductName: '', SKU: '', Barcode: '', Unit: '', IsReturnable: false,
+  ProductName: '', SKU: '', Barcode: '', Unit: '', IsAdjustable: false,
   CategoryID: '', SupplierID: '', Brand: '', Description: '',
   Material: '', ProfileType: '', Color: '',
 })
@@ -764,7 +765,7 @@ async function loadData() {
     Object.assign(form.value, {
       ProductName: p.data.ProductName, SKU: p.data.SKU ?? '',
       Barcode: p.data.Barcode ?? '',
-      Unit: p.data.Unit, IsReturnable: p.data.IsReturnable,
+      Unit: p.data.Unit, IsAdjustable: !!p.data.IsAdjustable,
       CategoryID: p.data.category?.CategoryID ?? '',
       SupplierID: p.data.suppliers?.[0]?.SupplierID ?? '',
       Brand: p.data.Brand ?? '', Description: p.data.Description ?? '',
@@ -820,10 +821,10 @@ async function updateProduct() {
   loading.value = true
   try {
     const fd = new FormData()
-    fd.append('IsReturnable', form.value.IsReturnable ? 1 : 0)
+    fd.append('IsAdjustable', form.value.IsAdjustable ? 1 : 0)
     for (const key in form.value) {
       // SKU is locked: the server keeps the stored one (or generates one if missing).
-      if (key === 'IsReturnable' || key === 'SKU') continue
+      if (key === 'IsAdjustable' || key === 'SKU') continue
       fd.append(key, form.value[key] ?? '')
     }
 

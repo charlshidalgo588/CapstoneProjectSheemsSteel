@@ -6,17 +6,9 @@
       <div class="page-header">
         <div class="page-header-l">
           <h1 class="page-title">Dashboard</h1>
-          <p class="page-sub">
-            <span>{{ todayLabel }}</span>
-            <span v-if="loading" class="status status--busy"><i class="fa-solid fa-spinner fa-spin"></i> Updating…</span>
-            <span v-else-if="lastUpdated" class="status"><i class="live-dot"></i>Updated {{ lastUpdated }}</span>
-          </p>
         </div>
-        <div class="page-header-right">
-          <router-link v-if="canTransactions" :to="{ name: 'sales-transactions' }" class="btn"><i class="fa-solid fa-receipt"></i>Transactions</router-link>
-          <button type="button" class="btn btn--primary" :disabled="loading" aria-label="Refresh dashboard" @click="loadDashboard()">
-            <i class="fa-solid fa-rotate" :class="{ 'fa-spin': loading }"></i>Refresh
-          </button>
+        <div v-if="canTransactions" class="page-header-right">
+          <router-link :to="{ name: 'sales-transactions' }" class="btn"><i class="fa-solid fa-receipt"></i>Transactions</router-link>
         </div>
       </div>
 
@@ -149,39 +141,40 @@
           </section>
         </div>
 
-        <!-- CALENDAR -->
+        <!-- BUSIEST DAYS HEATMAP -->
         <section class="card" style="--d: 140ms" aria-labelledby="hm-cal">
           <header class="card-header">
             <div class="card-head-l">
               <span class="card-icon card-icon--violet"><i class="fa-solid fa-table-cells"></i></span>
               <div>
-                <h2 id="hm-cal" class="card-title">{{ monthName }} at a glance</h2>
-                <p class="card-sub">Darker days sold more. Hover or tap a day for its numbers.</p>
+                <h2 id="hm-cal" class="card-title">Busiest days in {{ monthName }}</h2>
+                <p class="card-sub">Darker days had {{ calMetric === 'tx' ? 'more transactions' : 'higher sales' }}. Hover or tap a day for its numbers.</p>
               </div>
             </div>
             <div class="seg" role="group" aria-label="Calendar metric">
               <button type="button" class="seg-btn" :class="{ 'seg-btn--active': calMetric === 'total' }" :aria-pressed="calMetric === 'total'" @click="calMetric = 'total'">Sales</button>
-              <button type="button" class="seg-btn" :class="{ 'seg-btn--active': calMetric === 'profit' }" :aria-pressed="calMetric === 'profit'" @click="calMetric = 'profit'">Profit</button>
+              <button type="button" class="seg-btn" :class="{ 'seg-btn--active': calMetric === 'tx' }" :aria-pressed="calMetric === 'tx'" @click="calMetric = 'tx'">Transactions</button>
             </div>
           </header>
 
           <div class="cal-layout">
-            <div class="cal" :class="{ 'cal--profit': calMetric === 'profit' }">
+            <div class="cal" :class="{ 'cal--tx': calMetric === 'tx' }">
               <span v-for="(w, i) in weekdays" :key="'w' + i" class="cal-dow">{{ w }}</span>
               <template v-for="(c, i) in calendar" :key="i">
                 <span v-if="!c" class="cal-blank"></span>
-                <button v-else type="button" class="cal-day" :style="{ '--i': i }" :class="[`lv${c.level}`, { 'cal-day--sel': c.key === activeRow.key, 'cal-day--today': c.key === todayKey }]" :disabled="c.future" :aria-pressed="c.key === activeRow.key" :aria-label="`${c.d}: ₱${price(c.v)}`" v-bind="tipBind(() => dayTip(c.key))" @click="selectDay(c.key)">{{ c.d }}</button>
+                <button v-else type="button" class="cal-day" :style="{ '--i': i }" :class="[`lv${c.level}`, { 'cal-day--sel': c.key === activeRow.key, 'cal-day--today': c.key === todayKey, 'cal-day--peak': c.key === peakKey }]" :disabled="c.future" :aria-pressed="c.key === activeRow.key" :aria-label="`${c.d}: ${calValueText(c.v)}`" v-bind="tipBind(() => dayTip(c.key))" @click="selectDay(c.key)">{{ c.d }}</button>
               </template>
-              <div class="cal-scale"><span>Less</span><i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>More</span></div>
+              <div class="cal-scale"><span>{{ calMetric === 'tx' ? 'Quieter' : 'Less' }}</span><i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>{{ calMetric === 'tx' ? 'Busier' : 'More' }}</span></div>
             </div>
 
             <div class="day" aria-live="polite">
               <div class="day-head">
                 <h3 class="day-title">{{ activeLabel }}</h3>
                 <span v-if="activeIsToday" class="chip">Today</span>
-                <button v-else type="button" class="link-btn" @click="backToToday">Back to today</button>
+                <span v-if="activeIsBusiest" class="chip chip--live">Busiest day</span>
+                <button v-if="!activeIsToday" type="button" class="link-btn" @click="backToToday">Back to today</button>
               </div>
-              <p class="day-value">₱{{ price(anim.day) }}</p>
+              <p class="day-value">{{ calMetric === 'tx' ? formatNumber(activeRow.tx) + (activeRow.tx === 1 ? ' transaction' : ' transactions') : '₱' + price(anim.day) }}</p>
               <div v-if="activeRow.total > 0" class="split-wrap">
                 <div class="split-bar" role="img" :aria-label="`Profit ${activeMargin} percent of sales`">
                   <span class="split-seg split-seg--profit" tabindex="0" :style="{ width: (splitReady ? activeProfitPct : 0) + '%' }" v-bind="tipBind(() => splitTip('profit'))"></span>
@@ -191,10 +184,12 @@
               </div>
               <p v-else class="muted">No sales on this day.</p>
               <dl class="facts">
+                <div><dt>Transactions</dt><dd>{{ formatNumber(activeRow.tx) }}</dd></div>
+                <div><dt>Sales</dt><dd>₱{{ price(activeRow.total) }}</dd></div>
                 <div><dt>Profit</dt><dd class="green">₱{{ price(activeRow.profit) }}</dd></div>
                 <div><dt>Cost of goods</dt><dd>₱{{ price(activeCost) }}</dd></div>
                 <div><dt>Margin</dt><dd>{{ activeMargin }}%</dd></div>
-                <div><dt>Share of month</dt><dd>{{ activeShare }}%</dd></div>
+                <div><dt>Share of month {{ calMetric === 'tx' ? 'transactions' : 'sales' }}</dt><dd>{{ activeShare }}%</dd></div>
                 <div><dt>Vs daily average</dt><dd :class="activeVsAvg >= 0 ? 'green' : 'red'">{{ activeVsAvg >= 0 ? '+' : '' }}{{ activeVsAvg.toFixed(1) }}%</dd></div>
               </dl>
             </div>
@@ -204,17 +199,18 @@
         <!-- SALES MIX + STOCK -->
         <div class="row-two">
 
-          <section class="card" style="--d: 210ms" aria-labelledby="hm-mix">
+          <section class="card card--mix" style="--d: 210ms" aria-labelledby="hm-mix">
             <header class="card-header">
               <div class="card-head-l">
                 <span class="card-icon card-icon--green"><i class="fa-solid fa-chart-pie"></i></span>
                 <div>
                   <h2 id="hm-mix" class="card-title">Where sales come from</h2>
-                  <p class="card-sub">Share of {{ monthName }} {{ mixMetric === 'qty' ? 'units sold' : 'sales' }} by product</p>
+                  <p class="card-sub">Share of {{ monthName }} {{ mixNoun }} by product</p>
                 </div>
               </div>
               <div class="seg" role="group" aria-label="Measure by">
                 <button type="button" class="seg-btn" :class="{ 'seg-btn--active': mixMetric === 'sales' }" :aria-pressed="mixMetric === 'sales'" @click="setMixMetric('sales')">By sales</button>
+                <button type="button" class="seg-btn" :class="{ 'seg-btn--active': mixMetric === 'profit' }" :aria-pressed="mixMetric === 'profit'" @click="setMixMetric('profit')">By profit</button>
                 <button type="button" class="seg-btn" :class="{ 'seg-btn--active': mixMetric === 'qty' }" :aria-pressed="mixMetric === 'qty'" @click="setMixMetric('qty')">By units</button>
               </div>
             </header>
@@ -248,11 +244,11 @@
                     <template v-if="focusRow">
                       <strong>{{ focusRow.pct.toFixed(1) }}%</strong>
                       <span class="dc-name">{{ focusRow.name }}</span>
-                      <span class="dc-sub">{{ mixMetric === 'qty' ? formatNumber(focusRow.qty) + ' units' : '₱' + price(focusRow.sales) }}</span>
+                      <span class="dc-sub">{{ mixValueText(focusRow) }}</span>
                     </template>
                     <template v-else>
                       <strong>{{ mixMetric === 'qty' ? formatNumber(mixTotal) : '₱' + compact(mixTotal) }}</strong>
-                      <span class="dc-name">{{ mixMetric === 'qty' ? 'Units sold' : 'Total sales' }}</span>
+                      <span class="dc-name">{{ mixTotalLabel }}</span>
                       <span class="dc-sub">Hover or select a slice</span>
                     </template>
                   </div>
@@ -264,14 +260,16 @@
                       <span class="mix-top">
                         <i class="mix-dot" :style="{ background: r.color }"></i>
                         <span class="mix-name">{{ r.name }}</span>
-                        <span class="mix-amt">{{ mixMetric === 'qty' ? formatNumber(r.qty) + ' units' : '₱' + price(r.sales) }}</span>
+                        <span class="mix-amt">{{ mixValueText(r) }}</span>
                         <span class="mix-pct">{{ r.pct.toFixed(1) }}%</span>
                       </span>
                       <span class="mix-bar"><span class="mix-bar-fill" :style="{ width: (mixReady ? r.pct : 0) + '%', background: r.color }"></span></span>
                     </button>
                     <dl v-if="mixIdx === i" class="mix-detail">
                       <div><dt>Sales</dt><dd>₱{{ price(r.sales) }}</dd></div>
+                      <div v-if="r.profit !== null"><dt>Profit</dt><dd>₱{{ price(r.profit) }}</dd></div>
                       <template v-if="r.qty !== null">
+                        <div><dt>Margin</dt><dd>{{ r.sales ? ((r.profit / r.sales) * 100).toFixed(1) : '0.0' }}%</dd></div>
                         <div><dt>Units sold</dt><dd>{{ formatNumber(r.qty) }}</dd></div>
                         <div><dt>Average price</dt><dd>₱{{ price(r.qty ? r.sales / r.qty : 0) }}</dd></div>
                       </template>
@@ -281,8 +279,12 @@
                 </ul>
               </div>
 
-              <!-- Full Reports shortcut: Administrators only -->
-              <router-link v-if="canReports" :to="{ name: 'reports' }" class="link-btn mix-link">See the full ranking in Reports<i class="fa-solid fa-arrow-right"></i></router-link>
+              <!-- Full Reports shortcut: Administrators only.
+                   Pinned to the bottom of the card so any extra height in the
+                   row never shows up as an empty gap. -->
+              <footer v-if="canReports" class="mix-foot">
+                <router-link :to="{ name: 'reports' }" class="link-btn">See the full ranking in Reports<i class="fa-solid fa-arrow-right"></i></router-link>
+              </footer>
             </div>
 
             <div v-else class="empty">
@@ -413,11 +415,11 @@ export default {
       ],
       targetMode: 'yesterday',
       customTarget: 0,
-      calMetric: 'total',
+      calMetric: 'total', // heatmap shading: 'total' (sales) | 'tx' (transactions)
       selectedKey: null,
       weekdays: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
 
-      mixMetric: 'sales',
+      mixMetric: 'sales', // donut measure: 'sales' | 'profit' | 'qty'
       mixIdx: null,
       hoverIdx: null,
       mixReady: false,
@@ -439,7 +441,6 @@ export default {
       firstLoad: true,
       loading: false,
       loadError: '',
-      lastUpdated: '',
       requestSeq: 0,
     }
   },
@@ -456,7 +457,6 @@ export default {
     canInvLogs()      { return canAccess(this.role, '/inventory-logs') },
 
     todayKey() { return new Date().toLocaleDateString('en-CA') },
-    todayLabel() { return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) },
     monthName() { return new Date().toLocaleDateString('en-US', { month: 'long' }) },
     dayOfMonth() { return new Date().getDate() },
     daysInMonth() { const n = new Date(); return new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate() },
@@ -516,19 +516,34 @@ export default {
       return row ? this.num(row.profit) : 0
     },
 
-    /* days */
+    /* days (sales, profit and number of transactions per day) */
     monthRows() {
       const profitMap = {}
       this.dailyProfit.forEach((p) => { profitMap[String(p.date || '').slice(0, 10)] = this.num(p.profit) })
       return this.monthlySales.map((s) => {
         const key = String(s.date || '').slice(0, 10)
-        return { key, total: this.num(s.total), profit: profitMap[key] ?? 0 }
+        return { key, total: this.num(s.total), profit: profitMap[key] ?? 0, tx: this.num(s.transactions) }
       })
     },
-    /* Average of all days that had sales this month (used by calendar + tooltips). */
+    /* Average of all days that had sales this month. */
     monthAvg() {
       const rows = this.monthRows.filter((r) => r.total > 0)
       return rows.length ? rows.reduce((a, r) => a + r.total, 0) / rows.length : 0
+    },
+    /* Average of the heatmap's active metric (sales or transactions) over days that had any. */
+    calAvg() {
+      const k = this.calMetric
+      const rows = this.monthRows.filter((r) => r[k] > 0)
+      return rows.length ? rows.reduce((a, r) => a + r[k], 0) / rows.length : 0
+    },
+    /* Busiest day by the active heatmap metric (gets the ★). */
+    peakKey() {
+      const k = this.calMetric
+      let best = null
+      for (const r of this.monthRows) {
+        if (r[k] > 0 && (!best || r[k] > best[k])) best = r
+      }
+      return best ? best.key : null
     },
 
     /* sparkline — daily sales for up to the last 14 days of this month (design only) */
@@ -569,38 +584,60 @@ export default {
     },
     activeRow() {
       const key = this.selectedKey ?? this.todayKey
-      return this.monthRows.find((r) => r.key === key) || { key, total: 0, profit: 0 }
+      return this.monthRows.find((r) => r.key === key) || { key, total: 0, profit: 0, tx: 0 }
     },
     activeIsToday() { return this.activeRow.key === this.todayKey },
+    activeIsBusiest() {
+      const k = this.calMetric
+      return this.peakKey === this.activeRow.key && this.monthRows.filter((r) => r[k] > 0).length > 1
+    },
     activeLabel() { return new Date(this.activeRow.key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) },
     activeCost() { return Math.max(this.activeRow.total - this.activeRow.profit, 0) },
     activeMargin() { const r = this.activeRow; return r.total ? ((r.profit / r.total) * 100).toFixed(1) : '0.0' },
     activeProfitPct() { const r = this.activeRow; return r.total ? Math.min(100, Math.max(0, (r.profit / r.total) * 100)) : 0 },
-    activeShare() { const t = this.num(this.monthlyTotal); return t ? ((this.activeRow.total / t) * 100).toFixed(1) : '0.0' },
+    /* Share of the month for whichever metric the heatmap is showing. */
+    activeShare() {
+      const k = this.calMetric
+      const t = this.monthRows.reduce((a, r) => a + r[k], 0)
+      return t ? ((this.activeRow[k] / t) * 100).toFixed(1) : '0.0'
+    },
     activeVsAvg() {
-      const avg = this.monthAvg
-      return avg ? ((this.activeRow.total - avg) / avg) * 100 : 0
+      const avg = this.calAvg
+      return avg ? ((this.activeRow[this.calMetric] - avg) / avg) * 100 : 0
     },
 
-    /* sales mix */
+    /* sales mix (top 5 products by the chosen measure + one grey "Other items" slice) */
     mixRows() {
       const palette = ['#EA580C', '#6366F1', '#10B981', '#3B82F6', '#F59E0B']
-      const byQty = this.mixMetric === 'qty'
+      const m = this.mixMetric
+      const val = (r) => (m === 'qty' ? r.qty : m === 'profit' ? r.profit : r.sales)
       const items = this.topSellingItems
-        .map((i) => ({ name: i.ProductName, sales: this.num(i.total_sales), qty: this.num(i.total_quantity) }))
-        .sort((a, b) => (byQty ? b.qty - a.qty : b.sales - a.sales))
+        .map((i) => ({
+          name: i.ProductName,
+          sales: this.num(i.total_sales),
+          qty: this.num(i.total_quantity),
+          profit: this.num(i.total_profit),
+        }))
+        // A product sold at a loss has no share of the profit, so it stays out of that view.
+        .filter((r) => m !== 'profit' || r.profit > 0)
+        .sort((a, b) => val(b) - val(a))
         .slice(0, 5)
         .map((r, idx) => ({ ...r, color: palette[idx], rank: idx + 1 }))
-      if (!byQty) {
-        const other = Math.max(this.num(this.monthlyTotal) - items.reduce((a, r) => a + r.sales, 0), 0)
-        if (other > 0.5) items.push({ name: 'Other items', sales: other, qty: null, color: '#94A3B8', rank: null })
+
+      if (m !== 'qty') {
+        // Whatever the five products don't explain (other products + the shop's share of services).
+        const otherSales = Math.max(this.num(this.monthlyTotal) - items.reduce((a, r) => a + r.sales, 0), 0)
+        const otherProfit = Math.max(this.num(this.totalProfit) - items.reduce((a, r) => a + r.profit, 0), 0)
+        const otherVal = m === 'profit' ? otherProfit : otherSales
+        if (otherVal > 0.5) items.push({ name: 'Other items', sales: otherSales, profit: otherProfit, qty: null, color: '#94A3B8', rank: null })
       }
-      const val = (r) => (byQty ? r.qty : r.sales)
       const base = items.reduce((a, r) => a + val(r), 0) || 1
       return items.map((r) => ({ ...r, pct: (val(r) / base) * 100 }))
     },
     hasMix() { return this.mixRows.some((r) => r.pct > 0) },
-    mixTotal() { return this.mixRows.reduce((a, r) => a + (this.mixMetric === 'qty' ? r.qty : r.sales), 0) },
+    mixTotal() { return this.mixRows.reduce((a, r) => a + this.mixVal(r), 0) },
+    mixNoun() { return { sales: 'sales', qty: 'units sold', profit: 'profit' }[this.mixMetric] },
+    mixTotalLabel() { return { sales: 'Total sales', qty: 'Units sold', profit: 'Total profit' }[this.mixMetric] },
     focusIdx() { return this.hoverIdx ?? this.mixIdx },
     focusRow() { return this.focusIdx === null ? null : this.mixRows[this.focusIdx] || null },
     mixArcs() {
@@ -617,9 +654,9 @@ export default {
     mixInsight() {
       const lead = this.mixRows.find((r) => r.rank === 1)
       if (!lead) return ''
-      return this.mixMetric === 'qty'
-        ? `${lead.name} is ${lead.pct.toFixed(1)}% of the units sold among your top products.`
-        : `${lead.name} brings in ${lead.pct.toFixed(1)}% of ${this.monthName} sales.`
+      if (this.mixMetric === 'qty') return `${lead.name} is ${lead.pct.toFixed(1)}% of the units sold among your top products.`
+      if (this.mixMetric === 'profit') return `${lead.name} earns ${lead.pct.toFixed(1)}% of ${this.monthName} profit.`
+      return `${lead.name} brings in ${lead.pct.toFixed(1)}% of ${this.monthName} sales.`
     },
     mixConcentrated() {
       const lead = this.mixRows.find((r) => r.rank === 1)
@@ -666,6 +703,11 @@ export default {
     price(v) { return this.num(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
     money(v) { return '₱' + this.price(v) },
     compact(v) { return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(this.num(v)) },
+
+    /* Heatmap + donut value helpers */
+    calValueText(v) { return this.calMetric === 'tx' ? `${this.formatNumber(v)} transactions` : this.money(v) },
+    mixVal(r) { return this.mixMetric === 'qty' ? r.qty : this.mixMetric === 'profit' ? r.profit : r.sales },
+    mixValueText(r) { return this.mixMetric === 'qty' ? this.formatNumber(r.qty) + ' units' : this.money(this.mixVal(r)) },
 
     /* Props for a stock tile: a router-link target when the role may open
        the Product List, nothing (so it stays a plain div) when it may not.
@@ -908,13 +950,14 @@ export default {
       }
     },
     dayTip(key) {
-      const r = this.monthRows.find((x) => x.key === key) || { total: 0, profit: 0 }
+      const r = this.monthRows.find((x) => x.key === key) || { total: 0, profit: 0, tx: 0 }
       const title = new Date(key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
-      if (!(r.total > 0)) return { title, note: 'No sales on this day.' }
-      const margin = ((r.profit / r.total) * 100).toFixed(1)
-      const avg = this.monthAvg
-      const vs = avg ? ((r.total - avg) / avg) * 100 : 0
+      if (!(r.total > 0 || r.tx > 0)) return { title, note: 'No sales on this day.' }
+      const margin = r.total ? ((r.profit / r.total) * 100).toFixed(1) : '0.0'
+      const avg = this.calAvg
+      const vs = avg ? ((r[this.calMetric] - avg) / avg) * 100 : 0
       return { title, rows: [
+        { k: 'Transactions', v: this.formatNumber(r.tx) },
         { k: 'Sales', v: this.money(r.total) },
         { k: 'Profit', v: this.money(r.profit), tone: 'good' },
         { k: 'Margin', v: margin + '%' },
@@ -938,8 +981,13 @@ export default {
     },
     mixTip(r) {
       if (!r) return { title: '' }
-      const rows = [{ k: this.mixMetric === 'qty' ? 'Share of units' : 'Share of sales', v: r.pct.toFixed(1) + '%' }, { k: 'Sales', v: this.money(r.sales) }]
+      const shareLabel = { sales: 'Share of sales', qty: 'Share of units', profit: 'Share of profit' }[this.mixMetric]
+      const rows = [{ k: shareLabel, v: r.pct.toFixed(1) + '%' }, { k: 'Sales', v: this.money(r.sales) }]
+      if (r.profit !== null && r.profit !== undefined) {
+        rows.push({ k: 'Profit', v: this.money(r.profit), tone: r.profit >= 0 ? 'good' : 'bad' })
+      }
       if (r.qty !== null) {
+        if (r.sales) rows.push({ k: 'Margin', v: ((r.profit / r.sales) * 100).toFixed(1) + '%' })
         rows.push({ k: 'Units sold', v: this.formatNumber(r.qty) })
         rows.push({ k: 'Average price', v: this.money(r.qty ? r.sales / r.qty : 0) })
       } else {
@@ -1069,7 +1117,6 @@ export default {
         this.splitReady = false
         this.mixReady = false
         this.firstLoad = false
-        this.lastUpdated = new Date().toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
         await this.$nextTick()
         if (seq !== this.requestSeq) return
         this.animateAll()           // …then numbers count up and bars grow
@@ -1142,11 +1189,6 @@ html[data-theme="dark"] .dash {
 .page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .page-header-l { min-width: 0; }
 .page-title { font-size: 26px; font-weight: 800; color: var(--d-text); letter-spacing: -.03em; margin: 0; line-height: 1.15; }
-.page-sub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 0; font-size: 13.5px; font-weight: 500; color: var(--d-text-2); }
-.status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--d-muted); padding: 2px 10px 2px 8px; background: var(--d-surface); border: 1px solid var(--d-border); border-radius: 999px; }
-.status--busy { color: var(--d-accent); font-weight: 600; padding-left: 10px; }
-.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--d-green); box-shadow: 0 0 0 0 rgba(16,185,129,.5); animation: pulse 2.2s ease-out infinite; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,.45); } 70%, 100% { box-shadow: 0 0 0 7px rgba(16,185,129,0); } }
 .page-header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .btn {
@@ -1220,11 +1262,12 @@ html[data-theme="dark"] .dash {
 .card-title { font-size: 15.5px; font-weight: 700; color: var(--d-text); margin: 0; letter-spacing: -.015em; }
 .card-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--d-muted); }
 .row-two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--d-gap); align-items: stretch; }
-.chip { font-size: 10.5px; font-weight: 700; letter-spacing: .02em; color: var(--d-accent); background: var(--d-accent-soft); border: 1px solid var(--d-accent-border); padding: 2px 10px; border-radius: 20px; }
+.chip { font-size: 10.5px; font-weight: 700; letter-spacing: .02em; color: var(--d-accent); background: var(--d-accent-soft); border: 1px solid var(--d-accent-border); padding: 2px 10px; border-radius: 20px; white-space: nowrap; }
+.chip--live { color: var(--d-green); background: var(--d-green-soft); border-color: rgba(16,185,129,.28); }
 
 /* ── segmented control ── */
 .seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--d-sunken); border: 1px solid var(--d-border); border-radius: 11px; }
-.seg-btn { border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; color: var(--d-muted); padding: 6px 12px; border-radius: 8px; transition: background-color .2s ease, color .2s ease, box-shadow .2s ease; }
+.seg-btn { border: none; background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; color: var(--d-muted); padding: 6px 12px; border-radius: 8px; white-space: nowrap; transition: background-color .2s ease, color .2s ease, box-shadow .2s ease; }
 .seg-btn--active { background: var(--d-surface); color: var(--d-text); box-shadow: 0 1px 3px rgba(16,24,40,.16), 0 0 0 1px var(--d-border); }
 
 /* ── trend + big numbers ── */
@@ -1279,13 +1322,14 @@ html[data-theme="dark"] .dash {
 .mini-stats dd.green { color: var(--d-green); }
 .ms-sub { display: block; margin-top: 3px; font-size: 11.5px; color: var(--d-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ── calendar ── */
-.cal-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 28px; align-items: start; }
-.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; --lv: 234,88,12; }
-.cal--profit { --lv: 16,185,129; }
+/* ── busiest days heatmap (sizes match the Reports page) ── */
+.cal-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; --lv: 234,88,12; }
+/* Transactions view is blue so it reads as a different measure from sales (orange) */
+.cal--tx { --lv: 59,130,246; }
 .cal-dow { text-align: center; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--d-faint); padding-bottom: 4px; }
 .cal-day {
-  aspect-ratio: 1.15; border: 1px solid transparent; border-radius: 10px; cursor: pointer;
+  aspect-ratio: 1.4; border: 1px solid transparent; border-radius: 10px; cursor: pointer;
   font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--d-text-2);
   touch-action: manipulation;
   transition: transform .15s var(--d-ease), border-color .15s ease, box-shadow .15s ease, background-color .3s ease;
@@ -1297,6 +1341,9 @@ html[data-theme="dark"] .dash {
 .cal-day:disabled { cursor: default; opacity: .35; }
 .cal-day--today { border-color: var(--d-text-2); }
 .cal-day--sel { border-color: rgb(var(--lv)); box-shadow: 0 0 0 3px rgba(var(--lv), .28); color: var(--d-text); }
+/* ★ marks the busiest day for the metric that is selected */
+.cal-day--peak { position: relative; }
+.cal-day--peak::after { content: '★'; position: absolute; top: 3px; right: 5px; font-size: 10px; line-height: 1; color: currentColor; }
 .lv0 { background: var(--d-sunken); }
 .lv1 { background: rgba(var(--lv), .16); }
 .lv2 { background: rgba(var(--lv), .34); }
@@ -1307,11 +1354,11 @@ html[data-theme="dark"] .dash {
 .cal-scale span:first-child { margin-right: 3px; }
 .cal-scale span:last-child { margin-left: 3px; }
 
-.day { padding: 20px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 16px; }
-.day-head { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.day { padding: 16px; background: var(--d-raised); border: 1px solid var(--d-border); border-radius: 16px; min-width: 0; }
+.day-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 28px; }
 .day-title { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--d-text); }
 .day-head .link-btn { margin-left: auto; }
-.day-value { margin: 8px 0 14px; font-size: 30px; font-weight: 800; color: var(--d-text); letter-spacing: -.035em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.day-value { margin: 6px 0 12px; font-size: 24px; font-weight: 800; color: var(--d-text); letter-spacing: -.035em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .split-bar { display: flex; gap: 3px; height: 10px; border-radius: 10px; overflow: hidden; }
 .split-seg { display: block; height: 100%; cursor: default; transition: width 1s var(--d-ease), filter .2s ease; touch-action: manipulation; }
 .split-seg--profit { background: linear-gradient(90deg, #059669, var(--d-green)); border-radius: 10px 3px 3px 10px; }
@@ -1321,17 +1368,21 @@ html[data-theme="dark"] .dash {
 .sl { width: 8px; height: 8px; border-radius: 50%; }
 .sl--profit { background: var(--d-green); }
 .sl--cost { background: var(--d-accent); }
-.facts { margin: 16px 0 0; border-top: 1px solid var(--d-border); }
-.facts > div { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--d-border); }
+.facts { margin: 12px 0 0; border-top: 1px solid var(--d-border); }
+.facts > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--d-border); }
 .facts > div:last-child { border-bottom: none; padding-bottom: 0; }
-.facts dt { font-size: 12.5px; color: var(--d-muted); }
-.facts dd { margin: 0; font-size: 13px; font-weight: 700; color: var(--d-text); font-variant-numeric: tabular-nums; }
+.facts dt { font-size: 12px; color: var(--d-muted); }
+.facts dd { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--d-text); font-variant-numeric: tabular-nums; text-align: right; }
 
 /* ── sales mix ── */
-.mix { container-type: inline-size; display: flex; flex-direction: column; gap: 18px; }
+/* The card is a column that fills the row height. The donut + list centre
+   in whatever space is free and the Reports link is pinned to the bottom,
+   so a taller neighbour (Needs attention) never leaves an empty gap. */
+.card--mix { display: flex; flex-direction: column; }
+.mix { container-type: inline-size; display: flex; flex-direction: column; gap: 18px; flex: 1 1 auto; }
 .mix-insight { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--d-accent-soft); border: 1px solid var(--d-accent-border); font-size: 12.5px; line-height: 1.55; color: var(--d-text-2); }
 .mix-insight i { margin-top: 2px; font-size: 12px; color: var(--d-accent); }
-.mix-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: center; }
+.mix-body { flex: 1 1 auto; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: center; align-content: center; }
 @container (max-width: 520px) { .mix-body { grid-template-columns: minmax(0, 1fr); } .donut { margin: 0 auto; width: min(240px, 100%); } }
 
 .donut { position: relative; width: 200px; max-width: 100%; aspect-ratio: 1; }
@@ -1360,9 +1411,10 @@ html[data-theme="dark"] .dash {
 .mix-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 10px; margin: 0; padding: 2px 13px 13px 33px; }
 .mix-detail dt { font-size: 11.5px; color: var(--d-muted); }
 .mix-detail dd { margin: 2px 0 0; font-size: 13px; font-weight: 700; color: var(--d-text); font-variant-numeric: tabular-nums; }
-.mix-link { align-self: flex-start; }
+.mix-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--d-border); }
 
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 32px 12px; }
+.card--mix .empty { flex: 1 1 auto; }
 .empty-ico { width: 52px; height: 52px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--d-faint); background: var(--d-sunken); margin-bottom: 6px; }
 .empty-title { margin: 0; font-size: 14px; font-weight: 700; color: var(--d-text-2); }
 .empty-sub { margin: 0; font-size: 12.5px; color: var(--d-muted); max-width: 300px; line-height: 1.5; }
@@ -1396,32 +1448,59 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
 .link-list a i:first-child { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--d-sunken); color: var(--d-muted); font-size: 11.5px; transition: background-color .15s ease, color .15s ease; }
 .link-list a i:last-child { margin-left: auto; font-size: 9px; color: var(--d-faint); transition: transform .2s var(--d-ease); }
 
-/* ── shared tooltip ── */
+/* ── shared tooltip (light by default, dark in dark mode) ── */
 .tip {
+  /* light mode tokens */
+  --tip-bg: rgba(255, 255, 255, .98);
+  --tip-text: #0f172a;
+  --tip-label: #64748b;
+  --tip-note: #475569;
+  --tip-border: var(--c-border-strong, #e2e8f0);
+  --tip-divider: rgba(15, 23, 42, .09);
+  --tip-dot-ring: rgba(15, 23, 42, .12);
+  --tip-good: #059669;
+  --tip-warn: #b45309;
+  --tip-bad: #e11d48;
+  --tip-shadow: 0 12px 32px -10px rgba(15, 23, 42, .28), 0 2px 6px rgba(15, 23, 42, .08);
+
   position: fixed; z-index: 80; pointer-events: none;
   width: max-content; min-width: 150px; max-width: min(250px, calc(100vw - 16px));
   padding: 10px 12px 11px; border-radius: 12px;
-  background: rgba(15, 23, 42, .96); color: #f8fafc;
-  border: 1px solid rgba(255,255,255,.08);
-  box-shadow: 0 12px 32px -8px rgba(2,6,23,.5), 0 2px 6px rgba(2,6,23,.25);
+  background: var(--tip-bg); color: var(--tip-text);
+  border: 1px solid var(--tip-border);
+  box-shadow: var(--tip-shadow);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   opacity: 0; transform: translate(-50%, -100%) translateY(4px);
   transition: opacity .14s ease, transform .14s ease;
   font-size: 12px; line-height: 1.4;
 }
+/* dark mode tokens */
+html[data-theme="dark"] .tip {
+  --tip-bg: rgba(15, 23, 42, .96);
+  --tip-text: #f8fafc;
+  --tip-label: #94a3b8;
+  --tip-note: #cbd5e1;
+  --tip-border: rgba(255, 255, 255, .08);
+  --tip-divider: rgba(255, 255, 255, .12);
+  --tip-dot-ring: rgba(255, 255, 255, .14);
+  --tip-good: #34d399;
+  --tip-warn: #fbbf24;
+  --tip-bad: #fb7185;
+  --tip-shadow: 0 12px 32px -8px rgba(2, 6, 23, .5), 0 2px 6px rgba(2, 6, 23, .25);
+}
 .tip--on { opacity: 1; transform: translate(-50%, -100%); }
 .tip--below { transform: translate(-50%, 0) translateY(-4px); }
 .tip--below.tip--on { transform: translate(-50%, 0); }
-.tip-title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; font-weight: 700; letter-spacing: -.005em; }
-.tip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(255,255,255,.14); }
-.tip-rows { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; gap: 5px; }
+.tip-title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; font-weight: 700; letter-spacing: -.005em; overflow-wrap: anywhere; }
+.tip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px var(--tip-dot-ring); }
+.tip-rows { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--tip-divider); display: flex; flex-direction: column; gap: 5px; }
 .tip-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-.tip-row dt { color: #94a3b8; font-weight: 500; }
-.tip-row dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
-.tip-good { color: #34d399; }
-.tip-warn { color: #fbbf24; }
-.tip-bad { color: #fb7185; }
-.tip-note { margin: 8px 0 0; color: #cbd5e1; font-size: 11.5px; line-height: 1.45; }
+.tip-row dt { color: var(--tip-label); font-weight: 500; }
+.tip-row dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.tip-good { color: var(--tip-good); }
+.tip-warn { color: var(--tip-warn); }
+.tip-bad { color: var(--tip-bad); }
+.tip-note { margin: 8px 0 0; color: var(--tip-note); font-size: 11.5px; line-height: 1.45; }
 .tip-title + .tip-note { margin-top: 5px; }
 
 /* ── skeleton ── */
@@ -1477,6 +1556,10 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
 @media (max-width: 900px) {
   .dash { --d-pad-x: 16px; --d-gap: 14px; padding-top: 12px; padding-bottom: 32px; }
 }
+@media (max-width: 860px) {
+  /* Stacked, the calendar would otherwise get huge cells */
+  .cal-day { aspect-ratio: auto; min-height: 44px; }
+}
 
 /* Phones */
 @media (max-width: 600px) {
@@ -1487,7 +1570,7 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
   .card-header { gap: 12px; margin-bottom: 14px; }
   .card-head-l { width: 100%; }
 
-  /* header: title on top, full-width 44px touch buttons below */
+  /* header: title on top, full-width 44px touch button below */
   .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
   .page-title { font-size: 24px; }
   .page-header-right { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; }
@@ -1516,11 +1599,11 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
   .ms { padding: 11px 12px; }
   .mini-stats--3 .ms:last-child { grid-column: 1 / -1; }
 
-  /* calendar: bigger square tap targets across the whole width */
+  /* heatmap: compact tap targets across the whole width */
   .cal { gap: 5px; }
-  .cal-day { aspect-ratio: 1; border-radius: 9px; font-size: 12.5px; }
-  .day { padding: 16px 14px; }
-  .day-value { font-size: 28px; }
+  .cal-day { aspect-ratio: auto; min-height: 44px; border-radius: 9px; font-size: 12.5px; }
+  .day { padding: 14px 12px; }
+  .day-value { font-size: 21px; }
   .split-bar { height: 12px; }
 
   /* sales mix: donut centered, list underneath */
@@ -1548,6 +1631,7 @@ html[data-theme="dark"] .tile--warn .tile-sub { color: #FBBF24; }
   .big-value { font-size: 30px; }
   .cal { gap: 4px; }
   .mix-amt { display: none; }
+  .day-value { font-size: 19px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

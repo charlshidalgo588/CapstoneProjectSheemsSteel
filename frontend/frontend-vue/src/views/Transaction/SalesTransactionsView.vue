@@ -2,21 +2,26 @@
   <Layout>
     <div class="sales-page" ref="pageRef" :class="{ 'sales-page--has-bar': selectedSales.length > 0 }">
 
-      <!-- ── PAGE HEADER ── -->
-      <div class="page-header">
-        <div>
-          <h1 class="page-title">Sales Receipts</h1>
+      <!-- ── PAGE HEADER (one compact row: SALES / Transaction  ·····  New Sale) ──
+           Same markup and sizes as the Product List header. -->
+      <header class="page-header">
+        <div class="page-heading">
+          <div class="page-title-row">
+            <span class="page-eyebrow">Sales</span>
+            <span class="page-crumb-sep" aria-hidden="true">/</span>
+            <h1 class="page-title">Transaction</h1>
+          </div>
         </div>
         <div class="header-actions">
-          <button v-if="selectedSales.length > 0" @click="openPasswordModal" class="btn btn--danger">
+          <button v-if="selectedSales.length > 0" @click="openPasswordModal" class="btn btn--danger btn--sm">
             <i class="fa-solid fa-trash"></i> Delete selected
             <span class="selected-count">{{ selectedSales.length }}</span>
           </button>
-          <RouterLink to="/point-of-sale" class="btn btn--primary">
+          <RouterLink to="/point-of-sale" class="btn btn--primary btn--sm">
             <i class="fa-solid fa-plus"></i> New Sale
           </RouterLink>
         </div>
-      </div>
+      </header>
 
       <!-- ═════════ STICKY BLOCK: summary cards + search + period ═════════
            Desktop: the whole block stays pinned to the very top.
@@ -24,9 +29,9 @@
            slim search + period toolbar stays pinned; the cards scroll away. -->
       <div class="sticky-controls" :class="{ 'is-stuck': isStuck }" ref="stickyRef">
 
-        <!-- Summary cards -->
+        <!-- Summary cards (same compact style as the Product List cards) -->
         <section class="kpi-strip" aria-label="Sales summary">
-          <div class="kpi-card">
+          <div class="kpi-card kpi-card--featured">
             <span class="kpi-icon kpi-icon--accent"><i class="fa-solid fa-receipt"></i></span>
             <span class="kpi-body">
               <span class="kpi-label">Receipts</span>
@@ -66,7 +71,7 @@
         </section>
 
         <!-- Toolbar: search + period -->
-        <section class="toolbar" aria-label="Search and period">
+        <section class="toolbar" aria-label="Search and period" ref="toolbarRef">
           <div class="search-field">
             <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
             <input
@@ -122,7 +127,7 @@
       </div>
 
       <!-- ── TABLE CARD ── -->
-      <div class="table-card">
+      <div class="table-card" ref="tableRef">
 
         <!-- Phone-only tools: select all + sort (the table header is hidden on phones) -->
         <div v-if="!loading && !loadError && pagedSales.length" class="mobile-tools">
@@ -140,17 +145,22 @@
             </span>
             <span>Select all</span>
           </label>
-          <label class="mobile-sort">
+
+          <div class="mobile-sort">
             <span>Sort</span>
-            <select v-model="sortChoice" aria-label="Sort receipts">
-              <option value="date-desc">Newest first</option>
-              <option value="date-asc">Oldest first</option>
-              <option value="amount-desc">Amount: high to low</option>
-              <option value="amount-asc">Amount: low to high</option>
-              <option value="customer-asc">Customer: A to Z</option>
-              <option value="customer-desc">Customer: Z to A</option>
-            </select>
-          </label>
+            <button
+              ref="sortTrigger"
+              type="button"
+              class="sort-trigger"
+              :class="{ 'sort-trigger--open': sortOpen }"
+              aria-haspopup="listbox"
+              :aria-expanded="sortOpen"
+              @click="toggleSort"
+            >
+              <span class="sort-trigger-label">{{ sortLabel }}</span>
+              <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+            </button>
+          </div>
         </div>
 
         <!-- Loading -->
@@ -257,12 +267,13 @@
           </table>
         </div>
 
-        <!-- Pagination -->
-        <div v-if="!loading && !loadError && filteredSales.length > 0" class="pager">
-          <span class="pager-info">
-            Showing <strong>{{ rangeStart }}–{{ rangeEnd }}</strong> of <strong>{{ filteredSales.length }}</strong>
-          </span>
-          <div class="pager-controls">
+        <!-- Footer: how many are showing + pagination (same as Product List) -->
+        <div v-if="!loading && !loadError && filteredSales.length > 0" class="table-footer table-footer--pager">
+          <div class="footer-text">
+            Showing <strong>{{ rangeStart }}–{{ rangeEnd }}</strong> of {{ filteredSales.length }} receipts
+          </div>
+
+          <div class="footer-controls">
             <label class="pager-size">
               Rows
               <select v-model.number="pageSize" aria-label="Rows per page">
@@ -271,14 +282,62 @@
                 <option :value="100">100</option>
               </select>
             </label>
-            <button class="pager-btn" :disabled="page <= 1" @click="page = 1" aria-label="First page"><i class="fa-solid fa-angles-left"></i></button>
-            <button class="pager-btn" :disabled="page <= 1" @click="page--" aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></button>
-            <span class="pager-page">Page {{ page }} of {{ totalPages }}</span>
-            <button class="pager-btn" :disabled="page >= totalPages" @click="page++" aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></button>
-            <button class="pager-btn" :disabled="page >= totalPages" @click="page = totalPages" aria-label="Last page"><i class="fa-solid fa-angles-right"></i></button>
+
+            <nav v-if="totalPages > 1" class="pager" aria-label="Receipt pages">
+              <button type="button" class="pager-btn pager-btn--wide" :disabled="page === 1" @click="goToPage(page - 1)">
+                <i class="fa-solid fa-chevron-left"></i> Previous
+              </button>
+              <template v-for="(it, i) in pageItems" :key="i">
+                <span v-if="it === '…'" class="pager-gap" aria-hidden="true">…</span>
+                <button
+                  v-else
+                  type="button"
+                  class="pager-btn pager-btn--num"
+                  :class="{ 'pager-btn--on': it === page }"
+                  :aria-current="it === page ? 'page' : undefined"
+                  :aria-label="`Page ${it}`"
+                  @click="goToPage(it)"
+                >{{ it }}</button>
+              </template>
+              <button type="button" class="pager-btn pager-btn--wide" :disabled="page === totalPages" @click="goToPage(page + 1)">
+                Next <i class="fa-solid fa-chevron-right"></i>
+              </button>
+            </nav>
           </div>
         </div>
       </div>
+
+      <!-- ── SORT DROPDOWN (phones): small custom menu anchored to the Sort button ── -->
+      <Transition name="menu">
+        <div v-if="sortOpen" class="menu-backdrop" @click="closeSort">
+          <div
+            ref="menuEl"
+            class="sort-menu"
+            :class="{ 'sort-menu--up': menuPos.up }"
+            :style="menuPos.style"
+            role="listbox"
+            aria-label="Sort receipts"
+            @click.stop
+            @keydown="onMenuKey"
+          >
+            <p class="sort-menu-title">Sort by</p>
+            <button
+              v-for="(o, i) in sortOptions"
+              :key="o.value"
+              type="button"
+              role="option"
+              class="sort-opt"
+              :class="{ 'sort-opt--on': sortChoice === o.value, 'sort-opt--sep': i > 0 && i % 2 === 0 }"
+              :aria-selected="sortChoice === o.value"
+              @click="chooseSort(o.value)"
+            >
+              <i :class="o.icon" class="sort-opt-icon" aria-hidden="true"></i>
+              <span>{{ o.label }}</span>
+              <i v-if="sortChoice === o.value" class="fa-solid fa-check sort-opt-check" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </Transition>
 
       <!-- BACK TO TOP (phones and tablets only) -->
       <button
@@ -442,10 +501,12 @@ const receiptNo = s => `SR-${String(s.SaleID).padStart(5, '0')}`
    show through. We find the scrolling parent and pull --sticky-top up by
    that padding, then self-correct after the first real scroll.
 ──────────────────────────────────────────────────────────── */
-const pageRef   = ref(null)
-const stickyRef = ref(null)
-const isStuck   = ref(false)
-const showTop   = ref(false)
+const pageRef    = ref(null)
+const stickyRef  = ref(null)
+const toolbarRef = ref(null)   // the search + period card (pinned on tablet / phone)
+const tableRef   = ref(null)   // the table card (the pager scrolls back to it)
+const isStuck    = ref(false)
+const showTop    = ref(false)
 
 let scrollEl      = null   // the shell's scrolling element (null = the window scrolls)
 let stickyTop     = 0
@@ -503,6 +564,24 @@ function scrollToTop(e) {
   const opts = { top: 0, behavior: smooth ? 'smooth' : 'auto' }
   if (scrollEl) scrollEl.scrollTo(opts)
   else window.scrollTo(opts)
+}
+
+/* Scrolls back to the top of the table (used by the pager), stopping just
+   below whatever is pinned: the whole block on desktop, the toolbar on tablet / phone. */
+async function scrollToTable() {
+  await nextTick()
+  const el = tableRef.value
+  if (!el) return
+  const sticky = stickyRef.value
+  let offset = 0
+  if (sticky) {
+    const cs = getComputedStyle(sticky)
+    if (cs.position === 'sticky') offset = sticky.offsetHeight
+    else if (cs.display === 'contents') offset = toolbarRef.value?.offsetHeight || 0
+  }
+  el.style.scrollMarginTop = `${offset + 12}px`
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 
 function initStickyTop() {
@@ -660,9 +739,16 @@ function segments(text) {
 
 function clearSearch() { search.value = ''; searchInput.value?.focus() }
 
-/* "/" jumps to the search box from anywhere (unless typing in a field). */
+/* "/" jumps to the search box from anywhere (unless typing in a field).
+   Esc closes the phone sort menu first. */
 function onGlobalKey(e) {
+  if (e.key === 'Escape' && sortOpen.value) {
+    closeSort()
+    sortTrigger.value?.focus()
+    return
+  }
   if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+  if (sortOpen.value) return
   const tag = document.activeElement?.tagName
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
   e.preventDefault()
@@ -692,7 +778,7 @@ function sortIcon(key) {
   return sortDir.value === 'asc' ? 'fa-solid fa-sort-up sort-icon sort-icon--on' : 'fa-solid fa-sort-down sort-icon sort-icon--on'
 }
 
-// Phone sort dropdown: one value that maps onto sortKey + sortDir.
+// Phone sort: one value that maps onto sortKey + sortDir.
 const sortChoice = computed({
   get: () => `${sortKey.value}-${sortDir.value}`,
   set: (v) => {
@@ -700,6 +786,86 @@ const sortChoice = computed({
     sortKey.value = k
     sortDir.value = d
   },
+})
+
+/* ── Phone sort dropdown (small custom menu, replaces the native <select> list) ── */
+const sortOpen    = ref(false)
+const sortTrigger = ref(null)
+const menuEl      = ref(null)
+const menuPos     = ref({ up: false, style: {} })
+const MENU_W      = 232
+const MENU_EST_H  = 300
+
+const sortOptions = [
+  { value: 'date-desc',     label: 'Newest first',        icon: 'fa-regular fa-calendar' },
+  { value: 'date-asc',      label: 'Oldest first',        icon: 'fa-regular fa-calendar' },
+  { value: 'amount-desc',   label: 'Amount: high to low', icon: 'fa-solid fa-peso-sign' },
+  { value: 'amount-asc',    label: 'Amount: low to high', icon: 'fa-solid fa-peso-sign' },
+  { value: 'customer-asc',  label: 'Customer: A to Z',    icon: 'fa-solid fa-arrow-down-a-z' },
+  { value: 'customer-desc', label: 'Customer: Z to A',    icon: 'fa-solid fa-arrow-down-z-a' },
+]
+const sortLabel = computed(() => sortOptions.find(o => o.value === sortChoice.value)?.label || 'Sort')
+
+// Place the menu under the Sort button (right-aligned). Flips above it if there is more room there.
+function placeMenu() {
+  const r = sortTrigger.value?.getBoundingClientRect()
+  if (!r) return
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const below = vh - r.bottom - 12
+  const above = r.top - 12
+  const up = below < MENU_EST_H && above > below
+  const space = up ? above : below
+  menuPos.value = {
+    up,
+    style: {
+      width: Math.min(MENU_W, vw - 24) + 'px',
+      right: Math.max(12, vw - r.right) + 'px',
+      maxHeight: Math.max(160, space - 6) + 'px',
+      ...(up ? { bottom: vh - r.top + 6 + 'px' } : { top: r.bottom + 6 + 'px' }),
+    },
+  }
+}
+function toggleSort() {
+  if (sortOpen.value) { closeSort(); return }
+  placeMenu()
+  sortOpen.value = true
+}
+function closeSort() { sortOpen.value = false }
+function chooseSort(value) {
+  sortChoice.value = value
+  closeSort()
+  sortTrigger.value?.focus()
+}
+// Arrow keys move through the options
+function onMenuKey(e) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
+  e.preventDefault()
+  const items = Array.from(menuEl.value?.querySelectorAll('.sort-opt') || [])
+  if (!items.length) return
+  const i = items.indexOf(document.activeElement)
+  let next = i
+  if (e.key === 'ArrowDown') next = i < items.length - 1 ? i + 1 : 0
+  else if (e.key === 'ArrowUp') next = i > 0 ? i - 1 : items.length - 1
+  else if (e.key === 'Home') next = 0
+  else next = items.length - 1
+  items[next].focus()
+}
+// The menu is fixed to the screen, so close it if the page moves underneath it.
+function onScrollClose(e) {
+  if (menuEl.value && menuEl.value.contains(e.target)) return
+  closeSort()
+}
+watch(sortOpen, async (open) => {
+  if (open) {
+    window.addEventListener('resize', closeSort)
+    window.addEventListener('scroll', onScrollClose, true)
+    await nextTick()
+    menuEl.value?.querySelector('.sort-opt--on')?.focus()
+  } else {
+    window.removeEventListener('resize', closeSort)
+    window.removeEventListener('scroll', onScrollClose, true)
+  }
 })
 
 const sortedSales = computed(() => {
@@ -722,6 +888,27 @@ const pagedSales = computed(() => {
 })
 const rangeStart = computed(() => (sortedSales.value.length ? (page.value - 1) * pageSize.value + 1 : 0))
 const rangeEnd   = computed(() => Math.min(page.value * pageSize.value, sortedSales.value.length))
+
+// Page buttons: 1 … 4 5 6 … 12  (with "…" gaps for long lists), same as Product List
+const pageItems = computed(() => {
+  const total = totalPages.value, cur = page.value
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const items = [1]
+  const start = Math.max(2, cur - 1)
+  const end   = Math.min(total - 1, cur + 1)
+  if (start > 2) items.push('…')
+  for (let i = start; i <= end; i++) items.push(i)
+  if (end < total - 1) items.push('…')
+  items.push(total)
+  return items
+})
+
+function goToPage(n) {
+  const next = Math.min(Math.max(1, n), totalPages.value)
+  if (next === page.value) return
+  page.value = next
+  scrollToTable()
+}
 
 const stats = computed(() => {
   const paid = filteredSales.value.filter(s => s.Status === 'Paid')
@@ -819,6 +1006,8 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('keydown', onGlobalKey)
+  window.removeEventListener('resize', closeSort)
+  window.removeEventListener('scroll', onScrollClose, true)
   clearTimeout(highlightTimer)
   teardownSticky()
 })
@@ -883,12 +1072,11 @@ async function confirmDelete() {
 }
 </script>
 
-<!-- Breakpoints (same as Inventory Logs / Reports):
-       ≥1500px  large screens (roomier)
-       ≤1100px  tablet landscape (smaller bleed, 2 × 2 cards)
+<!-- Breakpoints (identical to Product List / Inventory Logs / Reports):
+       ≥1500px  large screens (roomier gaps and side padding)
+       ≤1100px  tablet landscape (tighter shell bleed, 2 × 2 cards)
        ≤900px   tablet / phone: only the slim toolbar is pinned, cards scroll away
-       ≤700px   phone: edge-to-edge, receipt cards instead of a table
-       ≤480px   small phone
+       ≤700px   phone: edge-to-edge, 44px touch targets, receipt cards instead of a table
        ≤380px   very narrow phones -->
 <style scoped>
 /* ── TOKEN BRIDGE ── */
@@ -915,7 +1103,7 @@ async function confirmDelete() {
   --radius: 16px;
   --sp-ease: cubic-bezier(.16, 1, .3, 1);
 
-  /* ── SPACE TUNING (same values as Inventory Logs, Home, Reports) ──
+  /* ── SPACE TUNING (same values as Product List, Home, Reports, Inventory Logs) ──
      The app shell (Layout.vue) adds its own padding around every page.
      --bleed-x / --bleed-y let this page reclaim part of that padding
      (left, right and top) on EVERY screen size; each breakpoint below sets
@@ -924,11 +1112,11 @@ async function confirmDelete() {
      it to 0px) if content ever touches the sidebar, top bar or screen edge.
 
      IMPORTANT: do NOT add `max-width: 100%` to .sales-page. It caps the width
-     at the shell's content box, so the negative right margin below can no
-     longer stretch the page and a strip on the right is left empty. */
+     at the shell's content box, so the negative side margins below can no
+     longer stretch the page and a strip is left empty. */
   --bleed-x: 30px;
-  --bleed-y: 26px;
-  --sp-gap: 16px;
+  --bleed-y: 30px;
+  --sp-gap: 12px;
   --sp-pad-x: 24px;
 
   /* Where the sticky block stops. Set automatically by the script (it
@@ -938,7 +1126,7 @@ async function confirmDelete() {
   min-height: 100%;
   overflow-x: clip;            /* never scrolls sideways (clip keeps sticky working) */
   background: var(--sp-bg);
-  padding: 16px max(var(--sp-pad-x), env(safe-area-inset-right)) 40px max(var(--sp-pad-x), env(safe-area-inset-left));
+  padding: 8px max(var(--sp-pad-x), env(safe-area-inset-right)) 40px max(var(--sp-pad-x), env(safe-area-inset-left));
   margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--sp-gap);
@@ -951,11 +1139,17 @@ async function confirmDelete() {
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Snappier taps on touch screens */
-.sales-page button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.sales-page button, .sales-page a { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 
-/* PAGE HEADER */
-.page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.page-title   { font-size: 26px; font-weight: 800; color: var(--sp-text-primary); letter-spacing: -.03em; margin: 0; transition: color .22s; }
+/* PAGE HEADER
+   One compact row: "SALES / Transaction" on the left, New Sale on the right.
+   "Sales" and "Transaction" share the same size (16px), each keeping its own style. */
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page-heading { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.page-title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.page-eyebrow { font-size: 16px; font-weight: 700; letter-spacing: .12em; color: var(--sp-accent); text-transform: uppercase; line-height: 1.2; margin: 0; }
+.page-crumb-sep { font-size: 16px; font-weight: 300; color: var(--sp-text-faint); line-height: 1.2; }
+.page-title   { font-size: 16px; font-weight: 800; color: var(--sp-text-primary); letter-spacing: -.02em; line-height: 1.2; margin: 0; transition: color .22s; }
 .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 /* BUTTONS */
@@ -990,12 +1184,14 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
   background: var(--sp-surface); border: 1px solid var(--sp-border);
   border-radius: 14px; box-shadow: var(--c-shadow-sm);
   transition: border-color .18s, background-color .22s, box-shadow .18s;
-  animation: kpi-rise .6s cubic-bezier(.16, 1, .3, 1) backwards;
+  animation: kpi-rise .6s var(--sp-ease) backwards;
 }
 .kpi-card:nth-child(2) { animation-delay: 60ms; }
 .kpi-card:nth-child(3) { animation-delay: 120ms; }
 .kpi-card:nth-child(4) { animation-delay: 180ms; }
 @keyframes kpi-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+/* first card gets the soft accent tint (same as the first Product List card) */
+.kpi-card--featured { background: var(--sp-accent-soft); border-color: var(--sp-accent-border); }
 .kpi-card--search { border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.07); }
 .kpi-icon {
   width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
@@ -1014,7 +1210,7 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .kpi-value--text { font-size: 17px; letter-spacing: -.02em; }
-.kpi-hint { font-size: 11.5px; color: var(--sp-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-hint { font-size: 11.5px; font-weight: 600; color: var(--sp-text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 
 /* TOOLBAR: search + period in one card */
 .toolbar {
@@ -1023,7 +1219,7 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
   border-radius: var(--radius); padding: 8px 10px;
   box-shadow: var(--c-shadow-sm);
 }
-.search-field { position: relative; flex: 1 1 320px; min-width: 0; display: flex; align-items: center; }
+.search-field { position: relative; flex: 1 1 260px; min-width: 0; display: flex; align-items: center; }
 .search-icon { position: absolute; left: 13px; font-size: 12px; color: var(--sp-text-faint); pointer-events: none; }
 .search-input {
   width: 100%; height: 38px; padding: 0 40px 0 36px;
@@ -1034,11 +1230,11 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
   -webkit-appearance: none; appearance: none;
 }
 .search-input::-webkit-search-cancel-button { display: none; }
-.search-input:focus { border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); background: var(--sp-surface); }
+.search-input:focus { border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); }
 .search-input::placeholder { color: var(--sp-text-faint); }
 .search-clear {
-  position: absolute; right: 7px; width: 26px; height: 26px; border: none; border-radius: 7px;
-  background: none; color: var(--sp-text-faint); cursor: pointer; font-size: 12px;
+  position: absolute; right: 8px; width: 24px; height: 24px; border: none; border-radius: 6px;
+  background: none; color: var(--sp-text-faint); cursor: pointer; font-size: 11px;
   display: flex; align-items: center; justify-content: center; transition: background .15s, color .15s;
 }
 .search-clear:hover { background: var(--sp-border); color: var(--sp-text-primary); }
@@ -1056,10 +1252,10 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 }
 .search-note i { color: var(--sp-accent); }
 .search-note strong { color: var(--sp-text-primary); }
-.link-btn { background: none; border: none; padding: 0; margin-left: auto; font: inherit; font-weight: 700; color: var(--sp-accent); cursor: pointer; }
+.link-btn { background: none; border: none; padding: 0; margin-left: auto; font: inherit; font-weight: 600; color: var(--sp-accent); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
 
-/* PERIOD DROPDOWN */
+/* PERIOD DROPDOWN (same look as the Product List category select) */
 .period-dropdown-wrap { position: relative; display: inline-block; transition: opacity .18s; }
 .period-dropdown-wrap--muted { opacity: .55; }
 .period-trigger {
@@ -1067,7 +1263,7 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
   height: 38px; padding: 0 14px;
   border: 1.5px solid var(--sp-border-strong); border-radius: 10px;
   background: var(--sp-surface); color: var(--sp-text-secondary);
-  font-size: 13px; font-family: inherit; cursor: pointer;
+  font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
   transition: border-color .18s, background-color .22s, color .22s, box-shadow .18s;
 }
 .period-trigger:hover { border-color: var(--sp-accent-border); }
@@ -1097,13 +1293,18 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 .dropdown-fade-enter-from, .dropdown-fade-leave-to { opacity: 0; transform: translateY(-6px); }
 
 /* TABLE CARD */
-.table-card { background: var(--sp-surface); border: 1px solid var(--sp-border); border-radius: var(--radius); box-shadow: var(--c-shadow-sm); overflow: hidden; transition: background-color .22s, border-color .22s; }
+.table-card {
+  background: var(--sp-surface); border: 1px solid var(--sp-border); border-radius: var(--radius);
+  box-shadow: var(--c-shadow-sm); overflow: hidden;
+  transition: background-color .22s, border-color .22s;
+  scroll-margin-top: 120px;   /* the pager sets a precise value in JS */
+}
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .data-table thead th {
   background: var(--sp-surface-raised); color: var(--sp-text-faint);
-  font-size: 12px; font-weight: 600;
-  text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--sp-border);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--sp-border);
   white-space: nowrap; transition: background-color .22s, color .22s, border-color .22s;
 }
 .th-right { text-align: right !important; }
@@ -1112,7 +1313,7 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 
 .sort-btn {
   display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; border: none;
-  font: inherit; color: inherit; cursor: pointer; transition: color .15s;
+  font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit; cursor: pointer; transition: color .15s;
 }
 .sort-btn--right { flex-direction: row-reverse; }
 .sort-btn:hover { color: var(--sp-text-primary); }
@@ -1123,7 +1324,7 @@ html[data-theme="dark"] .btn--danger:hover { background: rgba(244,63,94,.20); }
 .data-table tbody tr { transition: background-color .15s; }
 .data-table tbody tr:hover td { background: var(--sp-surface-raised); }
 .data-table tbody tr.row--selected td { background: var(--sp-accent-soft); }
-.data-table tbody td { padding: 13px 16px; border-bottom: 1px solid var(--sp-border); white-space: nowrap; transition: background-color .15s, border-color .22s; }
+.data-table tbody td { padding: 14px 16px; border-bottom: 1px solid var(--sp-border); white-space: nowrap; transition: background-color .15s, border-color .22s; }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .row-click { cursor: pointer; }
 .row-go { font-size: 11px; color: var(--sp-text-faint); transition: color .15s, transform .15s; }
@@ -1144,16 +1345,17 @@ html[data-theme="dark"] .row-highlight td { background: rgba(16,185,129,.14) !im
   border-radius: 3px; padding: 0 2px; font-weight: 700;
 }
 
-/* CHECKBOX */
+/* CHECKBOX (same size and shape as the Product List checkboxes: 20px, 6px corners) */
 .checkbox-wrap { position: relative; display: inline-flex; cursor: pointer; }
-.checkbox-wrap input { position: absolute; opacity: 0; width: 18px; height: 18px; cursor: pointer; margin: 0; }
+.checkbox-wrap input { position: absolute; opacity: 0; width: 20px; height: 20px; cursor: pointer; margin: 0; }
 .checkbox-box {
-  width: 18px; height: 18px; border-radius: 5px;
+  width: 20px; height: 20px; border-radius: 6px;
   border: 1.5px solid var(--sp-border-strong); background: var(--sp-surface);
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; color: transparent;
-  transition: background-color .15s, border-color .15s, color .15s;
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s;
 }
+.checkbox-wrap:hover .checkbox-box { border-color: var(--sp-accent); }
 .checkbox-wrap input:checked + .checkbox-box,
 .checkbox-wrap--partial .checkbox-box { background: var(--sp-accent); border-color: var(--sp-accent); color: #fff; }
 .checkbox-wrap input:focus-visible + .checkbox-box { box-shadow: 0 0 0 3px var(--sp-ring); }
@@ -1166,7 +1368,7 @@ html[data-theme="dark"] .row-highlight td { background: rgba(16,185,129,.14) !im
 .receipt-link:hover { text-decoration: underline; }
 .receipt-link:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; border-radius: 3px; }
 
-.status-pill { display: inline-flex; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 3px 11px; letter-spacing: .03em; }
+.status-pill { display: inline-flex; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 4px 11px; letter-spacing: .03em; }
 .status-pill--paid { background: rgba(16,185,129,.12); color: var(--sp-green); }
 .status-pill--void { background: rgba(244,63,94,.12);  color: var(--sp-red); }
 html[data-theme="dark"] .status-pill--paid { background: rgba(16,185,129,.18); color: #4ADE80; }
@@ -1178,9 +1380,9 @@ html[data-theme="dark"] .status-pill--void { background: rgba(244,63,94,.18);  c
 /* EMPTY / LOADING / ERROR */
 .td-empty { padding: 56px 24px !important; text-align: center; border-bottom: none !important; }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--sp-text-faint); white-space: normal; }
-.empty-state i { font-size: 32px; margin-bottom: 4px; }
-.empty-state p { font-size: 14px; font-weight: 600; color: var(--sp-text-secondary); margin: 0; }
-.empty-state span { font-size: 13px; max-width: 360px; line-height: 1.5; }
+.empty-state i { font-size: 36px; margin-bottom: 4px; }
+.empty-state p { font-size: 14.5px; font-weight: 700; color: var(--sp-text-secondary); margin: 0; }
+.empty-state span { font-size: 12.5px; color: var(--sp-text-muted); max-width: 360px; line-height: 1.5; }
 .empty-state .btn { margin-top: 8px; }
 
 .state-block { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
@@ -1195,28 +1397,80 @@ html[data-theme="dark"] .status-pill--void { background: rgba(244,63,94,.18);  c
 }
 @keyframes skel-shimmer { to { background-position: -200% 0; } }
 
-/* PAGINATION */
-.pager {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  padding: 12px 16px; border-top: 1px solid var(--sp-border); font-size: 13px; color: var(--sp-text-muted);
+/* TABLE FOOTER + PAGINATION (same as Product List) */
+.table-footer {
+  padding: 11px 18px; border-top: 1px solid var(--sp-border);
+  font-size: 12px; color: var(--sp-text-muted); background: var(--sp-surface-raised);
 }
-.pager-info strong { color: var(--sp-text-primary); }
-.pager-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.pager-size { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; }
+.table-footer strong { color: var(--sp-text-primary); }
+.table-footer--pager { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; }
+.footer-controls { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; }
+
+.pager-size { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--sp-text-muted); }
 .pager-size select {
   height: 32px; padding: 0 8px; border: 1.5px solid var(--sp-border-strong); border-radius: 8px;
-  background: var(--sp-surface); color: var(--sp-text-secondary); font: inherit; cursor: pointer;
+  background: var(--sp-surface); color: var(--sp-text-secondary); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
 }
-.pager-page { padding: 0 6px; font-weight: 600; color: var(--sp-text-secondary); }
+.pager { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .pager-btn {
-  width: 32px; height: 32px; border: 1.5px solid var(--sp-border-strong); border-radius: 8px;
-  background: var(--sp-surface); color: var(--sp-text-secondary); cursor: pointer; font-size: 11px;
-  display: flex; align-items: center; justify-content: center;
-  transition: border-color .15s, color .15s, background .15s;
+  min-width: 32px; height: 32px; padding: 0 9px; border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1.5px solid var(--sp-border-strong); background: var(--sp-surface);
+  color: var(--sp-text-secondary); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: background-color .15s, border-color .15s, color .15s;
 }
-.pager-btn:hover:not(:disabled) { border-color: var(--sp-accent-border); color: var(--sp-accent); background: var(--sp-accent-soft); }
+.pager-btn i { font-size: 10px; }
+.pager-btn--wide { padding: 0 12px; }
+.pager-btn:hover:not(:disabled):not(.pager-btn--on) { border-color: var(--sp-accent-border); color: var(--sp-accent); background: var(--sp-accent-soft); }
+.pager-btn:focus-visible, .pager-size select:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--sp-ring); }
 .pager-btn:disabled { opacity: .4; cursor: not-allowed; }
-.pager-btn:focus-visible, .pager-size select:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+.pager-btn--on { background: var(--sp-accent); border-color: var(--sp-accent); color: #fff; cursor: default; }
+.pager-gap { min-width: 20px; text-align: center; color: var(--sp-text-faint); font-weight: 700; }
+
+/* ── SORT DROPDOWN (phones): compact custom menu, replaces the native <select> list ── */
+.menu-backdrop { position: fixed; inset: 0; z-index: 1000; background: transparent; }
+.sort-menu {
+  position: fixed; display: flex; flex-direction: column; overflow-y: auto;
+  padding: 6px; border-radius: 14px;
+  background: var(--sp-surface); border: 1px solid var(--sp-border-strong);
+  box-shadow: 0 18px 44px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.2);
+  transform-origin: top right; overscroll-behavior: contain;
+}
+.sort-menu--up { transform-origin: bottom right; }
+.sort-menu-title {
+  margin: 4px 10px 6px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--sp-text-faint);
+}
+.sort-opt {
+  position: relative; display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 40px; padding: 0 10px;
+  border: none; border-radius: 9px; background: transparent;
+  color: var(--sp-text-secondary); font: inherit; font-size: 13px; font-weight: 600;
+  text-align: left; cursor: pointer;
+  transition: background-color .12s ease, color .12s ease;
+}
+/* thin divider between each pair (date / amount / customer) */
+.sort-opt--sep { margin-top: 5px; }
+.sort-opt--sep::before {
+  content: ''; position: absolute; left: 10px; right: 10px; top: -3px;
+  height: 1px; background: var(--sp-border);
+}
+.sort-opt-icon { width: 14px; text-align: center; font-size: 12px; color: var(--sp-text-faint); flex-shrink: 0; }
+.sort-opt:active, .sort-opt:focus-visible { background: var(--sp-surface-raised); outline: none; }
+.sort-opt--on { background: var(--sp-accent-soft); color: var(--sp-accent); }
+.sort-opt--on .sort-opt-icon { color: var(--sp-accent); }
+.sort-opt-check { margin-left: auto; font-size: 12px; }
+
+/* pop in from the Sort button */
+.menu-enter-active, .menu-leave-active { transition: opacity .16s ease; }
+.menu-enter-from, .menu-leave-to { opacity: 0; }
+.menu-enter-active .sort-menu, .menu-leave-active .sort-menu { transition: transform .18s var(--sp-ease); }
+.menu-enter-from .sort-menu, .menu-leave-to .sort-menu { transform: scale(.95) translateY(-6px); }
+.menu-enter-from .sort-menu--up, .menu-leave-to .sort-menu--up { transform: scale(.95) translateY(6px); }
+
+/* The Sort button only exists on phones; never show the menu on wider screens */
+@media (min-width: 701px) { .menu-backdrop { display: none; } }
 
 /* BACK TO TOP: floating arrow, phones and tablets only */
 .back-top { display: none; }
@@ -1300,8 +1554,8 @@ html[data-theme="dark"] .success-modal { background: #1E2130; border-color: #2A2
 html[data-theme="dark"] .success-modal-icon { background: rgba(16,185,129,.16); color: #4ADE80; box-shadow: 0 0 0 10px rgba(16,185,129,.08); }
 @keyframes success-pop { from { transform: scale(.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .success-modal-body { padding: 18px 26px 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
-.success-modal-title { font-size: 19px; font-weight: 800; color: var(--sp-text-primary); letter-spacing: -.02em; margin: 0; }
-.success-modal-desc { font-size: 13.5px; line-height: 1.65; color: var(--sp-text-muted); margin: 0; }
+.success-modal-title { font-size: 18px; font-weight: 800; color: var(--sp-text-primary); letter-spacing: -.02em; margin: 0; }
+.success-modal-desc { font-size: 13px; line-height: 1.65; color: var(--sp-text-muted); margin: 0; }
 .success-modal-desc strong { color: var(--sp-text-primary); }
 .success-summary-chip {
   display: flex; align-items: center; gap: 12px; width: 100%;
@@ -1368,7 +1622,7 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
 .del-modal-desc strong { color: var(--sp-text-primary); }
 
 .pw-field { width: 100%; text-align: left; margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
-.pw-label { font-size: 12px; font-weight: 600; color: var(--sp-text-secondary); }
+.pw-label { font-size: 12.5px; font-weight: 600; color: var(--sp-text-secondary); }
 .input-wrap { position: relative; display: flex; align-items: center; }
 .input-icon { position: absolute; left: 13px; font-size: 12px; color: var(--sp-text-faint); pointer-events: none; z-index: 1; }
 .pw-input {
@@ -1400,13 +1654,13 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
 /* ══════════════════════════════════════════════════════════
    RESPONSIVE
    --bleed-x / --bleed-y reclaim the shell's padding at every size,
-   --sp-pad-x is the page's own inner side padding (same values as
-   Inventory Logs and Reports).
+   --sp-pad-x is the page's own inner side padding. These are the SAME
+   values the Product List uses at every breakpoint.
 ══════════════════════════════════════════════════════════ */
 
 /* ── Large screens: more breathing room ── */
 @media (min-width: 1500px) {
-  .sales-page { --sp-gap: 20px; --sp-pad-x: 32px; padding-bottom: 48px; }
+  .sales-page { --sp-gap: 16px; --sp-pad-x: 32px; padding-bottom: 48px; }
 }
 
 /* ── Desktop: cards + search + period stay pinned at the very top while the table scrolls.
@@ -1426,7 +1680,7 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
 
 /* ── Tablet landscape ── */
 @media (max-width: 1100px) {
-  .sales-page { --bleed-x: 22px; --bleed-y: 20px; }
+  .sales-page { --bleed-x: 22px; --bleed-y: 24px; }
   .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -1478,41 +1732,40 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
 
 /* ── Tablet portrait ── */
 @media (max-width: 900px) {
-  .sales-page { --sp-pad-x: 16px; --sp-gap: 14px; padding-top: 12px; padding-bottom: 32px; }
+  .sales-page { --sp-pad-x: 16px; --sp-gap: 12px; padding-top: 8px; padding-bottom: 32px; }
   .sales-page--has-bar { padding-bottom: 110px; }
 }
 
 /* ── Phone ──
-   Goals: edge-to-edge layout that uses the shell's top and side padding, a slim
-   pinned toolbar, big touch targets (≥ 40px), and receipt cards instead of a table. */
+   Goals (same as Product List): edge-to-edge layout that uses the shell's top and side
+   padding, a slim pinned toolbar, big touch targets (≥ 40px), and receipt cards instead of a table. */
 @media (max-width: 700px) {
   .sales-page {
-    --bleed-x: 16px; --bleed-y: 16px; --sp-pad-x: 12px; --sp-gap: 12px;
-    padding-top: 10px;
+    --bleed-x: 16px; --bleed-y: 12px; --sp-pad-x: 12px; --sp-gap: 10px;
+    padding-top: 12px;
     padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
   }
   .sales-page--has-bar { padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
 
-  /* Header: title on top, actions full width underneath */
-  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
-  .page-title { font-size: 23px; }
-  .header-actions { flex-direction: column; align-items: stretch; }
-  .header-actions .btn { height: 44px; }
+  /* Header: title stays on one line, the New Sale / Delete buttons go full width below it */
+  .page-eyebrow, .page-title { font-size: 14px; }
+  .page-header { flex-direction: column; align-items: stretch; gap: 10px; }
+  .header-actions { flex-direction: column; align-items: stretch; gap: 8px; }
+  .header-actions .btn { min-height: 44px; }
 
-  /* Summary cards: 2 × 2 grid, icon above the text */
-  .kpi-strip { gap: 10px; }
-  .kpi-card { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 12px 12px; }
+  /* Summary cards: 2 × 2 grid, icon beside the text (same as the Product List cards) */
+  .kpi-strip { gap: 8px; }
+  .kpi-card { padding: 10px 11px; gap: 9px; }
   .kpi-icon { width: 32px; height: 32px; font-size: 13px; }
-  .kpi-body { width: 100%; }
   .kpi-label { font-size: 10px; }
-  .kpi-value { font-size: 18px; }
+  .kpi-value { font-size: 19px; }
   .kpi-value--text { font-size: 15px; }
   .kpi-hint { font-size: 11px; }
 
   /* Pinned toolbar: search on top, period underneath, 44px touch targets */
-  .toolbar { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px; border-radius: 14px; }
+  .toolbar { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px; }
   .search-field { flex-basis: auto; }
-  .search-input { height: 44px; font-size: 14px; }
+  .search-input { height: 44px; font-size: 16px; }   /* 16px stops iOS zoom */
   .search-kbd { display: none; }
   .period-dropdown-wrap { width: 100%; }
   .period-trigger { width: 100%; height: 44px; font-size: 14px; }
@@ -1522,7 +1775,7 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
   .search-note { border-radius: 12px; }
 
   /* Table card: flat list of receipt cards */
-  .table-card { border-radius: 16px; }
+  .table-card { border-radius: 14px; }
   .table-wrap { overflow-x: visible; }
 
   /* Select all + sort row */
@@ -1533,13 +1786,18 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
   }
   .mobile-selectall { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--sp-text-secondary); cursor: pointer; min-height: 40px; }
   .mobile-sort { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--sp-text-faint); min-width: 0; }
-  .mobile-sort select {
-    height: 40px; max-width: 190px; padding: 0 10px; min-width: 0;
+  .sort-trigger {
+    max-width: 190px; min-width: 0; height: 40px; padding: 0 12px;
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
     border: 1.5px solid var(--sp-border-strong); border-radius: 10px;
     background: var(--sp-surface); color: var(--sp-text-primary);
     font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
   }
-  .mobile-sort select:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+  .sort-trigger i { font-size: 11px; color: var(--sp-text-faint); transition: transform .2s ease; }
+  .sort-trigger--open { border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); }
+  .sort-trigger--open i { transform: rotate(180deg); color: var(--sp-accent); }
+  .sort-trigger:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+  .sort-trigger-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Table rows → receipt cards */
   .data-table, .data-table tbody { display: block; width: 100%; }
@@ -1579,22 +1837,25 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
   .td-clerk::before { content: attr(data-label) ' · '; color: var(--sp-text-faint); font-weight: 600; }
   .td-go    { display: none !important; }
 
-  /* Bigger tap target for the checkbox on touch screens */
+  /* Bigger tap target for the checkbox on touch screens (24px, same as Product List) */
   .td-chk .checkbox-wrap { padding: 8px; margin: -8px; }
-  .td-chk .checkbox-box, .mobile-selectall .checkbox-box { width: 22px; height: 22px; font-size: 12px; }
-  .td-chk .checkbox-wrap input, .mobile-selectall .checkbox-wrap input { width: 22px; height: 22px; }
+  .td-chk .checkbox-box, .mobile-selectall .checkbox-box { width: 24px; height: 24px; font-size: 12px; }
+  .td-chk .checkbox-wrap input, .mobile-selectall .checkbox-wrap input { width: 24px; height: 24px; }
 
   /* Empty-state row stays a plain block */
   .data-table tbody tr:not(.row-click) { display: block; }
   .data-table tbody tr:not(.row-click) td { display: block; padding: 40px 16px !important; }
 
-  /* Pager: centred, big buttons */
-  .pager { justify-content: center; padding: 12px 14px; }
-  .pager-info { width: 100%; text-align: center; }
-  .pager-controls { justify-content: center; }
-  .pager-size { width: 100%; justify-content: center; margin-right: 0; }
+  /* Footer + pager: big Previous / Next, numbers shrink away except the current page */
+  .table-footer--pager { flex-direction: column; align-items: stretch; }
+  .footer-text { text-align: center; }
+  .footer-controls { flex-direction: column; align-items: stretch; gap: 10px; }
+  .pager-size { width: 100%; justify-content: center; }
   .pager-size select { height: 40px; padding: 0 12px; }
-  .pager-btn { width: 40px; height: 40px; font-size: 12px; }
+  .pager { justify-content: center; gap: 6px; flex-wrap: nowrap; }
+  .pager-btn { min-width: 40px; height: 40px; }
+  .pager-btn--wide { flex: 1; padding: 0 12px; }
+  .pager-btn--num:not(.pager-btn--on), .pager-gap { display: none; }
 
   /* Floating bar: full-width strip at the bottom on phones */
   .float-bar {
@@ -1605,25 +1866,24 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
   .float-btn { height: 42px; padding: 0 14px; }
 
   /* Modals: a bit more compact so they fit short screens */
-  .modal-backdrop { padding: 14px; }
+  .modal-backdrop { padding: 12px; }
   .del-modal-body, .success-modal-body { padding-left: 20px; padding-right: 20px; }
   .del-modal-footer { padding: 14px 20px 20px; }
   .success-modal-footer { padding: 0 20px 20px; }
+  .del-modal-btn { height: 46px; }
   .pw-input { height: 46px; font-size: 16px; } /* 16px stops iOS from zooming in on focus */
-  .search-input { font-size: 16px; }
 }
 
 /* ── Small phone ── */
 @media (max-width: 480px) {
-  .kpi-value { font-size: 17px; }
-  .mobile-sort select { max-width: 150px; }
+  .sort-trigger { max-width: 150px; }
 }
 
 /* ── Very narrow phones ── */
 @media (max-width: 380px) {
   .sales-page { --sp-pad-x: 10px; }
-  .kpi-strip { gap: 8px; }
-  .kpi-card { padding: 10px; }
+  .kpi-strip { gap: 6px; }
+  .kpi-card { padding: 9px; }
   .data-table tbody tr.row-click { padding: 12px 10px; column-gap: 10px; }
   .mobile-tools { padding: 8px 10px; }
   .period-trigger-label { display: none; }
@@ -1643,5 +1903,7 @@ html[data-theme="dark"] .del-modal-icon { background: rgba(244,63,94,.14); color
   .sticky-controls { transition: none; }
   .float-bar-enter-active, .float-bar-leave-active { transition: opacity .01s; }
   .back-top { transition: none; }
+  .menu-enter-active, .menu-leave-active,
+  .menu-enter-active .sort-menu, .menu-leave-active .sort-menu { transition: none; }
 }
 </style>

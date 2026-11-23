@@ -2,9 +2,9 @@
   <Layout title="Settings">
     <div class="settings-page">
 
-      <!-- HEADER (same pattern as Home) -->
+      <!-- HEADER (same pattern as Home / Suppliers) -->
       <div class="page-header">
-        <div>
+        <div class="page-heading">
           <h1 class="page-title">Settings</h1>
           <p class="page-sub">
             <span>Manage your account, appearance<template v-if="isAdmin"> and team</template>.</span>
@@ -13,8 +13,10 @@
           </p>
         </div>
         <div class="page-header-right">
-          <RouterLink to="/home" class="btn"><i class="fa-solid fa-arrow-left"></i>Dashboard</RouterLink>
-          <button type="button" class="btn btn--primary" :disabled="saving || !dirty" @click="saveChanges">
+          <RouterLink to="/home" class="btn btn--back" aria-label="Back to dashboard">
+            <i class="fa-solid fa-arrow-left"></i><span class="btn-text">Dashboard</span>
+          </RouterLink>
+          <button type="button" class="btn btn--primary btn--header-save" :disabled="saving || !dirty" @click="saveChanges">
             <i class="fa-solid" :class="saving ? 'fa-spinner fa-spin' : 'fa-floppy-disk'"></i>{{ saving ? 'Saving…' : 'Save changes' }}
           </button>
         </div>
@@ -164,8 +166,8 @@
           </section>
         </div>
 
-        <!-- ACTIONS -->
-        <div class="form-actions">
+        <!-- ACTIONS (sticky bar on phones, hidden there until something changes) -->
+        <div class="form-actions" :class="{ 'form-actions--idle': !dirty }">
           <span class="form-actions-note" v-if="dirty"><i class="fa-solid fa-circle-info"></i>You have unsaved changes.</span>
           <button type="button" class="btn" :disabled="!dirty || saving" @click="discardChanges"><i class="fa-solid fa-rotate-left"></i>Discard</button>
           <button type="submit" class="btn btn--primary" :disabled="saving || !dirty">
@@ -204,7 +206,7 @@
             </thead>
             <tbody>
               <tr v-for="u in filteredUsers" :key="u.id">
-                <td>
+                <td class="td-user">
                   <div class="team-user-cell">
                     <span class="team-avatar" :class="roleClass(u.role)">{{ initials(u.name) }}</span>
                     <div class="team-user-text">
@@ -213,9 +215,9 @@
                     </div>
                   </div>
                 </td>
-                <td><span class="team-badge" :class="roleClass(u.role)">{{ u.role }}</span></td>
-                <td><span class="team-badge" :class="u.status === 'active' ? 'team-badge--active' : 'team-badge--disabled'">{{ u.status === 'active' ? 'Active' : 'Disabled' }}</span></td>
-                <td class="team-muted">{{ timeAgo(u.last_active_at) }}</td>
+                <td class="td-role"><span class="team-badge" :class="roleClass(u.role)">{{ u.role }}</span></td>
+                <td class="td-status"><span class="team-badge" :class="u.status === 'active' ? 'team-badge--active' : 'team-badge--disabled'">{{ u.status === 'active' ? 'Active' : 'Disabled' }}</span></td>
+                <td class="team-muted td-last">{{ timeAgo(u.last_active_at) }}</td>
                 <td class="team-actions-cell">
                   <div class="team-row-menu-wrap">
                     <button type="button" class="icon-btn-sm" :ref="el => setRowButtonRef(u.id, el)" @click.stop="toggleRowMenu(u.id)" aria-label="Actions" :aria-expanded="openMenuId === u.id">
@@ -890,25 +892,42 @@ html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-back
 }
 
 .settings-page {
-  /* SPACE TUNING — identical to Home: reclaims part of the app shell's padding.
-     Lower these (or set 0px) if content ever touches the sidebar or top bar. */
-  --bleed-x: 30px;
-  --bleed-y: 26px;
-  --s-gap: 16px;
+  /* ── SPACE TUNING (same values as Home, Reports, Inventory Logs and Suppliers) ──
+     The app shell (Layout.vue) adds roughly 64px of its own padding around
+     every page. --bleed-* lets this page reclaim part of it on desktop.
+     Raise a value to push the content closer to the edge, lower it (or set
+     it to 0px) if content ever touches the sidebar or top bar.
+     --bleed-b reclaims the shell's bottom padding. */
+  --bleed-x: 32px;
+  --bleed-y: 30px;
+  --bleed-b: 30px;
+  /* Same idea for tablet and phone (below 1001px). The shell pads those screens
+     too, so the page pulls out into that padding. Raise these to use more space,
+     lower them (or use 0px) if content gets cut off at the screen edge. */
+  --bleed-xm: 12px;
+  --bleed-ym: 12px;
+  --bleed-bm: 12px;
+  --s-gap: 14px;
 
-  min-height: 100%; background: var(--s-bg); padding: 16px 24px 40px;
+  /* Height follows the content (no min-height), so a short page never forces a
+     scrollbar. border-box keeps the padding inside the width. */
+  box-sizing: border-box;
+  background: var(--s-bg); padding: 12px 16px 20px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--s-gap);
   -webkit-font-smoothing: antialiased;
+  transition: background-color .22s ease;
 }
+.settings-page *, .settings-page *::before, .settings-page *::after { box-sizing: border-box; }
 .settings-page button:focus-visible, .settings-page a:focus-visible, .settings-page input:focus-visible { outline: 2px solid var(--s-accent); outline-offset: 2px; }
 .green { color: var(--s-green); }
 
 /* ── header ── */
 .page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.page-heading { min-width: 0; }
 .page-title { font-size: 26px; font-weight: 800; color: var(--s-text); letter-spacing: -.03em; margin: 0; line-height: 1.15; }
-.page-sub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 0; font-size: 13.5px; font-weight: 500; color: var(--s-text-2); }
-.status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--s-muted); padding: 2px 10px 2px 8px; background: var(--s-surface); border: 1px solid var(--s-border); border-radius: 999px; }
+.page-sub { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin: 4px 0 0; font-size: 13.5px; font-weight: 500; color: var(--s-text-2); }
+.status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--s-muted); padding: 2px 10px 2px 8px; background: var(--s-surface); border: 1px solid var(--s-border); border-radius: 999px; white-space: nowrap; }
 .status i:not(.live-dot) { font-size: 10px; }
 .status--warn { color: var(--s-amber); border-color: rgba(245,158,11,.4); background: var(--s-amber-soft); font-weight: 600; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--s-green); animation: pulse 2.2s ease-out infinite; }
@@ -918,7 +937,7 @@ html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-back
 /* ── buttons ── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 16px;
-  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-decoration: none;
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-decoration: none; white-space: nowrap;
   color: var(--s-text-2); background: var(--s-surface); border: 1px solid var(--s-border-strong); border-radius: 10px;
   box-shadow: 0 1px 2px rgba(16,24,40,.05);
   transition: border-color .15s ease, color .15s ease, transform .15s ease, box-shadow .15s ease, filter .15s ease;
@@ -1031,7 +1050,7 @@ html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-back
 .form-input:focus { border-color: var(--s-accent); box-shadow: 0 0 0 3px var(--s-ring); background: var(--s-surface); }
 .form-input--pw { padding-right: 42px; }
 .form-input--mismatch { border-color: var(--s-red) !important; box-shadow: 0 0 0 3px rgba(244,63,94,.12) !important; }
-.pw-toggle { position: absolute; right: 8px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 8px; cursor: pointer; color: var(--s-faint); font-size: 13px; transition: color .15s, background-color .15s; }
+.pw-toggle { position: absolute; right: 6px; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 8px; cursor: pointer; color: var(--s-faint); font-size: 13px; transition: color .15s, background-color .15s; }
 .pw-toggle:hover { color: var(--s-text-2); background: var(--s-raised); }
 .form-hint { font-size: 11.5px; margin: 0; color: var(--s-muted); }
 .form-hint--error { color: var(--s-red); }
@@ -1067,10 +1086,10 @@ html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-back
 .team-table td { padding: 10px 12px; vertical-align: middle; color: var(--s-text-2); border-bottom: 1px solid var(--s-border); }
 .team-table tbody tr:last-child td { border-bottom: none; }
 .team-muted { color: var(--s-faint); font-size: 12.5px; white-space: nowrap; }
-.team-user-cell { display: flex; align-items: center; gap: 11px; }
+.team-user-cell { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .team-user-text { min-width: 0; }
 .team-user-name { margin: 0; font-size: 13px; font-weight: 600; color: var(--s-text); line-height: 1.3; }
-.team-user-email { margin: 1px 0 0; font-size: 11.5px; color: var(--s-faint); }
+.team-user-email { margin: 1px 0 0; font-size: 11.5px; color: var(--s-faint); overflow-wrap: anywhere; }
 .you-tag { margin-left: 8px; font-size: 10px; font-weight: 700; color: var(--s-muted); background: var(--s-sunken); border: 1px solid var(--s-border); padding: 1px 7px; border-radius: 999px; }
 .team-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
 .team-badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
@@ -1085,19 +1104,19 @@ html[data-theme="dark"] .team-badge--active { color: #4ADE80; }
 .team-badge--disabled { background: var(--s-sunken); color: var(--s-faint); }
 .team-actions-cell { text-align: right; }
 .team-row-menu-wrap { position: relative; display: inline-block; }
-.icon-btn-sm { width: 32px; height: 32px; border: 1.5px solid var(--s-border-strong); border-radius: 9px; background: var(--s-surface); color: var(--s-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background-color .15s, border-color .15s, color .15s; }
+.icon-btn-sm { width: 34px; height: 34px; border: 1.5px solid var(--s-border-strong); border-radius: 9px; background: var(--s-surface); color: var(--s-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background-color .15s, border-color .15s, color .15s; }
 .icon-btn-sm:hover { background: var(--s-accent-soft); border-color: var(--s-accent-border); color: var(--s-accent); }
 
 /* ── modals ── */
 .team-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.7); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 16px; }
 html[data-theme="dark"] .team-modal-backdrop { background: rgba(0,0,0,.82); }
-.team-modal { background: #fff; border: 1px solid #E5E7EB; border-radius: 20px; padding: 30px 28px; width: 400px; max-width: 100%; box-shadow: 0 24px 64px rgba(0,0,0,.35); text-align: center; transition: transform .24s cubic-bezier(.4,0,.2,1), opacity .2s ease; }
+.team-modal { background: #fff; border: 1px solid #E5E7EB; border-radius: 20px; padding: 30px 28px; width: 400px; max-width: 100%; max-height: calc(100dvh - 32px); overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,.35); text-align: center; transition: transform .24s cubic-bezier(.4,0,.2,1), opacity .2s ease; }
 .team-modal--edit-role { width: 420px; }
 html[data-theme="dark"] .team-modal { background: #1E2130; border-color: #2A2D3E; box-shadow: 0 24px 64px rgba(0,0,0,.6); }
 .team-modal-icon { width: 48px; height: 48px; border-radius: 13px; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--s-accent); background: var(--s-accent-soft); border: 1px solid var(--s-accent-border); }
 .team-modal-icon--danger { background: var(--s-red-soft); border-color: rgba(244,63,94,.25); color: var(--s-red); }
 .team-modal-icon--success { background: var(--s-green-soft); border-color: rgba(16,185,129,.3); color: var(--s-green); }
-.team-modal-title { font-size: 16px; font-weight: 700; color: var(--s-text); margin: 0 0 6px; }
+.team-modal-title { font-size: 16px; font-weight: 700; color: var(--s-text); margin: 0 0 6px; overflow-wrap: anywhere; }
 .team-modal-desc { font-size: 12.5px; color: var(--s-muted); line-height: 1.6; margin: 0 0 18px; }
 .team-modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 4px; }
 .edit-role-subject { display: flex; align-items: center; gap: 10px; background: var(--s-sunken); border: 1px solid var(--s-border); border-radius: 12px; padding: 10px 12px; margin-bottom: 14px; text-align: left; }
@@ -1108,10 +1127,10 @@ html[data-theme="dark"] .team-modal { background: #1E2130; border-color: #2A2D3E
 .temp-password-box { background: var(--s-accent-soft); border: 1px solid var(--s-accent-border); border-radius: 12px; padding: 12px 14px 10px; margin-bottom: 16px; text-align: left; transition: background-color .2s, border-color .2s; }
 .temp-password-label { margin: 0 0 6px; font-size: 11.5px; font-weight: 700; color: var(--s-accent); }
 .temp-password-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.temp-password-value { font-size: 15px; font-weight: 700; color: var(--s-text); letter-spacing: .02em; font-family: 'Courier New', monospace; user-select: all; overflow-wrap: anywhere; }
+.temp-password-value { font-size: 15px; font-weight: 700; color: var(--s-text); letter-spacing: .02em; font-family: 'Courier New', monospace; user-select: all; overflow-wrap: anywhere; min-width: 0; }
 .temp-password-box--copied { background: var(--s-green-soft); border-color: rgba(16,185,129,.4); }
 .temp-password-box--copied .temp-password-label { color: var(--s-green); }
-.copy-btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 1.5px solid var(--s-accent-border); border-radius: 8px; background: var(--s-surface); color: var(--s-accent); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; flex-shrink: 0; transition: background-color .15s, border-color .15s, color .15s, transform .15s; }
+.copy-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1.5px solid var(--s-accent-border); border-radius: 8px; background: var(--s-surface); color: var(--s-accent); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; flex-shrink: 0; transition: background-color .15s, border-color .15s, color .15s, transform .15s; }
 .copy-btn i { font-size: 11px; }
 .copy-btn:hover { background: var(--s-accent-soft); }
 .copy-btn:active { transform: scale(.96); }
@@ -1132,28 +1151,110 @@ html[data-theme="dark"] .copy-status--error { color: #F87171; }
 .dropdown-leave-active { transition: opacity .1s ease, transform .1s ease; }
 .dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-4px) scale(.97); }
 
-/* ── responsive ── */
-/* Desktop only: pull the page outward into the shell's padding, same as Home */
+/* ══ RESPONSIVE (same breakpoints as Home, Reports, Inventory Logs and Suppliers) ══ */
+
+/* Desktop only: pull the page outward into the shell's padding (top, left, right, bottom). */
 @media (min-width: 1001px) {
-  .settings-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) 0; }
+  .settings-page { margin: calc(-1 * var(--bleed-y)) calc(-1 * var(--bleed-x)) calc(-1 * var(--bleed-b)); }
 }
-@media (max-width: 1000px) { .row-two, .row-two--even { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 900px) { .settings-page { padding: 12px 14px 32px; --s-gap: 14px; } }
+/* Tablet and phone: pull out into the shell's smaller padding as well */
+@media (max-width: 1000px) {
+  .settings-page { margin: calc(-1 * var(--bleed-ym)) calc(-1 * var(--bleed-xm)) calc(-1 * var(--bleed-bm)); }
+}
+
+/* Tablet and below: single column cards */
+@media (max-width: 1000px) {
+  .row-two, .row-two--even { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Tablet / large phone: tighter page padding */
+@media (max-width: 900px) {
+  .settings-page { padding: 10px 12px 20px; --s-gap: 12px; }
+}
+
+/* Team table becomes one compact card per person */
+@media (max-width: 700px) {
+  .team-scroll { overflow: visible; margin: 0; padding: 0; }
+  .team-table, .team-table tbody { display: block; width: 100%; }
+  .team-table thead { display: none; }
+  .team-table tbody tr {
+    position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 8px;
+    padding: 12px; margin-bottom: 10px;
+    background: var(--s-surface); border: 1px solid var(--s-border); border-radius: 14px;
+  }
+  .team-table tbody tr:last-child { margin-bottom: 0; }
+  .team-table tbody tr:hover { background: var(--s-surface); }
+  .team-table td { display: block; width: auto; padding: 0; border: none; }
+  .team-table td.td-user { width: 100%; padding-right: 44px; }
+  .team-table td.team-actions-cell { position: absolute; top: 10px; right: 10px; }
+  .team-table td.td-last { margin-left: auto; font-size: 12px; }
+  .team-table td.td-last::before { content: 'Last active: '; }
+  .team-user-name { overflow-wrap: anywhere; }
+}
+
+/* Phones */
 @media (max-width: 600px) {
-  .card { padding: 18px 16px; border-radius: 16px; }
-  .page-header { flex-direction: column; align-items: stretch; }
-  .page-title { font-size: 24px; }
-  .page-header-right .btn--primary { display: none; } /* the sticky form actions below cover this on mobile */
-  .form-actions { flex-direction: column-reverse; align-items: stretch; }
-  .form-actions-note { margin: 0; justify-content: center; }
+  .settings-page { padding: 8px 10px 20px; --s-gap: 10px; }
+
+  /* Header stays on one row: title left, compact back button right */
+  .page-header { flex-wrap: nowrap; align-items: flex-start; gap: 10px; }
+  .page-title { font-size: 22px; }
+  .page-sub { font-size: 13px; margin-top: 3px; }
+  .page-header-right { flex-shrink: 0; flex-wrap: nowrap; }
+  .btn--back { width: 38px; padding: 0; }
+  .btn--back .btn-text { display: none; }
+  .btn--header-save { display: none; } /* the sticky action bar below covers this on phones */
+
+  .card { padding: 14px 12px; border-radius: 14px; }
+  .card::before { left: 18px; right: 18px; }
+  .card--hero::after { width: 200px; height: 200px; top: -70px; right: -60px; }
+  .card-header { margin-bottom: 14px; }
+  .card-head-l { align-items: flex-start; }
+
+  .profile { gap: 14px; }
+  .profile-avatar { width: 54px; height: 54px; border-radius: 15px; font-size: 19px; }
+  .profile-name { font-size: 18px; }
+  .mini-stats { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin-top: 16px; }
+  .ms { padding: 10px 12px; }
+  .mini-stats dd { font-size: 14.5px; }
+
+  .theme-choices { gap: 10px; }
+  .theme-prev { height: 54px; }
+
+  /* 16px stops iOS from zooming the page when a field is focused */
+  .form-input, .team-search input { font-size: 16px; }
+  .form-input { height: 46px; }
+  .form-stack { gap: 14px; }
+
+  /* Save / Discard bar: only shows once there is something to save */
+  .form-actions {
+    position: sticky; bottom: 8px; z-index: 5;
+    flex-direction: row; align-items: stretch; gap: 8px; padding: 10px;
+    background: var(--s-surface); border: 1px solid var(--s-border); border-radius: 14px;
+    box-shadow: var(--s-shadow-hover);
+  }
+  .form-actions .btn { flex: 1; height: 42px; }
+  .form-actions-note { display: none; }
+  .form-actions--idle { display: none; }
+
+  /* Team */
   .team-tools { width: 100%; }
-  .team-search { flex: 1; }
-  .team-search input { width: 100%; }
-  .team-user-email { display: none; }
-  .team-scroll { margin: 0 -16px -8px; }
-  .team-modal { padding: 24px 20px; }
+  .team-tools .btn { flex-shrink: 0; }
+  .team-search { flex: 1; min-width: 0; }
+  .team-search input { width: 100%; min-width: 0; }
+
   .notice { flex-wrap: wrap; }
+
+  /* Modals */
+  .team-modal-backdrop { padding: 12px; }
+  .team-modal { padding: 24px 18px; border-radius: 18px; }
+  .team-modal-actions { flex-direction: column-reverse; }
+  .team-modal-actions .btn { width: 100%; height: 44px; }
+  .btn--min { min-width: 0; }
+  .temp-password-row { flex-wrap: wrap; }
+  .temp-password-value { font-size: 14px; }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .settings-page * { transition: none !important; animation: none !important; }
 }

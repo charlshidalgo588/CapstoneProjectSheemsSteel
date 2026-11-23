@@ -7,6 +7,7 @@ use App\Models\SalesItem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class CustomerController extends Controller
 {
@@ -88,26 +89,36 @@ class CustomerController extends Controller
 
     /**
      * POST /api/customers
-     * "Add repeat buyer": for buyers already on the client's own list. They
-     * qualify immediately, without needing 10 purchases. If someone with the
-     * same name is already being tracked, that customer is upgraded instead
-     * of creating a duplicate.
+     * "Add repeat buyer": for buyers already on the client's own list.
+     *  - Name already a repeat buyer  -> rejected (422), nothing is registered again.
+     *  - Name tracked, not yet repeat -> that customer is upgraded (no duplicate).
+     *  - New name                     -> new customer, repeat buyer right away.
      */
     public function store(Request $request)
     {
-        $name     = trim((string) $request->input('CustomerName'));
-        $existing = $name !== '' ? Customer::where('CustomerName', $name)->first() : null;
+        $name     = $this->cleanName((string) $request->input('CustomerName'));
+        $existing = $name !== '' ? $this->findByName($name) : null;
 
         $data = $this->validated($request, $existing?->CustomerID);
 
         if ($existing) {
+            $visits = DB::table('sales')->where('CustomerID', $existing->CustomerID)->count();
+            $alreadyRepeat = (bool) $existing->IsRepeatBuyer || $visits >= self::REPEAT_MIN_PURCHASES;
+
+            if ($alreadyRepeat) {
+                throw ValidationException::withMessages([
+                    'CustomerName' => "“{$existing->CustomerName}” is already a repeat buyer ({$existing->CustomerCode}). No duplicate was added.",
+                ]);
+            }
+
+            // upgrade: the customer was only being tracked so far
             $existing->IsRepeatBuyer = true;
             if (! empty($data['ContactNumber'])) {
                 $existing->ContactNumber = $data['ContactNumber'];
             }
             $existing->save();
 
-            return response()->json($existing);
+            return response()->json(array_merge($existing->toArray(), ['upgraded' => true]));
         }
 
         // CustomerCode is generated automatically by the Customer model.
@@ -124,7 +135,19 @@ class CustomerController extends Controller
     public function update(Request $request, $id)
     {
         $customer = Customer::findOrFail($id);
-        $customer->update($this->validated($request, (int) $customer->CustomerID));
+        $data     = $this->validated($request, (int) $customer->CustomerID);
+
+        // Only check the name when it actually changed, so older duplicates can still be edited.
+        if (mb_strtolower($data['CustomerName']) !== mb_strtolower($this->cleanName((string) $customer->CustomerName))) {
+            $other = $this->findByName($data['CustomerName'], (int) $customer->CustomerID);
+            if ($other) {
+                throw ValidationException::withMessages([
+                    'CustomerName' => "Another customer is already named “{$other->CustomerName}” ({$other->CustomerCode}).",
+                ]);
+            }
+        }
+
+        $customer->update($data);
 
         return response()->json($customer);
     }
@@ -179,6 +202,21 @@ class CustomerController extends Controller
 
     /* ── helpers ───────────────────────────────────────────── */
 
+    /** Trim and collapse repeated spaces so "Juan  Dela Cruz " equals "Juan Dela Cruz". */
+    private function cleanName(string $name): string
+    {
+        return trim(preg_replace('/\s+/', ' ', $name));
+    }
+
+    /** Find a customer by name, ignoring capitals (optionally skipping one customer). */
+    private function findByName(string $name, ?int $exceptId = null): ?Customer
+    {
+        return Customer::query()
+            ->whereRaw('LOWER(TRIM(CustomerName)) = ?', [mb_strtolower($this->cleanName($name))])
+            ->when($exceptId, fn ($q) => $q->where('CustomerID', '!=', $exceptId))
+            ->first();
+    }
+
     /**
      * A customer is a repeat buyer when the client listed them (IsRepeatBuyer)
      * OR they have reached REPEAT_MIN_PURCHASES recorded purchases.
@@ -204,7 +242,7 @@ class CustomerController extends Controller
         $phone = preg_replace('/\D+/', '', (string) $request->input('ContactNumber'));
 
         $request->merge([
-            'CustomerName'  => trim((string) $request->input('CustomerName')),
+            'CustomerName'  => $this->cleanName((string) $request->input('CustomerName')),
             'ContactNumber' => $phone !== '' ? $phone : null,
         ]);
 

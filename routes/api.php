@@ -160,8 +160,9 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class, UpdateLastActive::
     /* ─── ADMINISTRATOR ONLY ─────────────────────────────── */
     Route::middleware($adminOnly)->group(function () {
 
-        // Reports
+        // Reports (insights = busiest times + running-out-soon list)
         Route::get('/reports', [ReportsController::class, 'index']);
+        Route::get('/reports/insights', [ReportsController::class, 'insights']);
 
         // Team / user management
         Route::get   ('/users',                       [UserController::class, 'index']);

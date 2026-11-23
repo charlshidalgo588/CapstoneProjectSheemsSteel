@@ -2678,8 +2678,8 @@ html[data-theme="dark"] .del-modal-chip-avatar { background: rgba(244,63,94,.18)
    padding, big touch targets (≥ 40px), a bottom-sheet restock modal, single-column cards. */
 @media (max-width: 700px) {
   .prod-list-page {
-    --bleed-x: 16px; --bleed-y: 20px; --pl-pad-x: 12px; --pl-gap: 10px;
-    padding-top: 6px;
+    --bleed-x: 16px; --bleed-y: 12px; --pl-pad-x: 12px; --pl-gap: 10px;
+    padding-top: 12px;
     padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
   }
 
