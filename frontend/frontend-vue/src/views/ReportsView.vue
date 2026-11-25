@@ -8,6 +8,7 @@
           <h1 class="page-title">Reports</h1>
           <p class="page-sub">
             <span>{{ periodLabel || 'Loading…' }}</span>
+            <span v-if="mode === 'range'" class="chip chip--muted">{{ rangeStepText }}</span>
             <span v-if="isCurrentPeriod" class="chip chip--live">In progress</span>
           </p>
           <p v-if="lastUpdated && !loading" class="page-updated">Updated {{ lastUpdated }}</p>
@@ -30,17 +31,19 @@
         </div>
       </header>
 
-      <!-- ── PERIOD BAR (sticky at the very top): group by + navigate + export actions ── -->
+      <!-- ── PERIOD BAR (sticky at the very top): group by + navigate + export actions.
+           The "One day / Range of days" switch and the quick ranges now live inside the dropdown. ── -->
       <div class="period-bar" ref="periodBar" :style="{ top: stickyTop + 'px' }" role="group" aria-label="Report period">
+        <!-- 1. Pick the unit: Day / Week / Month / Year -->
         <div class="seg" role="group" aria-label="Group report by">
           <button
             v-for="m in MODES"
             :key="m.key"
             type="button"
             class="seg-btn"
-            :class="{ 'seg-btn--active': mode === m.key }"
-            :aria-pressed="mode === m.key"
-            @click="setMode(m.key)"
+            :class="{ 'seg-btn--active': activeUnit === m.key }"
+            :aria-pressed="activeUnit === m.key"
+            @click="setUnit(m.key)"
           >
             {{ m.label }}
           </button>
@@ -52,6 +55,7 @@
             class="icon-btn"
             :disabled="!canGoPrev"
             :aria-label="`Previous ${modeNoun}`"
+            :title="mode === 'range' ? `Go back ${rangeStepText}` : null"
             @click="shiftPeriod(-1)"
           >
             <i class="fa-solid fa-chevron-left"></i>
@@ -81,6 +85,39 @@
               <div v-if="pickerOpen" class="picker-pop" role="dialog" :aria-label="`Choose ${modeNoun}`">
                 <span class="pk-grab" aria-hidden="true"></span>
 
+                <!-- One / Range switch (moved here from the sticky bar). Years have no range. -->
+                <div class="seg seg--sm pk-span" role="group" :aria-label="`Show one ${activeUnit} or a range`">
+                  <button
+                    type="button"
+                    class="seg-btn"
+                    :class="{ 'seg-btn--active': mode !== 'range' }"
+                    :aria-pressed="mode !== 'range'"
+                    @click="setSpan('single', true)"
+                  >{{ singleBtnLabel }}</button>
+                  <button
+                    type="button"
+                    class="seg-btn"
+                    :class="{ 'seg-btn--active': mode === 'range' }"
+                    :aria-pressed="mode === 'range'"
+                    @click="setSpan('range', true)"
+                  >{{ rangeBtnLabel }}</button>
+                </div>
+
+                <!-- Range mode: shows what is being picked (From → To) -->
+                <template v-if="showRangeHead">
+                  <div class="pk-range">
+                    <div class="pk-range-box" :class="{ 'pk-range-box--active': !pkDraftStart }">
+                      <span>From</span>
+                      <strong>{{ pkRangeFrom }}</strong>
+                    </div>
+                    <div class="pk-range-box" :class="{ 'pk-range-box--active': !!pkDraftStart }">
+                      <span>To</span>
+                      <strong>{{ pkRangeTo }}</strong>
+                    </div>
+                  </div>
+                  <p class="pk-hint">{{ pkHintText }}</p>
+                </template>
+
                 <!-- Header: ‹ title › -->
                 <div class="pk-head">
                   <button type="button" class="pk-nav" :disabled="!pkCanPrev" :class="{ 'pk-nav--hide': pickerView === 'years' }" aria-label="Previous" @click="pkShift(-1)">
@@ -95,8 +132,8 @@
                   </button>
                 </div>
 
-                <!-- Days (Day mode picks a day, Week mode picks the week that day belongs to) -->
-                <div v-if="pickerView === 'days'" class="pk-days">
+                <!-- Days (Day mode picks a day, Week mode picks the week that day belongs to, Range of days / weeks picks start → end) -->
+                <div v-if="pickerView === 'days'" class="pk-days" @mouseleave="pkHover(null)">
                   <span v-for="w in PK_WEEKDAYS" :key="w" class="pk-dow">{{ w }}</span>
                   <template v-for="(c, i) in pkDayCells" :key="i">
                     <span v-if="!c" class="pk-blank"></span>
@@ -104,46 +141,72 @@
                       v-else
                       type="button"
                       class="pk-day"
-                      :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
-                      :disabled="c.future"
+                      :class="{
+                        'pk-on': c.selected,
+                        'pk-today': c.today,
+                        'pk-mid': c.inRange,
+                        'pk-edge-s': c.edge === 'start',
+                        'pk-edge-e': c.edge === 'end',
+                      }"
+                      :disabled="c.future || c.tooFar"
                       :aria-pressed="c.selected"
                       :aria-label="c.title"
+                      @mouseenter="pkHover(c.key)"
+                      @focus="pkHover(c.key)"
                       @click="pkPickDay(c.key)"
                     >{{ c.d }}</button>
                   </template>
                 </div>
 
-                <!-- Months -->
-                <div v-else-if="pickerView === 'months'" class="pk-grid">
+                <!-- Months (also the start → end picker for a range of months) -->
+                <div v-else-if="pickerView === 'months'" class="pk-grid" @mouseleave="pkHoverMonth(null)">
                   <button
                     v-for="c in pkMonthCells"
                     :key="c.key"
                     type="button"
                     class="pk-cell"
-                    :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
-                    :disabled="c.future"
+                    :class="{
+                      'pk-on': c.selected,
+                      'pk-today': c.today,
+                      'pk-mid': c.inRange,
+                      'pk-edge-s': c.edge === 'start',
+                      'pk-edge-e': c.edge === 'end',
+                    }"
+                    :disabled="c.future || c.tooFar"
                     :aria-pressed="c.selected"
                     :aria-label="c.title"
+                    @mouseenter="pkHoverMonth(c.key)"
+                    @focus="pkHoverMonth(c.key)"
                     @click="pkPickMonth(c.m)"
                   >{{ c.label }}</button>
                 </div>
 
-                <!-- Years -->
-                <div v-else class="pk-grid">
+                <!-- Years (also the start → end picker for a range of years) -->
+                <div v-else class="pk-grid" @mouseleave="pkHoverYear(null)">
                   <button
                     v-for="c in pkYearCells"
                     :key="c.y"
                     type="button"
                     class="pk-cell"
-                    :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
+                    :class="{
+                      'pk-on': c.selected,
+                      'pk-today': c.today,
+                      'pk-mid': c.inRange,
+                      'pk-edge-s': c.edge === 'start',
+                      'pk-edge-e': c.edge === 'end',
+                    }"
+                    :disabled="c.tooFar"
                     :aria-pressed="c.selected"
+                    @mouseenter="pkHoverYear(c.y)"
+                    @focus="pkHoverYear(c.y)"
                     @click="pkPickYear(c.y)"
                   >{{ c.y }}</button>
                 </div>
 
                 <div class="pk-foot">
                   <button type="button" class="pk-link pk-link--muted" @click="closePicker(true)">Close</button>
-                  <button type="button" class="pk-link" :disabled="isCurrentPeriod" @click="pkGoCurrent">
+                  <span v-if="mode === 'range'" class="pk-limit">{{ rangeLimitText }}</span>
+                  <button v-else type="button" class="pk-link" :disabled="isCurrentPeriod" @click="pkGoCurrent">
                     <i class="fa-solid fa-location-crosshairs"></i>{{ currentLabel }}
                   </button>
                 </div>
@@ -156,15 +219,12 @@
             class="icon-btn"
             :disabled="!canGoNext"
             :aria-label="`Next ${modeNoun}`"
+            :title="mode === 'range' ? `Go forward ${rangeStepText}` : null"
             @click="shiftPeriod(1)"
           >
             <i class="fa-solid fa-chevron-right"></i>
           </button>
         </div>
-
-        <button v-if="!isCurrentPeriod" type="button" class="link-btn link-btn--current" @click="goCurrent">
-          <i class="fa-solid fa-rotate-left"></i>{{ currentLabel }}
-        </button>
 
         <!-- Right side: status text + Copy / CSV / Print (hidden on phones; see header) -->
         <div class="period-end">
@@ -293,7 +353,7 @@
           </div>
         </section>
 
-        <!-- ── 3. BUSIEST HEATMAP (adapts: Day/Week → week strip, Month → calendar, Year → months) ── -->
+        <!-- ── 3. BUSIEST HEATMAP (adapts: Day → hours, Week / short Range → strip, Month / long Range → calendar, Year → months) ── -->
         <section class="card" aria-labelledby="rp-heat">
           <header class="card-head">
             <div>
@@ -307,8 +367,8 @@
           </header>
 
           <div class="heat-layout">
-            <div class="heat" :class="[`heat--${heatShape}`, { 'heat--tx': calMetric === 'tx' }]">
-              <template v-if="mode === 'month'">
+            <div class="heat" :class="[`heat--${heatShape}`, { 'heat--tx': calMetric === 'tx', 'heat--dense': heatDense }]">
+              <template v-if="heatShape === 'month'">
                 <span v-for="(w, i) in weekdays" :key="'w' + i" class="heat-dow">{{ w }}</span>
               </template>
 
@@ -334,11 +394,12 @@
                     <span class="hc-num">{{ c.num }}</span>
                     <span class="hc-amt">{{ c.future ? '' : heatShort(c) }}</span>
                   </template>
-                  <template v-else-if="mode === 'year'">
+                  <template v-else-if="heatShape === 'year'">
+                    <span v-if="c.mon" class="hc-mon">{{ c.mon }}</span>
                     <span class="hc-month">{{ c.label }}</span>
                     <span class="hc-amt">{{ c.future ? '' : heatShort(c) }}</span>
                   </template>
-                  <template v-else>{{ c.label }}</template>
+                  <template v-else><span v-if="c.mon" class="hc-mon">{{ c.mon }}</span>{{ c.label }}</template>
                 </button>
               </template>
 
@@ -348,7 +409,7 @@
             <div v-if="heatDetail" class="heat-day" aria-live="polite">
               <div class="heat-day-head">
                 <h3 class="heat-day-title">{{ heatDetail.cell.title }}</h3>
-                <span v-if="heatDetail.cell.today" class="chip chip--accent">{{ mode === 'year' ? 'This month' : mode === 'day' ? 'This hour' : 'Today' }}</span>
+                <span v-if="heatDetail.cell.today" class="chip chip--accent">{{ heatShape === 'year' ? 'This month' : mode === 'day' ? 'This hour' : 'Today' }}</span>
                 <span v-if="heatDetail.isBusiest" class="chip chip--live">Busiest {{ heatCellWord }}</span>
                 <button v-if="canOpenHeat" type="button" class="link-btn" @click="openHeatCell">{{ openHeatLabel }}</button>
               </div>
@@ -370,7 +431,7 @@
                 <div><dt>Cost of goods</dt><dd>₱{{ price(heatDetail.cost) }}</dd></div>
                 <div><dt>Margin</dt><dd>{{ heatDetail.margin }}%</dd></div>
                 <div><dt>Share of {{ heatRangeWord }} {{ heatMetricNoun }}</dt><dd>{{ heatDetail.share }}%</dd></div>
-                <div><dt>Vs {{ heatCellWord }}ly average</dt><dd :class="heatDetail.vsAvg >= 0 ? 'pos' : 'neg'">{{ heatDetail.vsAvg >= 0 ? '+' : '' }}{{ heatDetail.vsAvg.toFixed(1) }}%</dd></div>
+                <div><dt>Vs {{ seriesWord.toLowerCase() }} average</dt><dd :class="heatDetail.vsAvg >= 0 ? 'pos' : 'neg'">{{ heatDetail.vsAvg >= 0 ? '+' : '' }}{{ heatDetail.vsAvg.toFixed(1) }}%</dd></div>
               </dl>
             </div>
           </div>
@@ -853,14 +914,34 @@ function shiftDayStr(dayStr, n) {
   d.setDate(d.getDate() + n)
   return toDayStr(d)
 }
+// Whole days from a to b (b - a), both 'YYYY-MM-DD'.
+function dayDiff(a, b) {
+  return Math.round((new Date(`${b}T00:00:00`) - new Date(`${a}T00:00:00`)) / 86400000)
+}
 // Weeks run Sunday → Saturday. weekStr is the Sunday.
 const weekEndStr = (weekStr) => shiftDayStr(weekStr, 6)
 
-// "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" / "Dec 28, 2026 – Jan 3, 2027"
-function formatWeekRange(weekStr) {
-  const s = new Date(`${weekStr}T00:00:00`)
-  const e = new Date(`${weekEndStr(weekStr)}T00:00:00`)
+// Month helpers (function declarations so they are available everywhere, including early setup code).
+// A "month index" is year * 12 + (month - 1).
+function monthIdxOf(ym) {
+  const [y, m] = String(ym).split('-').map(Number)
+  return y * 12 + (m - 1)
+}
+function idxFirst(i) { return `${Math.floor(i / 12)}-${pad((i % 12) + 1)}-01` }
+function idxLast(i)  { return toDayStr(new Date(Math.floor(i / 12), (i % 12) + 1, 0)) }
+function lastDayOfMonth(ym) {
+  const [y, m] = String(ym).split('-').map(Number)
+  return toDayStr(new Date(y, m, 0))
+}
+
+// "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" / "Dec 28, 2026 – Jan 3, 2027" / "Nov 8, 2026" (single day)
+function formatDateSpan(startStr, endStr) {
+  const s = new Date(`${startStr}T00:00:00`)
+  const e = new Date(`${endStr}T00:00:00`)
   const mon = (d) => d.toLocaleDateString('en-US', { month: 'short' })
+  if (startStr === endStr) {
+    return `${mon(s)} ${s.getDate()}, ${s.getFullYear()}`
+  }
   if (s.getFullYear() !== e.getFullYear()) {
     return `${mon(s)} ${s.getDate()}, ${s.getFullYear()} – ${mon(e)} ${e.getDate()}, ${e.getFullYear()}`
   }
@@ -869,13 +950,27 @@ function formatWeekRange(weekStr) {
   }
   return `${mon(s)} ${s.getDate()} – ${e.getDate()}, ${e.getFullYear()}`
 }
+const formatWeekRange = (weekStr) => formatDateSpan(weekStr, weekEndStr(weekStr))
+
+// "Nov 8, 2026" (used by the range picker's From / To boxes)
+const formatShortDate = (dayStr) =>
+  new Date(`${dayStr}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+// "Nov 2026" (used by the range-of-months picker's From / To boxes)
+const formatMonthKey = (ym) =>
+  new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 
 /* ════════════════════════════════════════════════════════════
-   PERIOD STATE  (Day / Week / Month / Year)
+   PERIOD STATE
+   The top bar picks a UNIT (Day / Week / Month / Year). Inside the
+   calendar dropdown a toggle then picks ONE of that unit or a RANGE of
+   them (Day, Week and Month can be a range).
+   Internally a range is always loaded through the existing 'range' report mode
+   (start + end days), so mode is 'day' | 'week' | 'month' | 'year' | 'range'
+   and rangeUnit remembers which unit the range is made of.
 ════════════════════════════════════════════════════════════ */
 const MODES = [
   { key: 'day',   label: 'Day' },
-  { key: 'week',  label: 'Week' },
   { key: 'month', label: 'Month' },
   { key: 'year',  label: 'Year' },
 ]
@@ -888,39 +983,183 @@ const currentYear       = today.getFullYear()
 const yearOptions       = Array.from({ length: 12 }, (_, i) => currentYear - i) // newest first, 12 = a clean 3 × 4 grid
 const minYear           = yearOptions[yearOptions.length - 1]
 
+/* Range limits: the earliest pickable day and the longest allowed range
+   (keeps the chart, heatmap and print sheet readable). */
+const MIN_DATE        = `${minYear}-01-01`
+const MAX_RANGE_DAYS  = 366
+const MAX_RANGE_WEEKS = 52
+const MAX_RANGE_MONTHS = 12
+const MAX_RANGE_YEARS  = yearOptions.length // every year the picker offers
+
+function presetSpan(key) {
+  const t = currentDayValue
+  switch (key) {
+    case 'last7':     return { start: shiftDayStr(t, -6),  end: t }
+    case 'last30':    return { start: shiftDayStr(t, -29), end: t }
+    case 'last90':    return { start: shiftDayStr(t, -89), end: t }
+    case 'thisMonth': return { start: `${currentMonthValue}-01`, end: t }
+    case 'lastMonth': {
+      const s = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+      const e = new Date(today.getFullYear(), today.getMonth(), 0)
+      return { start: toDayStr(s), end: toDayStr(e) }
+    }
+    case 'ytd':       return { start: `${currentYear}-01-01`, end: t }
+    default: {
+      // 'w4' / 'w12' …: the last N weeks (the current week counts as one)
+      const wm = String(key).match(/^w(\d+)$/)
+      if (wm) return { start: shiftDayStr(currentWeekValue, -(Number(wm[1]) - 1) * 7), end: t }
+      // 'm3' / 'm12' …: the last N months (the current month counts as one)
+      const mm = String(key).match(/^m(\d+)$/)
+      if (mm) return { start: idxFirst(today.getFullYear() * 12 + today.getMonth() - (Number(mm[1]) - 1)), end: t }
+      return { start: shiftDayStr(t, -29), end: t }
+    }
+  }
+}
+
 const mode          = ref('month')
 const selectedDay   = ref(currentDayValue)
 const selectedWeek  = ref(currentWeekValue) // Sunday of the selected week
 const selectedMonth = ref(currentMonthValue)
 const selectedYear  = ref(currentYear)
+// Range mode: inclusive start / end days, 'YYYY-MM-DD'. Starts as the last 30 days.
+const rangeStart    = ref(presetSpan('last30').start)
+const rangeEnd      = ref(presetSpan('last30').end)
+// What a range is made of: days, weeks or months (only used while mode is 'range').
+const rangeUnit     = ref('day')
+// A range made of whole years (loaded one year at a time and merged, see fetchYearRange).
+const isYearRange   = computed(() => mode.value === 'range' && rangeUnit.value === 'year')
 
 const periodLabel      = ref('')
 const printGeneratedAt = ref('')
 const lastUpdated      = ref('')
 
-const modeNoun        = computed(() => ({ day: 'day', week: 'week', month: 'month', year: 'year' }[mode.value]))
-const currentLabel    = computed(() => ({ day: 'Today', week: 'This week', month: 'This month', year: 'This year' }[mode.value]))
-const seriesWord      = computed(() => ({ day: 'Hourly', week: 'Daily', month: 'Daily', year: 'Monthly' }[mode.value]))
-const bucketWord      = computed(() => ({ day: 'Hour', week: 'Day', month: 'Day', year: 'Month' }[mode.value]))
-const peakWord        = computed(() => ({ day: 'Peak hour', week: 'Best day', month: 'Best day', year: 'Best month' }[mode.value]))
-const reportTypeLabel = computed(() => ({ day: 'Daily Sales Report', week: 'Weekly Sales Report', month: 'Monthly Sales Report', year: 'Annual Sales Report' }[mode.value]))
+const rangeDays = computed(() => Math.max(1, dayDiff(rangeStart.value, rangeEnd.value) + 1))
+const rangeWeeksCount  = computed(() => Math.max(1, Math.ceil(rangeDays.value / 7)))
+const rangeMonthsCount = computed(() => monthIdxOf(rangeEnd.value.slice(0, 7)) - monthIdxOf(rangeStart.value.slice(0, 7)) + 1)
+const rangeYearsCount  = computed(() => Number(rangeEnd.value.slice(0, 4)) - Number(rangeStart.value.slice(0, 4)) + 1)
+
+// The unit the person is working in, whether it is one of them or a range of them.
+const activeUnit = computed(() => (mode.value === 'range' ? rangeUnit.value : mode.value))
+const singleBtnLabel = computed(() => `One ${activeUnit.value}`)
+const rangeBtnLabel  = computed(() => `Range of ${activeUnit.value}s`)
+
+// "30 days" / "4 weeks" / "3 months": how far the ‹ › buttons move a range.
+const rangeStepText = computed(() => {
+  if (rangeUnit.value === 'year')  return `${rangeYearsCount.value} ${rangeYearsCount.value === 1 ? 'year' : 'years'}`
+  if (rangeUnit.value === 'month') return `${rangeMonthsCount.value} ${rangeMonthsCount.value === 1 ? 'month' : 'months'}`
+  if (rangeUnit.value === 'week')  return `${rangeWeeksCount.value} ${rangeWeeksCount.value === 1 ? 'week' : 'weeks'}`
+  return `${rangeDays.value} ${rangeDays.value === 1 ? 'day' : 'days'}`
+})
+const rangeLimitText = computed(() => {
+  if (rangeUnit.value === 'year')  return `Up to ${MAX_RANGE_YEARS} years`
+  if (rangeUnit.value === 'month') return `Up to ${MAX_RANGE_MONTHS} months`
+  if (rangeUnit.value === 'week')  return `Up to ${MAX_RANGE_WEEKS} weeks`
+  return `Up to ${MAX_RANGE_DAYS} days`
+})
+
+// A range of years reads like a single year: monthly buckets, "Best month", and so on.
+const wordKey         = computed(() => (isYearRange.value ? 'year' : mode.value))
+const modeNoun        = computed(() => ({ day: 'day', week: 'week', month: 'month', year: 'year', range: 'range' }[mode.value]))
+const currentLabel    = computed(() => ({ day: 'Today', week: 'This week', month: 'This month', year: 'This year', range: 'Last 30 days' }[mode.value]))
+const seriesWord      = computed(() => ({ day: 'Hourly', week: 'Daily', month: 'Daily', year: 'Monthly', range: 'Daily' }[wordKey.value]))
+const bucketWord      = computed(() => ({ day: 'Hour', week: 'Day', month: 'Day', year: 'Month', range: 'Day' }[wordKey.value]))
+const peakWord        = computed(() => ({ day: 'Peak hour', week: 'Best day', month: 'Best day', year: 'Best month', range: 'Best day' }[wordKey.value]))
+const reportTypeLabel = computed(() => ({ day: 'Daily Sales Report', week: 'Weekly Sales Report', month: 'Monthly Sales Report', year: 'Annual Sales Report', range: 'Date Range Sales Report' }[mode.value]))
 
 const canGoNext = computed(() => {
   if (mode.value === 'year')  return selectedYear.value < currentYear
   if (mode.value === 'month') return !!selectedMonth.value && selectedMonth.value < currentMonthValue
   if (mode.value === 'week')  return !!selectedWeek.value && selectedWeek.value < currentWeekValue
+  if (mode.value === 'range') return !!rangeEnd.value && rangeEnd.value < currentDayValue
   return !!selectedDay.value && selectedDay.value < currentDayValue
 })
 const canGoPrev = computed(() => {
   if (mode.value === 'year')  return selectedYear.value > minYear
   if (mode.value === 'month') return !!selectedMonth.value
   if (mode.value === 'week')  return !!selectedWeek.value && selectedWeek.value > `${minYear}-01-01`
+  if (mode.value === 'range') return !!rangeStart.value && rangeStart.value > MIN_DATE
   return !!selectedDay.value
 })
+// For Range this means "the range reaches today", so it is still in progress.
 const isCurrentPeriod = computed(() => !canGoNext.value)
+
+/* Slides a range by its own size, in its own unit (days / whole weeks / whole months).
+   delta -1 = the range right before (used for the trend comparison), +1 = the next one.
+   With clamp = true the result is kept between MIN_DATE and today (used by the ‹ › buttons). */
+function rangeShifted(delta, clamp) {
+  if (!delta) return { start: rangeStart.value, end: rangeEnd.value }
+  const unit = rangeUnit.value
+
+  if (unit === 'year') {
+    const n = rangeYearsCount.value
+    let endY = Number(rangeEnd.value.slice(0, 4)) + delta * n
+    if (endY > currentYear) endY = currentYear
+    let startY = endY - (n - 1)
+    if (clamp && startY < minYear) {
+      startY = minYear
+      endY = Math.min(startY + (n - 1), currentYear)
+    }
+    let end = `${endY}-12-31`
+    if (end > currentDayValue) end = currentDayValue
+    return { start: `${startY}-01-01`, end }
+  }
+
+  if (unit === 'month') {
+    const n = rangeMonthsCount.value
+    const curIdx = today.getFullYear() * 12 + today.getMonth()
+    let endIdx = monthIdxOf(rangeEnd.value.slice(0, 7)) + delta * n
+    if (endIdx > curIdx) endIdx = curIdx
+    let startIdx = endIdx - (n - 1)
+    if (clamp && startIdx < minYear * 12) {
+      startIdx = minYear * 12
+      endIdx = Math.min(startIdx + (n - 1), curIdx)
+    }
+    let end = idxLast(endIdx)
+    if (end > currentDayValue) end = currentDayValue
+    return { start: idxFirst(startIdx), end }
+  }
+
+  if (unit === 'week') {
+    const n = rangeWeeksCount.value
+    let start = shiftDayStr(rangeStart.value, delta * n * 7)
+    if (clamp && shiftDayStr(start, (n - 1) * 7) > currentWeekValue) start = shiftDayStr(currentWeekValue, -(n - 1) * 7)
+    if (clamp && start < MIN_DATE) start = toDayStr(weekStartOf(MIN_DATE))
+    let end = shiftDayStr(start, n * 7 - 1)
+    if (end > currentDayValue) end = currentDayValue
+    return { start, end }
+  }
+
+  const len = rangeDays.value
+  let start = shiftDayStr(rangeStart.value, delta * len)
+  let end = shiftDayStr(rangeEnd.value, delta * len)
+  if (clamp) {
+    if (end > currentDayValue) { end = currentDayValue; start = shiftDayStr(end, -(len - 1)) }
+    if (start < MIN_DATE) { start = MIN_DATE; end = shiftDayStr(start, len - 1) }
+  }
+  return { start, end }
+}
+
+// "Nov 2026" / "Jan – Mar 2026" / "Oct 2025 – Feb 2026" for months, otherwise the normal date span.
+function formatRangeLabel(s, e) {
+  if (rangeUnit.value === 'year') {
+    const a = s.slice(0, 4)
+    const b = e.slice(0, 4)
+    return a === b ? a : `${a} – ${b}`
+  }
+  if (rangeUnit.value === 'month') {
+    const a = new Date(`${s}T00:00:00`)
+    const b = new Date(`${e}T00:00:00`)
+    if (s.slice(0, 7) === e.slice(0, 7)) return a.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    const m = (d) => d.toLocaleDateString('en-US', { month: 'short' })
+    if (a.getFullYear() === b.getFullYear()) return `${m(a)} – ${m(b)} ${b.getFullYear()}`
+    return `${m(a)} ${a.getFullYear()} – ${m(b)} ${b.getFullYear()}`
+  }
+  return formatDateSpan(s, e)
+}
 
 // Request params + a human label for the selected period (offset 0) or the
 // one right before it (offset -1), whichever mode is active.
+// Range mode compares against the range of the same size (days / weeks / months) right before it.
 function periodParams(offset = 0) {
   if (mode.value === 'year') {
     const y = selectedYear.value + offset
@@ -941,6 +1180,13 @@ function periodParams(offset = 0) {
       label: formatWeekRange(start),
     }
   }
+  if (mode.value === 'range') {
+    const { start, end } = rangeShifted(offset, false)
+    return {
+      params: { mode: 'range', start, end },
+      label: formatRangeLabel(start, end),
+    }
+  }
   const d = new Date(`${selectedDay.value}T00:00:00`)
   d.setDate(d.getDate() + offset)
   return {
@@ -949,8 +1195,33 @@ function periodParams(offset = 0) {
   }
 }
 
+// The start / end days a mode currently covers (end never goes past today).
+// Used to carry the person's period over when they switch to Range.
+function spanOf(m) {
+  let start
+  let end
+  if (m === 'year') {
+    start = `${selectedYear.value}-01-01`
+    end = `${selectedYear.value}-12-31`
+  } else if (m === 'month') {
+    const [yy, mm] = selectedMonth.value.split('-').map(Number)
+    start = `${yy}-${pad(mm)}-01`
+    end = toDayStr(new Date(yy, mm, 0))
+  } else if (m === 'week') {
+    start = selectedWeek.value
+    end = weekEndStr(start)
+  } else {
+    // A single day is a poor range, so Day → Range shows the 7 days ending that day.
+    end = selectedDay.value
+    start = shiftDayStr(end, -6)
+  }
+  if (end > currentDayValue) end = currentDayValue
+  if (start > end) start = end
+  return { start, end }
+}
+
 // Keeps the pickers pointing at the same moment in time when the
-// person switches Day / Week / Month / Year, instead of jumping back to "now".
+// person switches Day / Week / Month / Year / Range, instead of jumping back to "now".
 function syncPickers(from) {
   if (from === 'day' && selectedDay.value) {
     selectedMonth.value = selectedDay.value.slice(0, 7)
@@ -970,14 +1241,79 @@ function syncPickers(from) {
     selectedMonth.value = y === currentYear ? currentMonthValue : `${y}-01`
     selectedDay.value   = y === currentYear ? currentDayValue   : `${y}-01-01`
     selectedWeek.value  = toDayStr(weekStartOf(selectedDay.value))
+  } else if (from === 'range' && rangeEnd.value) {
+    // Leaving Range: land on the range's last day so the person stays in the same moment.
+    selectedDay.value   = rangeEnd.value
+    selectedMonth.value = rangeEnd.value.slice(0, 7)
+    selectedYear.value  = Number(rangeEnd.value.slice(0, 4))
+    selectedWeek.value  = toDayStr(weekStartOf(rangeEnd.value))
   }
 }
 
-async function setMode(next) {
+/* keepPicker = true is used by the One / Range switch inside the dropdown:
+   the dropdown stays open and re-opens on the right grid, so the person can
+   pick the dates straight away. */
+async function setMode(next, keepPicker = false) {
   if (mode.value === next) return
-  closePicker()
+  if (!keepPicker) closePicker()
+  if (next === 'range') {
+    const span = spanOf(mode.value)
+    rangeStart.value = span.start
+    rangeEnd.value = span.end
+  }
   syncPickers(mode.value)
   mode.value = next
+  if (keepPicker && pickerOpen.value) initPickerView()
+  await loadReports()
+}
+
+/* Unit buttons (Day / Week / Month / Year).
+   While a range is showing, Day / Week / Month keep it a range and only change what it is made of.
+   Year has no range, so it goes back to one single year. */
+async function setUnit(u) {
+  if (activeUnit.value === u) return
+  if (mode.value === 'range') return setRangeUnit(u)
+  return setMode(u)
+}
+
+/* One / Range toggle (lives inside the dropdown). */
+async function setSpan(kind, keepPicker = false) {
+  if (kind === 'range') {
+    if (mode.value === 'range') return
+    rangeUnit.value = mode.value
+    await setMode('range', keepPicker)
+    return
+  }
+  if (mode.value !== 'range') return
+  await setMode(rangeUnit.value, keepPicker)
+}
+
+// Re-cuts the current range so it starts / ends on whole weeks or whole months.
+async function setRangeUnit(u) {
+  if (rangeUnit.value === u) return
+  closePicker()
+  rangeUnit.value = u
+  let s = rangeStart.value
+  let e = rangeEnd.value
+  if (u === 'week') {
+    s = toDayStr(weekStartOf(s))
+    e = weekEndStr(toDayStr(weekStartOf(e)))
+  } else if (u === 'month') {
+    s = `${s.slice(0, 7)}-01`
+    e = lastDayOfMonth(e.slice(0, 7))
+  } else if (u === 'year') {
+    s = `${s.slice(0, 4)}-01-01`
+    e = `${e.slice(0, 4)}-12-31`
+  }
+  if (e > currentDayValue) e = currentDayValue
+  // Too long after snapping? Fall back to a sensible default for that unit.
+  if (u !== 'year' && dayDiff(s, e) + 1 > MAX_RANGE_DAYS) {
+    const fallback = presetSpan(u === 'week' ? 'w26' : u === 'month' ? 'm12' : 'last30')
+    s = fallback.start
+    e = fallback.end
+  }
+  rangeStart.value = s
+  rangeEnd.value = e
   await loadReports()
 }
 
@@ -992,6 +1328,11 @@ async function shiftPeriod(delta) {
     selectedMonth.value = toMonthStr(new Date(yy, mm - 1 + delta, 1))
   } else if (mode.value === 'week') {
     selectedWeek.value = shiftDayStr(selectedWeek.value, delta * 7)
+  } else if (mode.value === 'range') {
+    // Slide the whole range by its own size (days, weeks or months), keeping it the same size.
+    const r = rangeShifted(delta, true)
+    rangeStart.value = r.start
+    rangeEnd.value = r.end
   } else {
     const d = new Date(`${selectedDay.value}T00:00:00`)
     d.setDate(d.getDate() + delta)
@@ -1005,6 +1346,9 @@ async function goCurrent() {
   selectedWeek.value  = currentWeekValue
   selectedMonth.value = currentMonthValue
   selectedYear.value  = currentYear
+  const r = presetSpan('last30')
+  rangeStart.value = r.start
+  rangeEnd.value = r.end
   await loadReports()
 }
 
@@ -1039,7 +1383,12 @@ function updateStickyTop() {
    CALENDAR PICKER  (custom popover: days → months → years)
    Day mode picks a day. Week mode shows the same day grid, and
    clicking any day selects the whole week (Sun – Sat) it belongs to.
-   On phones it opens as a bottom sheet (CSS only).
+   Range of days: tap a start day, then an end day.
+   Range of weeks: tap any day of the first week, then any day of the last week.
+   Range of months: the months grid, tap a start month, then an end month.
+   (Tapping an earlier one second just swaps them.) The range is applied on
+   the second tap. On phones it opens as a bottom sheet (CSS only).
+   The One / Range switch and the quick ranges are part of this dropdown.
 ════════════════════════════════════════════════════════════ */
 const PK_WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTH_NAMES = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'long' }))
@@ -1052,8 +1401,33 @@ const browseMonth   = ref(today.getMonth()) // 0-11
 const pickerRoot    = ref(null)
 const pickerTrigger = ref(null)
 
-// Day and Week both drill down to a day grid.
-const pickerDaysMode = computed(() => mode.value === 'day' || mode.value === 'week')
+// Range mode: first tap (waiting for the end) and the cell under the cursor for the live preview.
+// Holds 'YYYY-MM-DD' for days / weeks and 'YYYY-MM' for months.
+const pkDraftStart = ref(null)
+const pkHoverKey   = ref(null)
+
+// Day, Week and a range of days / weeks all drill down to a day grid. A range of months uses the months grid.
+const pickerDaysMode = computed(() =>
+  mode.value === 'day' || mode.value === 'week' || (mode.value === 'range' && rangeUnit.value !== 'month' && rangeUnit.value !== 'year')
+)
+const rangeOfMonths = computed(() => mode.value === 'range' && rangeUnit.value === 'month')
+const rangeOfYears  = computed(() => mode.value === 'range' && rangeUnit.value === 'year')
+
+// Show the From / To boxes only on the grid where the range is actually picked.
+const showRangeHead = computed(() =>
+  mode.value === 'range' && (
+    rangeUnit.value === 'month' ? pickerView.value === 'months'
+    : rangeUnit.value === 'year' ? pickerView.value === 'years'
+    : pickerView.value === 'days'
+  )
+)
+const pkHintText = computed(() => {
+  const draft = !!pkDraftStart.value
+  if (rangeUnit.value === 'year')  return draft ? 'Now tap the end year.' : 'Tap a start year, then an end year.'
+  if (rangeUnit.value === 'week')  return draft ? 'Now tap any day in the last week.' : 'Tap any day in the first week, then any day in the last week.'
+  if (rangeUnit.value === 'month') return draft ? 'Now tap the end month.' : 'Tap a start month, then an end month.'
+  return draft ? 'Now tap the end date.' : 'Tap a start date, then an end date.'
+})
 
 const pickerLabel = computed(() => {
   if (mode.value === 'year') return String(selectedYear.value)
@@ -1062,36 +1436,100 @@ const pickerLabel = computed(() => {
     return `${MONTH_NAMES[m - 1]} ${y}`
   }
   if (mode.value === 'week') return formatWeekRange(selectedWeek.value || currentWeekValue)
+  if (mode.value === 'range') return formatRangeLabel(rangeStart.value, rangeEnd.value)
   const d = new Date(`${selectedDay.value || currentDayValue}T00:00:00`)
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 })
 
-function openPicker() {
+// True when `key` is too far from the first tap to stay within the range limit.
+function pkFar(a, b) {
+  if (rangeUnit.value === 'year') return Math.abs(Number(a) - Number(b)) >= MAX_RANGE_YEARS
+  if (rangeUnit.value === 'month') return Math.abs(monthIdxOf(a) - monthIdxOf(b)) >= MAX_RANGE_MONTHS
+  if (rangeUnit.value === 'week') {
+    return Math.abs(dayDiff(toDayStr(weekStartOf(a)), toDayStr(weekStartOf(b)))) + 7 > MAX_RANGE_WEEKS * 7
+  }
+  return Math.abs(dayDiff(a, b)) >= MAX_RANGE_DAYS
+}
+
+// Text for a From / To box: a day, the first / last day of a week, or a month.
+// Key kept while picking: 'YYYY' for years, 'YYYY-MM' for months, 'YYYY-MM-DD' otherwise.
+function pkKeyOf(dayStr) {
+  if (rangeUnit.value === 'year') return dayStr.slice(0, 4)
+  if (rangeUnit.value === 'month') return dayStr.slice(0, 7)
+  return dayStr
+}
+function pkFmtFrom(key) {
+  if (rangeUnit.value === 'year') return key.slice(0, 4)
+  if (rangeUnit.value === 'month') return formatMonthKey(key.slice(0, 7))
+  if (rangeUnit.value === 'week') return formatShortDate(toDayStr(weekStartOf(key)))
+  return formatShortDate(key)
+}
+function pkFmtTo(key) {
+  if (rangeUnit.value === 'year') return key.slice(0, 4)
+  if (rangeUnit.value === 'month') return formatMonthKey(key.slice(0, 7))
+  if (rangeUnit.value === 'week') {
+    const e = weekEndStr(toDayStr(weekStartOf(key)))
+    return formatShortDate(e > currentDayValue ? currentDayValue : e)
+  }
+  return formatShortDate(key)
+}
+
+const pkRangeFrom = computed(() => pkFmtFrom(pkDraftStart.value || pkKeyOf(rangeStart.value)))
+const pkRangeTo = computed(() => {
+  if (!pkDraftStart.value) return pkFmtTo(pkKeyOf(rangeEnd.value))
+  const h = pkHoverKey.value
+  const distinct = rangeUnit.value === 'day' ? h !== pkDraftStart.value : true
+  return h && distinct && !pkFar(pkDraftStart.value, h) ? pkFmtTo(h) : 'Pick end date'
+})
+
+// Sets the grid (days / months / years) the dropdown opens on for the current mode.
+// Also used when the One / Range switch changes the mode while the dropdown is open.
+function initPickerView() {
   tipClose()
+  pkDraftStart.value = null
+  pkHoverKey.value = null
   if (pickerDaysMode.value) {
-    const src = mode.value === 'week' ? (selectedWeek.value || currentWeekValue) : (selectedDay.value || currentDayValue)
+    const src =
+      mode.value === 'week' ? (selectedWeek.value || currentWeekValue)
+      : mode.value === 'range' ? (rangeEnd.value || currentDayValue)
+      : (selectedDay.value || currentDayValue)
     const [y, m] = src.split('-').map(Number)
     browseYear.value = y
     browseMonth.value = m - 1
     pickerView.value = 'days'
-  } else if (mode.value === 'month') {
-    browseYear.value = Number((selectedMonth.value || currentMonthValue).slice(0, 4))
+  } else if (rangeOfYears.value) {
+    // A range of years: open on the years grid.
+    browseYear.value = Number(rangeEnd.value.slice(0, 4))
+    pickerView.value = 'years'
+  } else if (mode.value === 'month' || mode.value === 'range') {
+    // Single month, or a range of months: open on the months grid.
+    const src = mode.value === 'range' ? (rangeEnd.value || currentDayValue) : (selectedMonth.value || currentMonthValue)
+    browseYear.value = Number(src.slice(0, 4))
     pickerView.value = 'months'
   } else {
     browseYear.value = selectedYear.value
     pickerView.value = 'years'
   }
+}
+function openPicker() {
+  initPickerView()
   pickerOpen.value = true
 }
 function closePicker(refocus = false) {
   if (!pickerOpen.value) return
   pickerOpen.value = false
+  pkDraftStart.value = null
+  pkHoverKey.value = null
   if (refocus) nextTick(() => pickerTrigger.value && pickerTrigger.value.focus())
 }
 function togglePicker() { pickerOpen.value ? closePicker() : openPicker() }
 
 function onDocPointer(e) {
-  if (pickerOpen.value && pickerRoot.value && !pickerRoot.value.contains(e.target)) pickerOpen.value = false
+  if (pickerOpen.value && pickerRoot.value && !pickerRoot.value.contains(e.target)) {
+    pickerOpen.value = false
+    pkDraftStart.value = null
+    pkHoverKey.value = null
+  }
   // Tooltip: tapping anywhere that isn't a tooltip target closes it.
   const t = e.target
   if (!(t && t.closest && t.closest('[data-dash-tip]'))) tipClose()
@@ -1136,62 +1574,194 @@ function pkUp() {
   else if (pickerView.value === 'months') pickerView.value = 'years'
 }
 
+// Day grid hover (range of days / weeks).
+function pkHover(key) {
+  if (mode.value !== 'range' || rangeUnit.value === 'month' || !pkDraftStart.value) return
+  pkHoverKey.value = key
+}
+// Months grid hover (range of months only).
+function pkHoverMonth(key) {
+  if (!rangeOfMonths.value || !pkDraftStart.value) return
+  pkHoverKey.value = key
+}
+// Years grid hover (range of years only).
+function pkHoverYear(y) {
+  if (!rangeOfYears.value || !pkDraftStart.value) return
+  pkHoverKey.value = y === null || y === undefined ? null : String(y)
+}
+
 const pkDayCells = computed(() => {
   const y = browseYear.value
   const m = browseMonth.value
   const count = new Date(y, m + 1, 0).getDate()
   const lead = new Date(y, m, 1).getDay()
   const out = Array(lead).fill(null)
-  const weekMode = mode.value === 'week'
+  const rangeMode = mode.value === 'range'
+  const weekRange = rangeMode && rangeUnit.value === 'week'
+  const weekMode = mode.value === 'week' || weekRange
   const wkStart = selectedWeek.value
   const wkEnd = wkStart ? weekEndStr(wkStart) : ''
+
+  // Range mode: the band to paint. While waiting for the end it follows the cursor.
+  // For a range of weeks the band always covers whole Sun – Sat weeks.
+  let ra = ''
+  let rb = ''
+  if (rangeMode) {
+    let a
+    let b
+    if (pkDraftStart.value) {
+      const x = pkDraftStart.value
+      const h = pkHoverKey.value || x
+      a = h < x ? h : x
+      b = h < x ? x : h
+    } else {
+      a = rangeStart.value
+      b = rangeEnd.value
+    }
+    if (weekRange) {
+      ra = toDayStr(weekStartOf(a))
+      rb = weekEndStr(toDayStr(weekStartOf(b)))
+    } else {
+      ra = a
+      rb = b
+    }
+  }
+
   for (let d = 1; d <= count; d++) {
     const key = `${y}-${pad(m + 1)}-${pad(d)}`
+    const isEdge = rangeMode && (key === ra || key === rb)
     out.push({
       key, d,
       title: new Date(y, m, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
       // Week mode: any day of the current week is still pickable (it selects the current week).
       future: weekMode ? toDayStr(weekStartOf(key)) > currentWeekValue : key > currentDayValue,
+      // Range mode: days that would make the range longer than the limit.
+      tooFar: rangeMode && !!pkDraftStart.value && pkFar(pkDraftStart.value, key),
       today: key === currentDayValue,
-      selected: weekMode ? (key >= wkStart && key <= wkEnd) : (mode.value === 'day' && key === selectedDay.value),
+      selected: rangeMode
+        ? (weekRange ? key >= ra && key <= rb : isEdge)
+        : mode.value === 'week' ? (key >= wkStart && key <= wkEnd) : (mode.value === 'day' && key === selectedDay.value),
+      inRange: rangeMode && !weekRange && key > ra && key < rb,
+      edge: rangeMode && !weekRange && ra !== rb ? (key === ra ? 'start' : key === rb ? 'end' : '') : '',
     })
   }
   return out
 })
-const pkMonthCells = computed(() =>
-  MONTH_SHORT.map((label, m) => {
+const pkMonthCells = computed(() => {
+  // Range of months: paint the band between the two end months (follows the cursor after the first tap).
+  let ra = ''
+  let rb = ''
+  if (rangeOfMonths.value) {
+    if (pkDraftStart.value) {
+      const x = pkDraftStart.value
+      const h = pkHoverKey.value || x
+      ra = h < x ? h : x
+      rb = h < x ? x : h
+    } else {
+      ra = rangeStart.value.slice(0, 7)
+      rb = rangeEnd.value.slice(0, 7)
+    }
+  }
+  return MONTH_SHORT.map((label, m) => {
     const key = `${browseYear.value}-${pad(m + 1)}`
     const selected =
       mode.value === 'month' ? key === selectedMonth.value
       : mode.value === 'day' ? (selectedDay.value || '').startsWith(key)
       : mode.value === 'week' ? (selectedWeek.value || '').startsWith(key)
+      : mode.value === 'range'
+        ? (rangeOfMonths.value ? key === ra || key === rb : (key >= (rangeStart.value || '').slice(0, 7) && key <= (rangeEnd.value || '').slice(0, 7)))
       : false
     return {
       key, m, label,
       title: `${MONTH_NAMES[m]} ${browseYear.value}`,
       future: key > currentMonthValue,
+      tooFar: rangeOfMonths.value && !!pkDraftStart.value && pkFar(pkDraftStart.value, key),
       today: key === currentMonthValue,
       selected,
+      inRange: rangeOfMonths.value && key > ra && key < rb,
+      edge: rangeOfMonths.value && ra !== rb ? (key === ra ? 'start' : key === rb ? 'end' : '') : '',
     }
   })
-)
-const pkYearCells = computed(() =>
-  [...yearOptions].reverse().map((y) => ({
+})
+const pkYearCells = computed(() => {
+  // Range of years: paint the band between the two end years (follows the cursor after the first tap).
+  let ra = 0
+  let rb = 0
+  if (rangeOfYears.value) {
+    if (pkDraftStart.value) {
+      const x = Number(pkDraftStart.value)
+      const h = Number(pkHoverKey.value || x)
+      ra = Math.min(h, x)
+      rb = Math.max(h, x)
+    } else {
+      ra = Number(rangeStart.value.slice(0, 4))
+      rb = Number(rangeEnd.value.slice(0, 4))
+    }
+  }
+  return [...yearOptions].reverse().map((y) => ({
     y,
     today: y === currentYear,
-    selected: mode.value === 'year' ? y === selectedYear.value : y === browseYear.value,
+    selected: rangeOfYears.value ? y === ra || y === rb : mode.value === 'year' ? y === selectedYear.value : y === browseYear.value,
+    inRange: rangeOfYears.value && y > ra && y < rb,
+    edge: rangeOfYears.value && ra !== rb ? (y === ra ? 'start' : y === rb ? 'end' : '') : '',
+    tooFar: rangeOfYears.value && !!pkDraftStart.value && pkFar(pkDraftStart.value, String(y)),
   }))
-)
+})
 
 async function pkPickDay(key) {
+  if (mode.value === 'range') {
+    // First tap = start, second tap = end (earlier one second just swaps them).
+    if (!pkDraftStart.value) {
+      pkDraftStart.value = key
+      pkHoverKey.value = key
+      return
+    }
+    const a = pkDraftStart.value
+    if (rangeUnit.value === 'week') {
+      // Whole weeks: from the first week's Sunday to the last week's Saturday (never past today).
+      const w1 = toDayStr(weekStartOf(a))
+      const w2 = toDayStr(weekStartOf(key))
+      const lo = w1 < w2 ? w1 : w2
+      const hi = w1 < w2 ? w2 : w1
+      let e = weekEndStr(hi)
+      if (e > currentDayValue) e = currentDayValue
+      rangeStart.value = lo
+      rangeEnd.value = e
+    } else {
+      rangeStart.value = key < a ? key : a
+      rangeEnd.value = key < a ? a : key
+    }
+    closePicker(true)
+    await loadReports()
+    return
+  }
   if (mode.value === 'week') selectedWeek.value = toDayStr(weekStartOf(key))
   else selectedDay.value = key
   closePicker(true)
   await loadReports()
 }
 async function pkPickMonth(m) {
+  if (rangeOfMonths.value) {
+    // First tap = start month, second tap = end month: whole months, never past today.
+    const key = `${browseYear.value}-${pad(m + 1)}`
+    if (!pkDraftStart.value) {
+      pkDraftStart.value = key
+      pkHoverKey.value = key
+      return
+    }
+    const a = pkDraftStart.value
+    const lo = key < a ? key : a
+    const hi = key < a ? a : key
+    let e = lastDayOfMonth(hi)
+    if (e > currentDayValue) e = currentDayValue
+    rangeStart.value = `${lo}-01`
+    rangeEnd.value = e
+    closePicker(true)
+    await loadReports()
+    return
+  }
   if (pickerDaysMode.value) {
-    // Day / Week mode: choosing a month just opens its days.
+    // Day / Week / range of days or weeks: choosing a month just opens its days.
     browseMonth.value = m
     pickerView.value = 'days'
     return
@@ -1201,13 +1771,32 @@ async function pkPickMonth(m) {
   await loadReports()
 }
 async function pkPickYear(y) {
+  if (rangeOfYears.value) {
+    // First tap = start year, second tap = end year: whole years, never past today.
+    const key = String(y)
+    if (!pkDraftStart.value) {
+      pkDraftStart.value = key
+      pkHoverKey.value = key
+      return
+    }
+    const a = Number(pkDraftStart.value)
+    const lo = Math.min(a, y)
+    const hi = Math.max(a, y)
+    let e = `${hi}-12-31`
+    if (e > currentDayValue) e = currentDayValue
+    rangeStart.value = `${lo}-01-01`
+    rangeEnd.value = e
+    closePicker(true)
+    await loadReports()
+    return
+  }
   if (mode.value === 'year') {
     selectedYear.value = y
     closePicker(true)
     await loadReports()
     return
   }
-  // Day / Week / Month mode: choosing a year opens its months.
+  // Day / Week / Month / Range mode: choosing a year opens its months.
   browseYear.value = y
   if (pickerDaysMode.value && y === currentYear && browseMonth.value > today.getMonth()) browseMonth.value = today.getMonth()
   pickerView.value = 'months'
@@ -1517,13 +2106,14 @@ const rankedByText  = computed(() => ({ sales: 'sales amount', qty: 'units sold'
 const PRINT_TOP_LIMIT = 15
 const brandInitials = BUSINESS_NAME.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()
 
-// Document reference, e.g. SR-M-202611 / SR-W-20261108 / SR-D-20261108 / SR-Y-2026
+// Document reference, e.g. SR-M-202611 / SR-W-20261108 / SR-D-20261108 / SR-Y-2026 / SR-R-20261101-20261124
 const reportRef = computed(() => {
-  const code = { day: 'D', week: 'W', month: 'M', year: 'Y' }[mode.value]
+  const code = { day: 'D', week: 'W', month: 'M', year: 'Y', range: 'R' }[mode.value]
   const key =
     mode.value === 'year' ? String(selectedYear.value)
     : mode.value === 'month' ? String(selectedMonth.value || '').replace('-', '')
     : mode.value === 'week' ? String(selectedWeek.value || '').replace(/-/g, '')
+    : mode.value === 'range' ? `${String(rangeStart.value || '').replace(/-/g, '')}-${String(rangeEnd.value || '').replace(/-/g, '')}`
     : String(selectedDay.value || '').replace(/-/g, '')
   return `SR-${code}-${key}`
 })
@@ -1761,16 +2351,30 @@ function setTopMetric(metric) {
 }
 
 /* ════════════════════════════════════════════════════════════
-   HEATMAP: BUSIEST DAYS / MONTHS
-   (adapts to the period: Day/Week → 7-day strip, Month → calendar, Year → months)
+   HEATMAP: BUSIEST HOURS / DAYS / MONTHS
+   (adapts to the period: Day → 24 hours, Week → 7-day strip, Month → calendar,
+    Year → months, Range → strip for up to 10 days, otherwise a continuous calendar)
    Cells are shaded by Sales or by Transactions (calMetric). The side
    panel always keeps the profit / cost split and the sales + profit numbers.
 ════════════════════════════════════════════════════════════ */
 const weekdays   = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 const calMetric  = ref('total') // 'total' (sales) | 'tx' (transactions)
 const heatSelKey = ref(null)
-// Day → 24 hourly cells, Week → 7-day strip, Month → calendar, Year → 12 months.
-const heatShape = computed(() => (mode.value === 'week' ? 'day' : mode.value === 'day' ? 'hour' : mode.value))
+
+const RANGE_STRIP_MAX = 10   // ranges up to this many days use the big-card strip
+const RANGE_DENSE_MIN = 100  // longer ranges use smaller calendar cells
+
+// Day → 24 hourly cells, Week / short Range → day strip, Month / long Range → calendar, Year → 12 months.
+const heatShape = computed(() => {
+  if (mode.value === 'week') return 'day'
+  if (mode.value === 'day') return 'hour'
+  if (isYearRange.value) return 'year'
+  if (mode.value === 'range') return rangeDays.value <= RANGE_STRIP_MAX ? 'day' : 'month'
+  return mode.value
+})
+const heatDense = computed(() =>
+  isYearRange.value ? rangeYearsCount.value > 1 : mode.value === 'range' && rangeDays.value > RANGE_DENSE_MIN
+)
 
 // Sunday-start week that contains the given YYYY-MM-DD.
 function weekStartOf(dayStr) {
@@ -1790,7 +2394,29 @@ const rowMap = computed(() => {
 const heatCells = computed(() => {
   const out = []
 
-  if (mode.value === 'year') {
+  if (isYearRange.value) {
+    // Range of years: one cell per month, with the year printed on each cell.
+    const first = monthIdxOf(rangeStart.value.slice(0, 7))
+    const last = monthIdxOf(rangeEnd.value.slice(0, 7))
+    for (let i = first; i <= last; i++) {
+      const y = Math.floor(i / 12)
+      const mo = i % 12
+      const key = `${y}-${pad(mo + 1)}`
+      const d = new Date(y, mo, 1)
+      const r = rowMap.value[key]
+      out.push({
+        key,
+        label: d.toLocaleDateString('en-US', { month: 'short' }),
+        mon: String(y),
+        title: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+        total: r ? r.total : 0,
+        profit: r ? r.profit : 0,
+        tx: r ? r.tx : 0,
+        future: key > currentMonthValue,
+        today: key === currentMonthValue,
+      })
+    }
+  } else if (mode.value === 'year') {
     const y = selectedYear.value
     for (let mo = 1; mo <= 12; mo++) {
       const key = `${y}-${pad(mo)}`
@@ -1847,6 +2473,35 @@ const heatCells = computed(() => {
         today: isToday && h === nowHour,
       })
     }
+  } else if (mode.value === 'range') {
+    // Range mode: one cell per day from start to end.
+    //   short range → big day cards (like Week)
+    //   long range  → calendar grid aligned to Sunday, with the month name on each 1st
+    const s = rangeStart.value
+    const e = rangeEnd.value
+    if (!s || !e) return []
+    const len = dayDiff(s, e) + 1
+    const strip = len <= RANGE_STRIP_MAX
+    const start = new Date(`${s}T00:00:00`)
+    if (!strip) for (let i = 0; i < start.getDay(); i++) out.push(null)
+    for (let i = 0; i < len; i++) {
+      const dt = new Date(start)
+      dt.setDate(start.getDate() + i)
+      const key = toDayStr(dt)
+      const r = rowMap.value[key]
+      out.push({
+        key,
+        label: strip ? dt.toLocaleDateString('en-US', { weekday: 'short' }) : String(dt.getDate()),
+        num: String(dt.getDate()),
+        mon: !strip && (i === 0 || dt.getDate() === 1) ? dt.toLocaleDateString('en-US', { month: 'short' }) : '',
+        title: dt.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }),
+        total: r ? r.total : 0,
+        profit: r ? r.profit : 0,
+        tx: r ? r.tx : 0,
+        future: key > currentDayValue,
+        today: key === currentDayValue,
+      })
+    }
   } else {
     // Week mode: a Sun–Sat strip read from the main report.
     const anchor = selectedWeek.value
@@ -1885,7 +2540,7 @@ const heatCells = computed(() => {
 
 const heatReal    = computed(() => heatCells.value.filter(Boolean))
 const heatHasData = computed(() => heatReal.value.some((c) => c.total > 0 || c.profit > 0 || c.tx > 0))
-// Total of the active metric across the visible cells (denominator for "share of week / month / year").
+// Total of the active metric across the visible cells (denominator for "share of week / month / year / range").
 const heatSum     = computed(() => heatReal.value.reduce((a, c) => a + c.v, 0))
 
 const heatMetricNoun = computed(() => (calMetric.value === 'tx' ? 'transactions' : 'sales'))
@@ -1901,26 +2556,27 @@ const heatPeakKey = computed(() => {
   return best ? best.key : null
 })
 
-const heatRangeWord = computed(() => ({ day: 'day', week: 'week', month: 'month', year: 'year' }[mode.value]))
-const heatCellWord  = computed(() => ({ day: 'hour', week: 'day', month: 'day', year: 'month' }[mode.value]))
+const heatRangeWord = computed(() => ({ day: 'day', week: 'week', month: 'month', year: 'year', range: 'range' }[mode.value]))
+const heatCellWord  = computed(() => (isYearRange.value ? 'month' : { day: 'hour', week: 'day', month: 'day', year: 'month', range: 'day' }[mode.value]))
 
 const heatTitle = computed(() => {
   if (mode.value === 'day') return 'Busiest hours of the day'
   if (mode.value === 'week') return 'Busiest day of the week'
+  if (isYearRange.value) return 'Busiest months in this range'
+  if (mode.value === 'range') return 'Busiest days in this range'
   if (mode.value === 'year') return `Busiest months of ${periodLabel.value || 'the year'}`
   return `Busiest days in ${periodLabel.value || 'the month'}`
 })
 const heatSub = computed(() => {
-  const what = { day: 'hours', week: 'days', month: 'days', year: 'months' }[mode.value]
+  const what = isYearRange.value ? 'months' : { day: 'hours', week: 'days', month: 'days', year: 'months', range: 'days' }[mode.value]
   const by = calMetric.value === 'tx' ? 'more transactions' : 'higher sales'
   const art = mode.value === 'day' ? 'an' : 'a'
   const pick = `Hover or tap ${art} ${heatCellWord.value} for its numbers.`
   if (mode.value === 'week' && selectedWeek.value) {
-    const s = new Date(`${selectedWeek.value}T00:00:00`)
-    const e = new Date(s)
-    e.setDate(e.getDate() + 6)
-    const f = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    return `${f(s)} – ${f(e)}. Darker ${what} had ${by}. ${pick}`
+    return `${formatWeekRange(selectedWeek.value)}. Darker ${what} had ${by}. ${pick}`
+  }
+  if (mode.value === 'range') {
+    return `${formatRangeLabel(rangeStart.value, rangeEnd.value)}. Darker ${what} had ${by}. ${pick}`
   }
   return `Darker ${what} had ${by}. ${pick}`
 })
@@ -1953,21 +2609,21 @@ const heatDetail = computed(() => {
   }
 })
 
-// Drill down: week/month → that day's report, year → that month's report.
+// Drill down: week / month / range → that day's report, year → that month's report.
 const canOpenHeat = computed(() => {
   const c = heatActive.value
   if (!c || c.future) return false
   if (mode.value === 'day') return false // an hour has no report of its own
   return true
 })
-const openHeatLabel = computed(() => (mode.value === 'year' ? 'Open this month' : 'Open this day'))
+const openHeatLabel = computed(() => (heatShape.value === 'year' ? 'Open this month' : 'Open this day'))
 
 function selectHeat(key) { heatSelKey.value = key }
 
 async function openHeatCell() {
   const c = heatActive.value
   if (!c) return
-  if (mode.value === 'year') {
+  if (heatShape.value === 'year') {
     selectedMonth.value = c.key
     syncPickers('month')
     mode.value = 'month'
@@ -2181,7 +2837,7 @@ function heatTip(c) {
     { k: 'Profit', v: peso(c.profit), tone: 'good' },
     { k: 'Margin', v: margin + '%' },
     { k: `Share of ${heatRangeWord.value} ${heatMetricNoun.value}`, v: share + '%' },
-    { k: `Vs ${heatCellWord.value}ly average`, v: `${vs >= 0 ? '+' : ''}${vs.toFixed(1)}%`, tone: vs >= 0 ? 'good' : 'bad' },
+    { k: `Vs ${seriesWord.value.toLowerCase()} average`, v: `${vs >= 0 ? '+' : ''}${vs.toFixed(1)}%`, tone: vs >= 0 ? 'good' : 'bad' },
   ] }
 }
 function splitTip(kind) {
@@ -2255,15 +2911,89 @@ function invTip(box) {
      { mode: 'week', start: 'YYYY-MM-DD', end: 'YYYY-MM-DD' }
    (start = Sunday, end = Saturday) and expects the same response shape
    as month mode, with monthly_sales / monthly_profit dated per day.
+
+   Range mode calls GET /api/reports with
+     { mode: 'range', start: 'YYYY-MM-DD', end: 'YYYY-MM-DD' }
+   (both inclusive, up to 366 days) and expects EXACTLY the same response
+   as week mode: monthly_sales / monthly_profit with one row per day
+   ('YYYY-MM-DD'). Backend tip: handle 'range' with the same code path
+   as 'week' (they only differ in how start / end are chosen).
+
+   A "range of days / weeks / months" in the UI is still just this one
+   'range' request: weeks start on a Sunday and end on a Saturday, months start
+   on the 1st and end on the last day, and the end never goes past today.
+   No backend change is needed for the One / Range toggle.
+
    monthly_sales rows also carry `transactions`; top_selling rows carry
    `total_profit`; the payload carries `service_profit`.
 ════════════════════════════════════════════════════════════ */
 // Guards against out-of-order responses when the person clicks quickly.
 let requestSeq = 0
 
+// A range of years needs no backend change: each year is loaded with the normal
+// 'year' report (monthly buckets) and the results are merged here.
+function yearsOf(start, end) {
+  const a = Number(start.slice(0, 4))
+  const b = Number(end.slice(0, 4))
+  return Array.from({ length: Math.max(b - a + 1, 1) }, (_, i) => a + i)
+}
+
+function mergeYearReports(list) {
+  const sum = (idx) => list.reduce((a, d) => a + parseDisplayNumber(d?.sales_activity?.[idx]?.value), 0)
+  const hasService = list.some((d) => d?.service_sales !== undefined && d?.service_sales !== null)
+
+  const byProduct = new Map()
+  list.forEach((d) => {
+    ;(d?.top_selling ?? []).forEach((i) => {
+      const k = String(i.ProductID ?? i.ProductName)
+      const cur = byProduct.get(k)
+      if (!cur) {
+        byProduct.set(k, { ...i, total_sales: num(i.total_sales), total_quantity: num(i.total_quantity), total_profit: num(i.total_profit) })
+      } else {
+        cur.total_sales += num(i.total_sales)
+        cur.total_quantity += num(i.total_quantity)
+        cur.total_profit += num(i.total_profit)
+      }
+    })
+  })
+
+  const latest = list[list.length - 1] ?? {}
+  return {
+    sales_activity: [
+      { label: 'Sales',        value: peso(sum(0)) },
+      { label: 'Items sold',   value: Math.round(sum(1)) },
+      { label: 'Transactions', value: Math.round(sum(2)) },
+      { label: 'Profit',       value: peso(sum(3)) },
+    ],
+    inventory_summary: latest.inventory_summary, // current stock, same in every response
+    top_selling: [...byProduct.values()],
+    monthly_sales: list.flatMap((d) => d?.monthly_sales ?? []),
+    monthly_profit: list.flatMap((d) => d?.monthly_profit ?? d?.daily_profit ?? []),
+    monthly_total: list.reduce((a, d) => a + num(d?.monthly_total), 0),
+    service_sales: hasService ? list.reduce((a, d) => a + num(d?.service_sales), 0) : null,
+    service_profit: list.reduce((a, d) => a + num(d?.service_profit), 0),
+  }
+}
+
+async function fetchYearRange() {
+  const years = yearsOf(rangeStart.value, rangeEnd.value)
+  const res = await Promise.all(
+    years.map((y) => api.get('/api/reports', { params: { mode: 'year', year: y, include_sales: 0 } }))
+  )
+  return mergeYearReports(res.map((r) => r.data))
+}
+
 // Lightweight call: only the previous period's total, for the trend badge.
 async function fetchPrevious() {
   try {
+    if (isYearRange.value) {
+      // The same number of years right before the selected ones.
+      const { start, end } = rangeShifted(-1, false)
+      const res = await Promise.all(
+        yearsOf(start, end).map((y) => api.get('/api/reports', { params: { mode: 'year', year: y, totals_only: 1 } }))
+      )
+      return { total: res.reduce((a, r) => a + num(r.data?.monthly_total), 0), label: formatRangeLabel(start, end) }
+    }
     const { params, label } = periodParams(-1)
     const res = await api.get('/api/reports', { params: { ...params, totals_only: 1 } })
     return { total: num(res.data?.monthly_total), label }
@@ -2282,13 +3012,14 @@ async function loadReports() {
   try {
     const { params, label } = periodParams(0)
 
-    const [res, prev] = await Promise.all([
-      api.get('/api/reports', { params: { ...params, include_sales: 0 } }),
+    const [d, prev] = await Promise.all([
+      isYearRange.value
+        ? fetchYearRange()
+        : api.get('/api/reports', { params: { ...params, include_sales: 0 } }).then((r) => r.data),
       fetchPrevious(),
     ])
     if (seq !== requestSeq) return
 
-    const d = res.data
     salesActivityRaw.value     = d.sales_activity    ?? salesActivityRaw.value
     inventorySummary.value     = d.inventory_summary ?? inventorySummary.value
     topSellingItems.value      = d.top_selling       ?? []
@@ -2443,6 +3174,12 @@ function buildReportCSV() {
   rows.push(['Business', BUSINESS_NAME])
   rows.push(['Report type', reportTypeLabel.value])
   rows.push(['Period', periodLabel.value || ''])
+  if (mode.value === 'range') {
+    rows.push(['Range of', `${rangeUnit.value}s`])
+    rows.push(['Range start', rangeStart.value])
+    rows.push(['Range end', rangeEnd.value])
+    rows.push(['Days in range', rangeDays.value])
+  }
   rows.push(['Status', isCurrentPeriod.value ? 'In progress' : 'Closed'])
   rows.push(['Grouped by', bucketWord.value])
   rows.push(['Generated', formatStamp()])
@@ -2498,6 +3235,7 @@ function reportFileSlug() {
     mode.value === 'year' ? selectedYear.value
     : mode.value === 'month' ? selectedMonth.value
     : mode.value === 'week' ? selectedWeek.value
+    : mode.value === 'range' ? `${rangeStart.value}_to_${rangeEnd.value}`
     : selectedDay.value
   const base = periodLabel.value || fallback
   const biz = BUSINESS_NAME.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
@@ -2575,7 +3313,7 @@ function chartColors(forceLight = false) {
   }
 }
 
-// Bucket keys arrive as "HH:00" (day), "YYYY-MM-DD" (week / month) or "YYYY-MM" (year).
+// Bucket keys arrive as "HH:00" (day), "YYYY-MM-DD" (week / month / range) or "YYYY-MM" (year).
 function parseBucket(raw) {
   const s = String(raw ?? '')
   let m = s.match(/^(\d{1,2}):\d{2}$/)
@@ -2591,7 +3329,11 @@ function formatPointLabel(raw) {
   const b = parseBucket(raw)
   if (!b) return String(raw ?? '')
   if (b.kind === 'hour')  return b.date.toLocaleTimeString('en-US', { hour: 'numeric' })
-  if (b.kind === 'month') return b.date.toLocaleDateString('en-US', { month: 'short' })
+  if (b.kind === 'month') {
+    const mon = b.date.toLocaleDateString('en-US', { month: 'short' })
+    // Across several years "Jan" alone is ambiguous, so add the year.
+    return isYearRange.value ? `${mon} ’${String(b.date.getFullYear()).slice(-2)}` : mon
+  }
   return b.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 function formatPointTitle(raw) {
@@ -2946,6 +3688,7 @@ html[data-theme="dark"] .reports {
 .page-updated { display: none; margin: 4px 0 0; font-size: 11.5px; font-weight: 600; color: var(--rp-text-muted); }
 .chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 20px; white-space: nowrap; }
 .chip--live { color: var(--rp-green); background: var(--rp-green-soft); }
+.chip--muted { color: var(--rp-text-secondary); background: var(--rp-surface-raised); border: 1px solid var(--rp-border); }
 .chip--accent { color: var(--rp-accent); background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border); font-size: 10.5px; padding: 2px 10px; }
 
 /* ── EXPORT BUTTONS ── */
@@ -2998,8 +3741,9 @@ html[data-theme="dark"] .reports {
   padding: 7px 14px; border-radius: 8px; white-space: nowrap;
   transition: background-color .16s ease, color .16s ease;
 }
-.seg-btn:hover:not(.seg-btn--active) { color: var(--rp-text-primary); }
+.seg-btn:hover:not(.seg-btn--active):not(:disabled) { color: var(--rp-text-primary); }
 .seg-btn--active { background: var(--rp-accent); color: #fff; }
+.seg-btn:disabled { opacity: .4; cursor: not-allowed; }
 .seg--sm .seg-btn { padding: 5px 12px; font-size: 12px; }
 
 .icon-btn {
@@ -3036,34 +3780,56 @@ html[data-theme="dark"] .reports {
 .picker-trigger--open { border-color: var(--rp-accent); box-shadow: 0 0 0 3px var(--rp-accent-soft); }
 .picker-trigger--open .picker-caret { transform: rotate(180deg); }
 
+/* Compact dropdown: narrower, tighter padding / spacing, and it never grows taller
+   than the screen (scrolls inside itself as a last resort). */
 .picker-pop {
-  position: absolute; top: calc(100% + 8px); left: 0; z-index: 40;
-  width: 300px; max-width: calc(100vw - 32px);
-  padding: 14px;
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+  width: 272px; max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 120px); overflow-y: auto; overscroll-behavior: contain;
+  padding: 10px;
   background: var(--rp-surface);
   border: 1px solid var(--rp-border-strong);
-  border-radius: 18px;
-  box-shadow: 0 28px 56px -18px rgba(0,0,0,.5), 0 4px 14px rgba(0,0,0,.14);
+  border-radius: 16px;
+  box-shadow: 0 24px 48px -18px rgba(0,0,0,.5), 0 4px 14px rgba(0,0,0,.14);
   transform-origin: top left;
+  scrollbar-width: thin;
 }
 .pop-enter-active, .pop-leave-active { transition: opacity .16s ease, transform .2s var(--rp-ease); }
 .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(-6px) scale(.97); }
 
-.pk-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 12px; }
+/* One / Range switch inside the dropdown: full width, equal halves */
+.pk-span { display: flex; width: 100%; margin-bottom: 8px; }
+.pk-span .seg-btn { flex: 1; text-align: center; padding: 5px 6px; font-size: 12px; }
+
+/* Range picker: From → To boxes + hint */
+.pk-range { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; }
+.pk-range-box {
+  min-width: 0; padding: 5px 9px;
+  border: 1px solid var(--rp-border); border-radius: 9px;
+  background: var(--rp-surface-sunken);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.pk-range-box span { display: block; font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--rp-text-faint); }
+.pk-range-box strong { display: block; margin-top: 1px; font-size: 12.5px; font-weight: 700; color: var(--rp-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pk-range-box--active { border-color: var(--rp-accent); box-shadow: 0 0 0 3px var(--rp-accent-soft); }
+.pk-hint { margin: 0 0 8px; font-size: 11.5px; line-height: 1.35; font-weight: 600; color: var(--rp-text-muted); }
+.pk-limit { font-size: 11px; font-weight: 600; color: var(--rp-text-faint); }
+
+.pk-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
 .pk-nav {
-  width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; cursor: pointer;
+  width: 28px; height: 28px; flex-shrink: 0; border-radius: 9px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid transparent; background: var(--rp-surface-sunken);
-  color: var(--rp-text-secondary); font-size: 11px;
+  color: var(--rp-text-secondary); font-size: 10.5px;
   transition: background-color .15s ease, color .15s ease, border-color .15s ease;
 }
 .pk-nav:hover:not(:disabled) { background: var(--rp-accent-soft); color: var(--rp-accent); border-color: var(--rp-accent-border); }
 .pk-nav:disabled { opacity: .35; cursor: not-allowed; }
 .pk-nav--hide { visibility: hidden; }
 .pk-title {
-  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  height: 32px; border: none; border-radius: 10px; background: transparent; cursor: pointer;
-  font: inherit; font-size: 14px; font-weight: 800; letter-spacing: -.01em;
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 28px; border: none; border-radius: 9px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 13.5px; font-weight: 800; letter-spacing: -.01em;
   color: var(--rp-text-primary);
   transition: background-color .15s ease;
 }
@@ -3071,22 +3837,22 @@ html[data-theme="dark"] .reports {
 .pk-title:hover:not(:disabled) { background: var(--rp-surface-raised); }
 .pk-title:disabled { cursor: default; }
 
-.pk-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
-.pk-dow { text-align: center; padding: 4px 0 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--rp-text-faint); }
+.pk-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.pk-dow { text-align: center; padding: 2px 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--rp-text-faint); }
 .pk-blank { display: block; }
 .pk-day {
-  position: relative; aspect-ratio: 1; min-width: 0; padding: 0;
-  border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer;
-  font: inherit; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+  position: relative; height: 31px; min-width: 0; padding: 0;
+  border: 1px solid transparent; border-radius: 9px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
   color: var(--rp-text-primary);
   transition: background-color .14s ease, color .14s ease, border-color .14s ease, transform .14s var(--rp-ease);
 }
 
-.pk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.pk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
 .pk-cell {
-  position: relative; height: 46px; padding: 0;
-  border: 1px solid transparent; border-radius: 12px; background: transparent; cursor: pointer;
-  font: inherit; font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  position: relative; height: 38px; padding: 0;
+  border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
   color: var(--rp-text-primary);
   transition: background-color .14s ease, color .14s ease, border-color .14s ease, transform .14s var(--rp-ease);
 }
@@ -3096,17 +3862,21 @@ html[data-theme="dark"] .reports {
 .pk-day:disabled, .pk-cell:disabled { opacity: .28; cursor: not-allowed; }
 .pk-today { border-color: var(--rp-accent-border); color: var(--rp-accent); }
 .pk-today::after {
-  content: ''; position: absolute; bottom: 5px; left: 50%; width: 4px; height: 4px; margin-left: -2px;
+  content: ''; position: absolute; bottom: 3px; left: 50%; width: 4px; height: 4px; margin-left: -2px;
   border-radius: 50%; background: var(--rp-accent);
 }
 .pk-on { background: var(--rp-accent); border-color: var(--rp-accent); color: #fff; box-shadow: 0 6px 14px -6px var(--rp-accent); }
 .pk-on::after { background: #fff; }
+/* Range band: soft fill between the two end days / months */
+.pk-mid { background: var(--rp-accent-soft); border-radius: 6px; color: var(--rp-text-primary); }
+.pk-edge-s { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+.pk-edge-e { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
 
-.pk-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--rp-border); }
+.pk-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--rp-border); }
 .pk-link {
-  display: inline-flex; align-items: center; gap: 7px; border: none; background: transparent; cursor: pointer;
-  font: inherit; font-size: 12.5px; font-weight: 700; color: var(--rp-accent);
-  padding: 6px 9px; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; color: var(--rp-accent);
+  padding: 4px 8px; border-radius: 8px;
   transition: background-color .15s ease;
 }
 .pk-link i { font-size: 11px; }
@@ -3122,7 +3892,6 @@ html[data-theme="dark"] .reports {
 }
 .link-btn:hover { background: var(--rp-accent-soft); }
 .link-btn--block { display: block; width: 100%; margin-top: 12px; text-align: center; }
-.link-btn--current i { margin-right: 6px; font-size: 11px; }
 
 /* ── NOTICE ── */
 .notice {
@@ -3293,6 +4062,14 @@ html[data-theme="dark"] .reports {
 /* ★ marks the busiest cell for the metric that is selected */
 .heat-cell--peak { position: relative; }
 .heat-cell--peak::after { content: '★'; position: absolute; top: 3px; right: 5px; font-size: 10px; line-height: 1; color: currentColor; }
+
+/* Long ranges (100+ days): smaller cells so a year still fits comfortably */
+.heat--dense { gap: 4px; }
+/* Range of several years: 6 months per row */
+.heat--year.heat--dense { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px; }
+.heat--year.heat--dense .heat-cell { min-height: 54px; }
+.heat--month.heat--dense .heat-cell { aspect-ratio: 1.9; border-radius: 8px; font-size: 11px; }
+.hc-mon { font-size: 8.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; line-height: 1; opacity: .85; }
 
 .hc-dow   { font-size: 11px; font-weight: 600; letter-spacing: .03em; opacity: .85; }
 .hc-num   { font-size: 20px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
@@ -3520,6 +4297,7 @@ html[data-theme="dark"] .tip {
   .heat-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   /* Stacked, the calendar would otherwise get huge cells */
   .heat--month .heat-cell { aspect-ratio: auto; min-height: 44px; }
+  .heat--month.heat--dense .heat-cell { min-height: 36px; }
   .heat--day .heat-cell { min-height: 82px; }
   .heat--year .heat-cell { min-height: 62px; }
   .heat--hour .heat-cell { min-height: 54px; }
@@ -3527,7 +4305,7 @@ html[data-theme="dark"] .tip {
 
 /* ── Phone ──
    Goals: edge-to-edge layout that uses the shell's top and side padding, a slim
-   sticky bar (period only), big touch targets (≥ 40px), export actions in the
+   sticky bar (period only), big touch targets, export actions in the
    page header, and single-column cards. */
 @media (max-width: 700px) {
   .reports {
@@ -3543,7 +4321,7 @@ html[data-theme="dark"] .tip {
   .report-toolbar--header { display: flex; width: 100%; }
   .report-toolbar--header .rt-btn { flex: 1; height: 44px; padding: 0 8px; font-size: 13px; }
 
-  /* Sticky bar: group-by + navigation only (≈ 100px tall) */
+  /* Sticky bar: group-by + navigation only */
   .period-bar {
     flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px;
     border-radius: 14px; box-shadow: 0 0 0 6px var(--rp-bg), var(--rp-shadow);
@@ -3554,33 +4332,32 @@ html[data-theme="dark"] .tip {
   .icon-btn { width: 44px; height: 44px; border-radius: 11px; font-size: 13px; }
   .picker { flex: 1; min-width: 0; }
   .picker-trigger { width: 100%; min-width: 0; height: 44px; font-size: 14px; }
-  .link-btn--current {
-    align-self: stretch; text-align: center; padding: 10px; font-size: 13px;
-    background: var(--rp-accent-soft); border: 1px solid var(--rp-accent-border);
-  }
   .period-end { display: none; }
 
-  /* Calendar picker becomes a bottom sheet with a dimmed backdrop */
+  /* Calendar picker becomes a compact bottom sheet with a dimmed backdrop */
   .picker-backdrop {
     display: block; position: fixed; inset: 0; z-index: 50;
     background: rgba(8, 10, 16, .5);
   }
   .picker-pop {
     position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60;
-    width: auto; max-width: none; max-height: 88vh; overflow-y: auto;
-    padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
-    border-radius: 22px 22px 0 0; border-bottom: none;
+    width: auto; max-width: none; max-height: 82vh; overflow-y: auto;
+    padding: 8px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-radius: 20px 20px 0 0; border-bottom: none;
     box-shadow: 0 -18px 50px -12px rgba(0,0,0,.45);
     transform-origin: bottom center;
   }
   .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(32px); }
-  .pk-grab { display: block; width: 38px; height: 4px; margin: 0 auto 12px; border-radius: 4px; background: var(--rp-border-strong); }
-  .pk-nav { width: 40px; height: 40px; font-size: 12px; }
-  .pk-title { height: 40px; font-size: 15px; }
-  .pk-days { gap: 4px; }
-  .pk-day { font-size: 14px; }
-  .pk-cell { height: 52px; font-size: 14.5px; }
-  .pk-link { padding: 10px 12px; font-size: 13.5px; }
+  .pk-grab { display: block; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 4px; background: var(--rp-border-strong); }
+  .pk-span { margin-bottom: 8px; }
+  .pk-span .seg-btn { padding: 8px 6px; font-size: 13px; }
+  .pk-nav { width: 34px; height: 34px; font-size: 11.5px; }
+  .pk-title { height: 34px; font-size: 14.5px; }
+  .pk-days { gap: 3px; }
+  .pk-day { height: 38px; font-size: 13.5px; }
+  .pk-cell { height: 44px; font-size: 14px; }
+  .pk-link { padding: 8px 10px; font-size: 13px; }
+  .pk-range-box strong { font-size: 13px; }
 
   /* Summary: hero on top, KPI cards 2 × 2 with the icon above the text */
   .summary-grid { gap: 10px; }
@@ -3636,6 +4413,7 @@ html[data-theme="dark"] .tip {
   .hc-num { font-size: 16px; }
   .hc-amt { font-size: 10px; }
   .heat--year { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .heat--year.heat--dense { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
   .heat--hour { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
   .heat--hour .heat-cell { min-height: 50px; }
   .hc-hour { font-size: 12px; }
@@ -3693,7 +4471,6 @@ html[data-theme="dark"] .tip {
   .period-bar { flex-direction: row; flex-wrap: nowrap; align-items: center; }
   .seg { width: auto; flex-shrink: 0; }
   .period-nav { flex: 1; min-width: 0; width: auto; }
-  .link-btn--current { display: none; }
   .picker-pop { max-height: 92vh; }
   .chart-area { height: 200px; }
 }

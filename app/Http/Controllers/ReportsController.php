@@ -20,9 +20,15 @@ class ReportsController extends Controller
      *  - every other line (and all older sales): (price at sale - cost at sale) * quantity
      */
     private const PROFIT_SQL = SalesItem::PROFIT_SQL;
-    
+
     /** Shop sales = customer paid minus the worker's pass-through share of services. */
     private const NET_SALES_SQL = 'SUM(sales.TotalAmount - COALESCE(svc.worker_total, 0))';
+
+    /** Longest custom range (days, inclusive). Keeps the chart, heatmap and print sheet readable. */
+    private const MAX_RANGE_DAYS = 366;
+
+    /** Earliest year the custom range may reach back to (matches the page's year picker). */
+    private const MIN_RANGE_YEAR = 2000;
 
     private function svcSub()
     {
@@ -53,15 +59,19 @@ class ReportsController extends Controller
      * UNIFIED REPORTS ENDPOINT
      *   ?mode=month&year=2026&month=6   (default)
      *   ?mode=week&start=2026-11-08&end=2026-11-14   (Sunday -> Saturday)
+     *   ?mode=range&start=2026-11-01&end=2026-11-24  (any custom days, both inclusive, up to 366 days)
      *   ?mode=day&date=2026-06-14
      *   ?mode=year&year=2026
      *   &totals_only=1   -> just the sales total (previous-period comparison)
      *   &include_sales=0 -> skip the transactions list
+     *
+     * Day / week / range / month all return one row per day ('YYYY-MM-DD'),
+     * so the page can treat them the same way.
      */
     public function index(Request $request)
     {
         $mode = $request->query('mode', 'month');
-        $mode = in_array($mode, ['day', 'week', 'month', 'year'], true) ? $mode : 'month';
+        $mode = in_array($mode, ['day', 'week', 'range', 'month', 'year'], true) ? $mode : 'month';
 
         $request->validate([
             'date'  => ['nullable', 'date_format:Y-m-d'],
@@ -206,9 +216,15 @@ class ReportsController extends Controller
         return response()->json($payload, 200);
     }
 
-    /** "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" / "Dec 28, 2026 – Jan 3, 2027" */
-    private function formatWeekRange(Carbon $start, Carbon $end): string
+    /**
+     * "Nov 8, 2026" (single day) / "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" /
+     * "Dec 28, 2026 – Jan 3, 2027". Same wording the page uses for its own labels.
+     */
+    private function formatDateSpan(Carbon $start, Carbon $end): string
     {
+        if ($start->isSameDay($end)) {
+            return $start->format('M j, Y');
+        }
         if ($start->year !== $end->year) {
             return $start->format('M j, Y') . ' – ' . $end->format('M j, Y');
         }
@@ -259,11 +275,55 @@ class ReportsController extends Controller
                     'start' => $start->format('Y-m-d'),
                     'end'   => $end->format('Y-m-d'),
                     'value' => $start->format('Y-m-d'),
-                    'label' => $this->formatWeekRange($start, $end),
+                    'label' => $this->formatDateSpan($start, $end),
                 ],
                 'words'    => [
                     'sales' => "This Week's Sales", 'items' => 'Items Sold This Week',
                     'tx' => 'Transactions This Week', 'profit' => 'Weekly Profit',
+                ],
+            ];
+        }
+
+        if ($mode === 'range') {
+            $today = now()->startOfDay();
+
+            // Missing dates fall back to "the last 30 days" instead of failing.
+            $start = Carbon::createFromFormat('Y-m-d', $request->query('start', $today->copy()->subDays(29)->format('Y-m-d')))->startOfDay();
+            $end   = Carbon::createFromFormat('Y-m-d', $request->query('end', $today->format('Y-m-d')))->startOfDay();
+
+            // Tidy up anything odd so a bad request can never produce a huge or empty query.
+            if ($start->isAfter($end)) {
+                [$start, $end] = [$end, $start];            // reversed → swap
+            }
+            if ($end->isAfter($today)) {
+                $end = $today->copy();                      // no future days
+            }
+            if ($start->isAfter($end)) {
+                $start = $end->copy();                      // whole range was in the future
+            }
+            $floor = Carbon::create(self::MIN_RANGE_YEAR, 1, 1)->startOfDay();
+            if ($start->isBefore($floor)) {
+                $start = $floor;
+            }
+            if ($start->diffInDays($end) + 1 > self::MAX_RANGE_DAYS) {
+                $start = $end->copy()->subDays(self::MAX_RANGE_DAYS - 1);   // keep the most recent days
+            }
+
+            $end = $end->copy()->endOfDay();
+
+            return [
+                'start'    => $start,
+                'end'      => $end,
+                'bucket'   => 'DATE(sales.SaleDate)',
+                'selected' => [
+                    'start' => $start->format('Y-m-d'),
+                    'end'   => $end->format('Y-m-d'),
+                    'value' => $start->format('Y-m-d') . '_' . $end->format('Y-m-d'),
+                    'label' => $this->formatDateSpan($start, $end),
+                ],
+                'words'    => [
+                    'sales' => 'Sales In Range', 'items' => 'Items Sold In Range',
+                    'tx' => 'Transactions In Range', 'profit' => 'Profit In Range',
                 ],
             ];
         }

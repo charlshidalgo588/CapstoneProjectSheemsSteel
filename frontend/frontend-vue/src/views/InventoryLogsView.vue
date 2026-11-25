@@ -42,6 +42,7 @@
             <h1 class="page-title">Inventory Logs</h1>
             <p class="page-sub">
               <span>{{ filterLabel || 'Loading…' }}</span>
+              <span v-if="periodMode === 'range'" class="chip chip--muted">{{ rangeStepText }}</span>
               <span v-if="isCurrentPeriod" class="chip chip--live">In progress</span>
             </p>
             <p v-if="lastUpdated && !isFiltering" class="page-updated">Updated {{ lastUpdated }}</p>
@@ -75,7 +76,7 @@
         <!-- Print-only heading for the summary tiles -->
         <h2 class="section-title print-only print-sec-title">Inventory Activity Summary</h2>
 
-        <!-- PERIOD BAR -->
+        <!-- PERIOD BAR: pick the unit (Day / Month / Year). "One / Range" lives inside the dropdown. -->
         <div class="period-bar" ref="periodBar" role="group" aria-label="Report period">
           <div class="seg" role="group" aria-label="Group logs by">
             <button
@@ -83,9 +84,9 @@
               :key="m.key"
               type="button"
               class="seg-btn"
-              :class="{ 'seg-btn--active': periodMode === m.key }"
-              :aria-pressed="periodMode === m.key"
-              @click="setPeriodMode(m.key)"
+              :class="{ 'seg-btn--active': activeUnit === m.key }"
+              :aria-pressed="activeUnit === m.key"
+              @click="setUnit(m.key)"
             >
               {{ m.label }}
             </button>
@@ -97,6 +98,7 @@
               class="icon-btn"
               :disabled="!canGoPrev || isFiltering"
               :aria-label="`Previous ${periodNoun}`"
+              :title="periodMode === 'range' ? `Go back ${rangeStepText}` : null"
               @click="shiftPeriod(-1)"
             >
               <i class="fa-solid fa-chevron-left"></i>
@@ -126,6 +128,39 @@
                 <div v-if="pickerOpen" class="picker-pop" role="dialog" :aria-label="`Choose ${periodNoun}`">
                   <span class="pk-grab" aria-hidden="true"></span>
 
+                  <!-- One / Range switch (works for days, months and years) -->
+                  <div class="seg seg--sm pk-span" role="group" :aria-label="`Show one ${activeUnit} or a range`">
+                    <button
+                      type="button"
+                      class="seg-btn"
+                      :class="{ 'seg-btn--active': periodMode !== 'range' }"
+                      :aria-pressed="periodMode !== 'range'"
+                      @click="setSpan('single', true)"
+                    >{{ singleBtnLabel }}</button>
+                    <button
+                      type="button"
+                      class="seg-btn"
+                      :class="{ 'seg-btn--active': periodMode === 'range' }"
+                      :aria-pressed="periodMode === 'range'"
+                      @click="setSpan('range', true)"
+                    >{{ rangeBtnLabel }}</button>
+                  </div>
+
+                  <!-- Range mode: shows what is being picked (From → To) -->
+                  <template v-if="showRangeHead">
+                    <div class="pk-range">
+                      <div class="pk-range-box" :class="{ 'pk-range-box--active': !pkDraftStart }">
+                        <span>From</span>
+                        <strong>{{ pkRangeFrom }}</strong>
+                      </div>
+                      <div class="pk-range-box" :class="{ 'pk-range-box--active': !!pkDraftStart }">
+                        <span>To</span>
+                        <strong>{{ pkRangeTo }}</strong>
+                      </div>
+                    </div>
+                    <p class="pk-hint">{{ pkHintText }}</p>
+                  </template>
+
                   <div class="pk-head">
                     <button type="button" class="pk-nav" :class="{ 'pk-nav--hide': pickerView === 'years' }" :disabled="!pkCanPrev" aria-label="Previous" @click="pkShift(-1)">
                       <i class="fa-solid fa-chevron-left"></i>
@@ -139,8 +174,8 @@
                     </button>
                   </div>
 
-                  <!-- Days (Day mode picks a day, Week mode picks the week that day belongs to) -->
-                  <div v-if="pickerView === 'days'" class="pk-days">
+                  <!-- Days (Day mode picks a day, Range of days picks start → end) -->
+                  <div v-if="pickerView === 'days'" class="pk-days" @mouseleave="pkHover(null)">
                     <span v-for="w in PK_WEEKDAYS" :key="w" class="pk-dow">{{ w }}</span>
                     <template v-for="(c, i) in pkDayCells" :key="i">
                       <span v-if="!c" class="pk-blank"></span>
@@ -148,46 +183,72 @@
                         v-else
                         type="button"
                         class="pk-day"
-                        :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
-                        :disabled="c.future"
+                        :class="{
+                          'pk-on': c.selected,
+                          'pk-today': c.today,
+                          'pk-mid': c.inRange,
+                          'pk-edge-s': c.edge === 'start',
+                          'pk-edge-e': c.edge === 'end',
+                        }"
+                        :disabled="c.future || c.tooFar"
                         :aria-pressed="c.selected"
                         :aria-label="c.title"
+                        @mouseenter="pkHover(c.key)"
+                        @focus="pkHover(c.key)"
                         @click="pkPickDay(c.key)"
                       >{{ c.d }}</button>
                     </template>
                   </div>
 
-                  <!-- Months -->
-                  <div v-else-if="pickerView === 'months'" class="pk-grid">
+                  <!-- Months (also the start → end picker for a range of months) -->
+                  <div v-else-if="pickerView === 'months'" class="pk-grid" @mouseleave="pkHoverMonth(null)">
                     <button
                       v-for="c in pkMonthCells"
                       :key="c.key"
                       type="button"
                       class="pk-cell"
-                      :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
-                      :disabled="c.future"
+                      :class="{
+                        'pk-on': c.selected,
+                        'pk-today': c.today,
+                        'pk-mid': c.inRange,
+                        'pk-edge-s': c.edge === 'start',
+                        'pk-edge-e': c.edge === 'end',
+                      }"
+                      :disabled="c.future || c.tooFar"
                       :aria-pressed="c.selected"
                       :aria-label="c.title"
+                      @mouseenter="pkHoverMonth(c.key)"
+                      @focus="pkHoverMonth(c.key)"
                       @click="pkPickMonth(c.m)"
                     >{{ c.label }}</button>
                   </div>
 
-                  <!-- Years -->
-                  <div v-else class="pk-grid">
+                  <!-- Years (also the start → end picker for a range of years) -->
+                  <div v-else class="pk-grid" @mouseleave="pkHoverYear(null)">
                     <button
                       v-for="c in pkYearCells"
                       :key="c.y"
                       type="button"
                       class="pk-cell"
-                      :class="{ 'pk-on': c.selected, 'pk-today': c.today }"
+                      :class="{
+                        'pk-on': c.selected,
+                        'pk-today': c.today,
+                        'pk-mid': c.inRange,
+                        'pk-edge-s': c.edge === 'start',
+                        'pk-edge-e': c.edge === 'end',
+                      }"
+                      :disabled="c.tooFar"
                       :aria-pressed="c.selected"
+                      @mouseenter="pkHoverYear(c.y)"
+                      @focus="pkHoverYear(c.y)"
                       @click="pkPickYear(c.y)"
                     >{{ c.y }}</button>
                   </div>
 
                   <div class="pk-foot">
                     <button type="button" class="pk-link pk-link--muted" @click="closePicker(true)">Close</button>
-                    <button type="button" class="pk-link" :disabled="isCurrentPeriod" @click="pkGoCurrent">
+                    <span v-if="periodMode === 'range'" class="pk-limit">{{ rangeLimitText }}</span>
+                    <button v-else type="button" class="pk-link" :disabled="isCurrentPeriod" @click="pkGoCurrent">
                       <i class="fa-solid fa-location-crosshairs"></i>{{ currentLabel }}
                     </button>
                   </div>
@@ -200,13 +261,14 @@
               class="icon-btn"
               :disabled="!canGoNext || isFiltering"
               :aria-label="`Next ${periodNoun}`"
+              :title="periodMode === 'range' ? `Go forward ${rangeStepText}` : null"
               @click="shiftPeriod(1)"
             >
               <i class="fa-solid fa-chevron-right"></i>
             </button>
           </div>
 
-          <button v-if="!isCurrentPeriod" type="button" class="link-btn link-btn--current" :disabled="isFiltering" @click="goCurrent">
+          <button v-if="periodMode !== 'range' && !isCurrentPeriod" type="button" class="link-btn link-btn--current" :disabled="isFiltering" @click="goCurrent">
             <i class="fa-solid fa-rotate-left"></i>{{ currentLabel }}
           </button>
 
@@ -260,6 +322,13 @@
         </div>
       </div>
 
+      <!-- SECTION JUMP BAR: the page is long, so every section is one tap away -->
+      <nav class="section-nav" aria-label="Jump to a section">
+        <button v-for="n in sectionNav" :key="n.id" type="button" class="nav-chip" @click="jumpTo(n.id)">
+          <i class="fa-solid" :class="n.icon"></i>{{ n.label }}<span class="nav-count">{{ n.count }}</span>
+        </button>
+      </nav>
+
       <!-- ERROR NOTICE -->
       <div v-if="loadError" class="notice" role="alert">
         <i class="fa-solid fa-triangle-exclamation"></i>
@@ -267,102 +336,78 @@
         <button type="button" class="link-btn" @click="refresh">Try again</button>
       </div>
 
-      <!-- Recent Activity (screen only: the printed report lists every movement in the Full History section) -->
-      <div class="section section--screen">
-        <div class="card">
+      <!-- Latest activity (screen only: the printed report lists every movement in the Full History section) -->
+      <div id="sec-latest" class="section section--screen sec-anchor">
+        <div class="card" :class="{ 'card--flash': flashId === 'sec-latest' }">
           <div class="card-header">
-            <div>
-              <p class="card-eyebrow">Latest</p>
-              <h2 class="card-title">Recent Activity</h2>
-              <p class="card-sub">Quantity is the number of whole pieces moved. For cut sales it also shows how much length was sold and how much was left over. Leftover pieces themselves are managed on the Inventory page.</p>
+            <div class="card-head-main">
+              <span class="card-ico card-ico--blue"><i class="fa-solid fa-clock-rotate-left"></i></span>
+              <div>
+                <h2 class="card-title">Latest activity</h2>
+                <p class="card-sub">The most recent stock movements. Full History below has every movement, cut details and notes.</p>
+              </div>
             </div>
+            <button type="button" class="link-btn" @click="jumpTo('sec-logs', 'all')">View all history</button>
           </div>
-          <div class="table-wrap">
-            <table id="recentActivityTable" class="data-table data-table--fixed data-table--stack">
-              <thead>
-                <tr>
-                  <th style="width:27%">Product</th>
-                  <th style="width:15%">Type</th>
-                  <th style="width:24%">Quantity</th>
-                  <th style="width:12%">Date</th>
-                  <th style="width:22%">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in recentActivity" :key="item.id">
-                  <td data-label="Product">
-                    <div class="cell-product">{{ item.ProductName }}</div>
-                    <div class="cell-sku">
-                      {{ item.SKU }}
-                      <span v-if="item.Unit" class="unit-pill">{{ unitLabel(item.Unit) }}</span>
-                    </div>
-                    <div v-if="item.VariantLabel" class="cell-sku">Size: {{ item.VariantLabel }}</div>
-                  </td>
-                  <td data-label="Type">
-                    <div class="pill-stack">
-                      <span class="status-pill" :class="'status-pill--' + item.type_pill.tone">
-                        {{ item.type_pill.label }}
-                      </span>
-                      <span v-if="isLeftoverUsed(item)" class="status-pill status-pill--rem">
-                        <i class="fa-solid fa-ruler-horizontal"></i> Leftover used
-                      </span>
-                      <span v-if="isNewProduct(item)" class="status-pill status-pill--new">New</span>
-                      <span v-if="item.is_cut" class="status-pill status-pill--cut"><i class="fa-solid fa-scissors"></i> Cut</span>
-                    </div>
-                  </td>
-                  <td data-label="Quantity" class="cell-qty" :data-order="num(item.quantity)">
-                    <div class="qty-main" :class="'qty-main--' + item.qty_info.tone">{{ item.qty_info.main }}</div>
-                    <div v-if="item.qty_info.caption" class="qty-caption">{{ item.qty_info.caption }}</div>
-                    <dl v-if="item.qty_info.details.length" class="qty-details">
-                      <div v-for="d in item.qty_info.details" :key="d.label" class="qty-row">
-                        <dt>{{ d.label }}</dt>
-                        <dd>{{ d.value }}</dd>
-                      </div>
-                    </dl>
-                  </td>
-                  <td data-label="Date" class="cell-date" :data-order="item.created_at" :title="item.created_at">
-                    <div class="cell-date-day">{{ dateOnly(item.created_at) }}</div>
-                    <div class="cell-date-time">{{ timeOnly(item.created_at) }}</div>
-                  </td>
-                  <td data-label="Notes" class="cell-muted cell-notes">{{ item.notes }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+
+          <ul v-if="feedItems.length" class="feed">
+            <li v-for="item in feedItems" :key="item.id" class="feed-item">
+              <span class="feed-ico" :class="'feed-ico--' + item.qty_info.tone"><i class="fa-solid" :class="feedIcon(item)"></i></span>
+              <div class="feed-main">
+                <p class="feed-name">{{ item.ProductName }}</p>
+                <p class="feed-meta">
+                  <span class="feed-type">{{ item.type_pill.label }}</span>
+                  <template v-if="item.VariantLabel"> · {{ item.VariantLabel }}</template>
+                  · {{ dateOnly(item.created_at) }}, {{ timeOnly(item.created_at) }}
+                </p>
+              </div>
+              <div class="feed-qty">
+                <span class="qty-main" :class="'qty-main--' + item.qty_info.tone">{{ item.qty_info.main }}</span>
+                <span v-if="item.qty_info.caption" class="feed-cap">{{ item.qty_info.caption }}</span>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="il-empty">No activity in this period.</p>
         </div>
       </div>
 
       <!-- Top Adjusted Products -->
-      <div class="section">
-        <div class="card">
+      <div id="sec-top" class="section sec-anchor">
+        <div class="card" :class="{ 'card--flash': flashId === 'sec-top' }">
           <div class="card-header">
-            <div>
-              <p class="card-eyebrow">Performance</p>
-              <h2 class="card-title">Top Adjusted Products</h2>
+            <div class="card-head-main">
+              <span class="card-ico card-ico--orange"><i class="fa-solid fa-ranking-star"></i></span>
+              <div>
+                <h2 class="card-title">Top Adjusted Products</h2>
+                <p class="card-sub">Products with the most stock movements in this period. Net is stock in minus stock out.</p>
+              </div>
             </div>
+            <span class="card-count">{{ (topAdjustedProducts || []).length }} products</span>
           </div>
           <div class="table-wrap">
             <table id="topAdjustedTable" class="data-table data-table--fixed data-table--stack">
               <thead>
                 <tr>
-                  <th style="width:40%">Product</th>
-                  <th style="width:16%">Adjustments</th>
-                  <th style="width:22%">Total Stock In</th>
-                  <th style="width:22%">Total Stock Out</th>
+                  <th style="width:34%">Product</th>
+                  <th style="width:14%">Adjustments</th>
+                  <th style="width:17%">Stock In</th>
+                  <th style="width:17%">Stock Out</th>
+                  <th style="width:18%">Net</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="item in topAdjustedProducts" :key="item.ProductID ?? item.id">
                   <td data-label="Product">
                     <div class="cell-product">{{ item.ProductName }}</div>
-                    <div class="cell-sku">
-                      {{ item.SKU }}
+                    <div class="cell-meta">
+                      <span class="cell-sku">{{ item.SKU }}</span>
                       <span v-if="item.Unit" class="unit-pill">{{ unitLabel(item.Unit) }}</span>
                     </div>
                   </td>
-                  <td data-label="Adjustments" class="cell-muted">{{ item.adjustment_count }}</td>
-                  <td data-label="Total Stock In" class="cell-positive" :data-order="num(item.total_stock_in)">+{{ formatQty(item.total_stock_in, item.Unit) }}</td>
-                  <td data-label="Total Stock Out" class="cell-negative" :data-order="num(item.total_stock_out)">-{{ formatQty(item.total_stock_out, item.Unit) }}</td>
+                  <td data-label="Adjustments" class="cell-muted"><strong class="cell-strong">{{ item.adjustment_count }}</strong></td>
+                  <td data-label="Stock In" class="cell-positive" :data-order="num(item.total_stock_in)">+{{ formatQty(item.total_stock_in, item.Unit) }}</td>
+                  <td data-label="Stock Out" class="cell-negative" :data-order="num(item.total_stock_out)">-{{ formatQty(item.total_stock_out, item.Unit) }}</td>
+                  <td data-label="Net" :class="netInfo(item).cls" :data-order="netInfo(item).n">{{ netInfo(item).text }}</td>
                 </tr>
               </tbody>
             </table>
@@ -374,11 +419,23 @@
       <div id="sec-services" class="section sec-anchor">
         <div class="card" :class="{ 'card--flash': flashId === 'sec-services' }">
           <div class="card-header">
-            <div>
-              <p class="card-eyebrow">Labour</p>
-              <h2 class="card-title">Extra Services</h2>
+            <div class="card-head-main">
+              <span class="card-ico card-ico--green"><i class="fa-solid fa-screwdriver-wrench"></i></span>
+              <div>
+                <h2 class="card-title">Extra Services</h2>
+                <p class="card-sub">Labour fees charged on sales, split between the worker and the owner.</p>
+              </div>
             </div>
+            <span class="card-count">{{ services.length }} {{ services.length === 1 ? 'service' : 'services' }}</span>
           </div>
+
+          <!-- Totals at a glance (screen only) -->
+          <div v-if="services.length" class="svc-stats">
+            <div class="svc-stat"><span>Total fees</span><strong>{{ peso(serviceTotals.fee) }}</strong></div>
+            <div class="svc-stat svc-stat--out"><span>Worker share</span><strong>{{ peso(serviceTotals.worker) }}</strong></div>
+            <div class="svc-stat svc-stat--in"><span>Owner share</span><strong>{{ peso(serviceTotals.owner) }}</strong></div>
+          </div>
+
           <div class="table-wrap">
             <table class="data-table data-table--plain data-table--fixed data-table--stack">
               <thead>
@@ -433,67 +490,74 @@
       <div id="sec-logs" class="section sec-anchor">
         <div class="card" :class="{ 'card--flash': flashId === 'sec-logs' }">
           <div class="card-header">
-            <div>
-              <p class="card-eyebrow">Full History</p>
-              <h2 class="card-title">Inventory Logs</h2>
-              <p class="card-sub">Every stock movement in this period, including cut sales and leftover updates.</p>
+            <div class="card-head-main">
+              <span class="card-ico card-ico--violet"><i class="fa-solid fa-list"></i></span>
+              <div>
+                <h2 class="card-title">Inventory Logs</h2>
+                <p class="card-sub">Every stock movement in this period, including cut sales and leftover updates. The colour bar on each row shows stock in (green), stock out (red) or other (amber).</p>
+              </div>
             </div>
+            <span class="card-count">{{ formatNumber(inventoryLogs.length) }} movements</span>
           </div>
 
-          <!-- Active filter from the summary cards -->
-          <div v-if="logFilter !== 'all'" class="filter-bar">
-            <span class="filter-chip">
-              <i class="fa-solid fa-filter"></i>
-              Showing {{ logFilterLabel }} · {{ filteredLogCount }} of {{ inventoryLogs.length }}
-            </span>
+          <!-- Quick filters (the summary cards use these too) -->
+          <div class="log-filters">
+            <div class="seg seg--sm" role="group" aria-label="Filter movements">
+              <button
+                v-for="f in LOG_FILTERS"
+                :key="f.key"
+                type="button"
+                class="seg-btn"
+                :class="{ 'seg-btn--active': logFilter === f.key }"
+                :aria-pressed="logFilter === f.key"
+                @click="setLogFilter(f.key)"
+              >{{ f.label }}<span class="seg-count">{{ logCounts[f.key] }}</span></button>
+            </div>
             <button v-if="logFilter === 'stock_in' || logFilter === 'stock_out'" type="button" class="link-btn" @click="openBreakdown(logFilter)">View breakdown</button>
-            <button type="button" class="link-btn" @click="clearLogFilter">Show all</button>
           </div>
 
           <div class="table-wrap">
             <table id="inventoryLogsTable" class="data-table data-table--fixed data-table--stack">
               <thead>
                 <tr>
-                  <th style="width:23%">Product</th>
-                  <th style="width:10%">Category</th>
-                  <th style="width:13%">Type</th>
-                  <th style="width:21%">Quantity</th>
-                  <th style="width:11%">Date</th>
-                  <th style="width:22%">Notes</th>
+                  <th style="width:30%">Product</th>
+                  <th style="width:16%">Type</th>
+                  <th style="width:24%">Quantity</th>
+                  <th style="width:12%">Date</th>
+                  <th style="width:18%">Notes</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in inventoryLogs" :key="item.id">
+                <tr v-for="item in inventoryLogs" :key="item.id" :class="'row--' + item.qty_info.tone">
                   <td data-label="Product">
                     <div class="cell-product">{{ item.ProductName }}</div>
-                    <div class="cell-sku">
-                      {{ item.SKU }}
+                    <div class="cell-meta">
+                      <span class="cell-sku">{{ item.SKU }}</span>
                       <span v-if="item.Unit" class="unit-pill">{{ unitLabel(item.Unit) }}</span>
+                      <span v-if="item.VariantLabel" class="size-pill">Size {{ item.VariantLabel }}</span>
+                      <span v-if="item.CategoryName" class="category-pill">{{ item.CategoryName }}</span>
                     </div>
-                    <div v-if="item.VariantLabel" class="cell-sku">Size: {{ item.VariantLabel }}</div>
                   </td>
-                  <td data-label="Category"><span class="category-pill">{{ item.CategoryName }}</span></td>
                   <td data-label="Type">
                     <div class="pill-stack">
                       <span class="status-pill" :class="'status-pill--' + item.type_pill.tone">
                         {{ item.type_pill.label }}
                       </span>
-                      <span v-if="isLeftoverUsed(item)" class="status-pill status-pill--rem">
-                        <i class="fa-solid fa-ruler-horizontal"></i> Leftover used
-                      </span>
-                      <span v-if="isNewProduct(item)" class="status-pill status-pill--new">New</span>
-                      <span v-if="item.is_cut" class="status-pill status-pill--cut"><i class="fa-solid fa-scissors"></i> Cut</span>
+                      <div class="pill-sub">
+                        <span v-if="isLeftoverUsed(item)" class="status-pill status-pill--rem">
+                          <i class="fa-solid fa-ruler-horizontal"></i> Leftover used
+                        </span>
+                        <span v-if="isNewProduct(item)" class="status-pill status-pill--new">New</span>
+                        <span v-if="item.is_cut" class="status-pill status-pill--cut"><i class="fa-solid fa-scissors"></i> Cut</span>
+                      </div>
                     </div>
                   </td>
                   <td data-label="Quantity" class="cell-qty" :data-order="num(item.quantity)">
                     <div class="qty-main" :class="'qty-main--' + item.qty_info.tone">{{ item.qty_info.main }}</div>
                     <div v-if="item.qty_info.caption" class="qty-caption">{{ item.qty_info.caption }}</div>
-                    <dl v-if="item.qty_info.details.length" class="qty-details">
-                      <div v-for="d in item.qty_info.details" :key="d.label" class="qty-row">
-                        <dt>{{ d.label }}</dt>
-                        <dd>{{ d.value }}</dd>
-                      </div>
-                    </dl>
+                    <div v-if="item.qty_info.details.length" class="qty-chips">
+                      <span v-for="d in item.qty_info.details" :key="d.label" class="qty-chip"><em>{{ d.label }}</em>{{ d.value }}</span>
+                    </div>
                   </td>
                   <td data-label="Date" class="cell-date" :data-order="item.created_at" :title="item.created_at">
                     <div class="cell-date-day">{{ dateOnly(item.created_at) }}</div>
@@ -652,48 +716,62 @@ const PAGE_LOGS  = 15
 const SVC_PAGE_SIZE = PAGE_SMALL
 
 /* ════════════════════════════════════════════════════════════
-   PERIOD FILTER + CALENDAR PICKER  (Day / Week / Month / Year)
+   PERIOD FILTER + CALENDAR PICKER  (Day / Month / Year, one or a range)
    Same behaviour as the Reports page.
+   The top bar picks a UNIT (Day / Month / Year). Inside the calendar
+   dropdown a toggle then picks ONE of that unit or a RANGE of them.
    The backend already filters on date_from / date_to, so every mode
    simply sends a different range:
      Day   → that day
-     Week  → Sunday – Saturday
      Month → 1st – last day
      Year  → Jan 1 – Dec 31
+     Range → any start – any end (days, whole months or whole years)
+   periodMode is 'day' | 'month' | 'year' | 'range' and rangeUnit
+   remembers what a range is made of.
 ════════════════════════════════════════════════════════════ */
 const MODES = [
   { key: 'day',   label: 'Day' },
-  { key: 'week',  label: 'Week' },
   { key: 'month', label: 'Month' },
   { key: 'year',  label: 'Year' },
 ]
 
-const periodMode = ref('month') // 'day' | 'week' | 'month' | 'year'
+const periodMode = ref('month') // 'day' | 'month' | 'year' | 'range'
 
 const pad = (n) => String(n).padStart(2, '0')
 const toDayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const toMonthStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
 
-// Sunday-start week that contains the given YYYY-MM-DD.
-function weekStartOf(dayStr) {
-  const d = new Date(`${dayStr}T00:00:00`)
-  d.setDate(d.getDate() - d.getDay())
-  return d
-}
 // 'YYYY-MM-DD' shifted by n days -> 'YYYY-MM-DD'
 function shiftDayStr(dayStr, n) {
   const d = new Date(`${dayStr}T00:00:00`)
   d.setDate(d.getDate() + n)
   return toDayStr(d)
 }
-// Weeks run Sunday → Saturday. weekStr is the Sunday.
-const weekEndStr = (weekStr) => shiftDayStr(weekStr, 6)
+// Whole days from a to b (b - a), both 'YYYY-MM-DD'.
+function dayDiff(a, b) {
+  return Math.round((new Date(`${b}T00:00:00`) - new Date(`${a}T00:00:00`)) / 86400000)
+}
 
-// "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" / "Dec 28, 2026 – Jan 3, 2027"
-function formatWeekRange(weekStr) {
-  const s = new Date(`${weekStr}T00:00:00`)
-  const e = new Date(`${weekEndStr(weekStr)}T00:00:00`)
+// Month helpers. A "month index" is year * 12 + (month - 1).
+function monthIdxOf(ym) {
+  const [y, m] = String(ym).split('-').map(Number)
+  return y * 12 + (m - 1)
+}
+function idxFirst(i) { return `${Math.floor(i / 12)}-${pad((i % 12) + 1)}-01` }
+function idxLast(i)  { return toDayStr(new Date(Math.floor(i / 12), (i % 12) + 1, 0)) }
+function lastDayOfMonth(ym) {
+  const [y, m] = String(ym).split('-').map(Number)
+  return toDayStr(new Date(y, m, 0))
+}
+
+// "Nov 8 – 14, 2026" / "Oct 25 – Nov 1, 2026" / "Dec 28, 2026 – Jan 3, 2027" / "Nov 8, 2026" (single day)
+function formatDateSpan(startStr, endStr) {
+  const s = new Date(`${startStr}T00:00:00`)
+  const e = new Date(`${endStr}T00:00:00`)
   const mon = (d) => d.toLocaleDateString('en-US', { month: 'short' })
+  if (startStr === endStr) {
+    return `${mon(s)} ${s.getDate()}, ${s.getFullYear()}`
+  }
   if (s.getFullYear() !== e.getFullYear()) {
     return `${mon(s)} ${s.getDate()}, ${s.getFullYear()} – ${mon(e)} ${e.getDate()}, ${e.getFullYear()}`
   }
@@ -703,18 +781,42 @@ function formatWeekRange(weekStr) {
   return `${mon(s)} ${s.getDate()} – ${e.getDate()}, ${e.getFullYear()}`
 }
 
+// "Nov 8, 2026" (used by the range picker's From / To boxes)
+const formatShortDate = (dayStr) =>
+  new Date(`${dayStr}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+// "Nov 2026" (used by the range-of-months picker's From / To boxes)
+const formatMonthKey = (ym) =>
+  new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+
 const todayDate  = new Date()
 const CUR_DATE   = toDayStr(todayDate)                         // 'YYYY-MM-DD'
-const CUR_WEEK   = toDayStr(weekStartOf(CUR_DATE))             // Sunday of this week
 const CUR_MONTH  = toMonthStr(todayDate)                       // 'YYYY-MM'
 const CUR_YEAR   = todayDate.getFullYear()
 const yearOptions = Array.from({ length: 12 }, (_, i) => CUR_YEAR - i) // newest first (clean 3 × 4 grid)
 const MIN_YEAR   = yearOptions[yearOptions.length - 1]
 
+/* Range limits: the earliest pickable day and the longest allowed range. */
+const MIN_DATE         = `${MIN_YEAR}-01-01`
+const MAX_RANGE_DAYS   = 366
+const MAX_RANGE_MONTHS = 12
+const MAX_RANGE_YEARS  = yearOptions.length // every year the picker offers
+
+// Default / fallback spans
+const last30Span = () => ({ start: shiftDayStr(CUR_DATE, -29), end: CUR_DATE })
+const lastMonthsSpan = (n) => ({
+  start: idxFirst(todayDate.getFullYear() * 12 + todayDate.getMonth() - (n - 1)),
+  end: CUR_DATE,
+})
+
 const selectedDate  = ref(CUR_DATE)
-const selectedWeek  = ref(CUR_WEEK) // Sunday of the selected week
 const selectedMonth = ref(CUR_MONTH)
 const selectedYear  = ref(CUR_YEAR)
+// Range mode: inclusive start / end days, 'YYYY-MM-DD'. Starts as the last 30 days.
+const rangeStart    = ref(last30Span().start)
+const rangeEnd      = ref(last30Span().end)
+// What a range is made of: days, months or years (only used while periodMode is 'range').
+const rangeUnit     = ref('day')
 
 const isFiltering   = ref(false)
 const loadError     = ref('')
@@ -729,51 +831,219 @@ const printing  = ref(false)
 const printAll  = ref(false)  // true while printing: tables show every row
 const printGeneratedAt = ref('')
 
-const periodNoun   = computed(() => ({ day: 'day', week: 'week', month: 'month', year: 'year' }[periodMode.value]))
-const currentLabel = computed(() => ({ day: 'Today', week: 'This week', month: 'This month', year: 'This year' }[periodMode.value]))
+const rangeDays        = computed(() => Math.max(1, dayDiff(rangeStart.value, rangeEnd.value) + 1))
+const rangeMonthsCount = computed(() => monthIdxOf(rangeEnd.value.slice(0, 7)) - monthIdxOf(rangeStart.value.slice(0, 7)) + 1)
+const rangeYearsCount  = computed(() => Number(rangeEnd.value.slice(0, 4)) - Number(rangeStart.value.slice(0, 4)) + 1)
+
+// The unit the person is working in, whether it is one of them or a range of them.
+const activeUnit     = computed(() => (periodMode.value === 'range' ? rangeUnit.value : periodMode.value))
+const singleBtnLabel = computed(() => `One ${activeUnit.value}`)
+const rangeBtnLabel  = computed(() => `Range of ${activeUnit.value}s`)
+
+// "30 days" / "3 months" / "4 years": how far the ‹ › buttons move a range.
+const rangeStepText = computed(() => {
+  if (rangeUnit.value === 'year')  return `${rangeYearsCount.value} ${rangeYearsCount.value === 1 ? 'year' : 'years'}`
+  if (rangeUnit.value === 'month') return `${rangeMonthsCount.value} ${rangeMonthsCount.value === 1 ? 'month' : 'months'}`
+  return `${rangeDays.value} ${rangeDays.value === 1 ? 'day' : 'days'}`
+})
+const rangeLimitText = computed(() => {
+  if (rangeUnit.value === 'year')  return `Up to ${MAX_RANGE_YEARS} years`
+  if (rangeUnit.value === 'month') return `Up to ${MAX_RANGE_MONTHS} months`
+  return `Up to ${MAX_RANGE_DAYS} days`
+})
+
+const periodNoun   = computed(() => ({ day: 'day', month: 'month', year: 'year', range: 'range' }[periodMode.value]))
+const currentLabel = computed(() => ({ day: 'Today', month: 'This month', year: 'This year', range: 'Last 30 days' }[periodMode.value]))
 
 const canGoNext = computed(() => {
   if (periodMode.value === 'year')  return selectedYear.value < CUR_YEAR
   if (periodMode.value === 'month') return !!selectedMonth.value && selectedMonth.value < CUR_MONTH
-  if (periodMode.value === 'week')  return !!selectedWeek.value && selectedWeek.value < CUR_WEEK
+  if (periodMode.value === 'range') return !!rangeEnd.value && rangeEnd.value < CUR_DATE
   return !!selectedDate.value && selectedDate.value < CUR_DATE
 })
 const canGoPrev = computed(() => {
   if (periodMode.value === 'year')  return selectedYear.value > MIN_YEAR
   if (periodMode.value === 'month') return !!selectedMonth.value && selectedMonth.value > `${MIN_YEAR}-01`
-  if (periodMode.value === 'week')  return !!selectedWeek.value && selectedWeek.value > `${MIN_YEAR}-01-01`
+  if (periodMode.value === 'range') return !!rangeStart.value && rangeStart.value > MIN_DATE
   return !!selectedDate.value && selectedDate.value > `${MIN_YEAR}-01-01`
 })
+// For Range this means "the range reaches today", so it is still in progress.
 const isCurrentPeriod = computed(() => !canGoNext.value)
 
+/* Slides a range by its own size, in its own unit (days / whole months / whole years),
+   kept between MIN_DATE and today. delta -1 = the range right before, +1 = the next one. */
+function rangeShifted(delta) {
+  const unit = rangeUnit.value
+
+  if (unit === 'year') {
+    const n = rangeYearsCount.value
+    let endY = Number(rangeEnd.value.slice(0, 4)) + delta * n
+    if (endY > CUR_YEAR) endY = CUR_YEAR
+    let startY = endY - (n - 1)
+    if (startY < MIN_YEAR) {
+      startY = MIN_YEAR
+      endY = Math.min(startY + (n - 1), CUR_YEAR)
+    }
+    let end = `${endY}-12-31`
+    if (end > CUR_DATE) end = CUR_DATE
+    return { start: `${startY}-01-01`, end }
+  }
+
+  if (unit === 'month') {
+    const n = rangeMonthsCount.value
+    const curIdx = todayDate.getFullYear() * 12 + todayDate.getMonth()
+    let endIdx = monthIdxOf(rangeEnd.value.slice(0, 7)) + delta * n
+    if (endIdx > curIdx) endIdx = curIdx
+    let startIdx = endIdx - (n - 1)
+    if (startIdx < MIN_YEAR * 12) {
+      startIdx = MIN_YEAR * 12
+      endIdx = Math.min(startIdx + (n - 1), curIdx)
+    }
+    let end = idxLast(endIdx)
+    if (end > CUR_DATE) end = CUR_DATE
+    return { start: idxFirst(startIdx), end }
+  }
+
+  const len = rangeDays.value
+  let start = shiftDayStr(rangeStart.value, delta * len)
+  let end = shiftDayStr(rangeEnd.value, delta * len)
+  if (end > CUR_DATE) { end = CUR_DATE; start = shiftDayStr(end, -(len - 1)) }
+  if (start < MIN_DATE) { start = MIN_DATE; end = shiftDayStr(start, len - 1) }
+  return { start, end }
+}
+
+// "2026" / "2023 – 2025" for years, "Nov 2026" / "Jan – Mar 2026" for months, otherwise the normal date span.
+function formatRangeLabel(s, e) {
+  if (rangeUnit.value === 'year') {
+    const a = s.slice(0, 4)
+    const b = e.slice(0, 4)
+    return a === b ? a : `${a} – ${b}`
+  }
+  if (rangeUnit.value === 'month') {
+    const a = new Date(`${s}T00:00:00`)
+    const b = new Date(`${e}T00:00:00`)
+    if (s.slice(0, 7) === e.slice(0, 7)) return a.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    const m = (d) => d.toLocaleDateString('en-US', { month: 'short' })
+    if (a.getFullYear() === b.getFullYear()) return `${m(a)} – ${m(b)} ${b.getFullYear()}`
+    return `${m(a)} ${a.getFullYear()} – ${m(b)} ${b.getFullYear()}`
+  }
+  return formatDateSpan(s, e)
+}
+
+// The start / end days a mode currently covers (end never goes past today).
+// Used to carry the person's period over when they switch to Range.
+function spanOf(m) {
+  let start
+  let end
+  if (m === 'year') {
+    start = `${selectedYear.value}-01-01`
+    end = `${selectedYear.value}-12-31`
+  } else if (m === 'month') {
+    const [yy, mm] = selectedMonth.value.split('-').map(Number)
+    start = `${yy}-${pad(mm)}-01`
+    end = toDayStr(new Date(yy, mm, 0))
+  } else {
+    // A single day is a poor range, so Day → Range shows the 7 days ending that day.
+    end = selectedDate.value
+    start = shiftDayStr(end, -6)
+  }
+  if (end > CUR_DATE) end = CUR_DATE
+  if (start > end) start = end
+  return { start, end }
+}
+
 // Keeps the pickers pointing at the same moment in time when the
-// person switches Day / Week / Month / Year, instead of jumping back to "now".
+// person switches Day / Month / Year / Range, instead of jumping back to "now".
 function syncPickers(from) {
   if (from === 'day' && selectedDate.value) {
-    selectedMonth.value = selectedDate.value.slice(0, 7)
-    selectedYear.value  = Number(selectedDate.value.slice(0, 4))
-    selectedWeek.value  = toDayStr(weekStartOf(selectedDate.value))
-  } else if (from === 'week' && selectedWeek.value) {
-    // Today if the week is the current one, otherwise the week's first day.
-    selectedDate.value  = selectedWeek.value === CUR_WEEK ? CUR_DATE : selectedWeek.value
     selectedMonth.value = selectedDate.value.slice(0, 7)
     selectedYear.value  = Number(selectedDate.value.slice(0, 4))
   } else if (from === 'month' && selectedMonth.value) {
     selectedYear.value = Number(selectedMonth.value.slice(0, 4))
     selectedDate.value = selectedMonth.value === CUR_MONTH ? CUR_DATE : `${selectedMonth.value}-01`
-    selectedWeek.value = toDayStr(weekStartOf(selectedDate.value))
   } else if (from === 'year') {
     const y = selectedYear.value
     selectedMonth.value = y === CUR_YEAR ? CUR_MONTH : `${y}-01`
     selectedDate.value  = y === CUR_YEAR ? CUR_DATE  : `${y}-01-01`
-    selectedWeek.value  = toDayStr(weekStartOf(selectedDate.value))
+  } else if (from === 'range' && rangeEnd.value) {
+    // Leaving Range: land on the range's last day so the person stays in the same moment.
+    selectedDate.value  = rangeEnd.value
+    selectedMonth.value = rangeEnd.value.slice(0, 7)
+    selectedYear.value  = Number(rangeEnd.value.slice(0, 4))
   }
 }
 
+/* keepPicker = true is used by the One / Range switch inside the dropdown:
+   the dropdown stays open and re-opens on the right grid, so the person can
+   pick the dates straight away. */
+function setPeriodMode(next, keepPicker = false) {
+  if (periodMode.value === next) return
+  if (!keepPicker) closePicker()
+  if (next === 'range') {
+    // Carry the current period over so the person isn't dropped on an unrelated range.
+    const span = spanOf(periodMode.value)
+    rangeStart.value = span.start
+    rangeEnd.value = span.end
+  }
+  syncPickers(periodMode.value)
+  periodMode.value = next
+  if (keepPicker && pickerOpen.value) initPickerView()
+  applyDateFilter()
+}
+
+/* Unit buttons (Day / Month / Year).
+   While a range is showing, they keep it a range and only change what it is made of. */
+function setUnit(u) {
+  if (activeUnit.value === u) return
+  if (periodMode.value === 'range') return setRangeUnit(u)
+  return setPeriodMode(u)
+}
+
+/* One / Range toggle (lives inside the dropdown). */
+function setSpan(kind, keepPicker = false) {
+  if (kind === 'range') {
+    if (periodMode.value === 'range') return
+    rangeUnit.value = periodMode.value
+    setPeriodMode('range', keepPicker)
+    return
+  }
+  if (periodMode.value !== 'range') return
+  setPeriodMode(rangeUnit.value, keepPicker)
+}
+
+// Re-cuts the current range so it starts / ends on whole months or whole years.
+function setRangeUnit(u) {
+  if (rangeUnit.value === u) return
+  closePicker()
+  rangeUnit.value = u
+  let s = rangeStart.value
+  let e = rangeEnd.value
+  if (u === 'month') {
+    s = `${s.slice(0, 7)}-01`
+    e = lastDayOfMonth(e.slice(0, 7))
+  } else if (u === 'year') {
+    s = `${s.slice(0, 4)}-01-01`
+    e = `${e.slice(0, 4)}-12-31`
+  }
+  if (e > CUR_DATE) e = CUR_DATE
+  // Too long after snapping? Fall back to a sensible default for that unit.
+  if (u !== 'year' && dayDiff(s, e) + 1 > MAX_RANGE_DAYS) {
+    const fallback = u === 'month' ? lastMonthsSpan(12) : last30Span()
+    s = fallback.start
+    e = fallback.end
+  }
+  rangeStart.value = s
+  rangeEnd.value = e
+  applyDateFilter()
+}
+
 /* ── calendar popover (days → months → years) ──
-   Day mode picks a day. Week mode shows the same day grid, and clicking
-   any day selects the whole week (Sun – Sat) it belongs to.
-   On phones it opens as a bottom sheet (CSS only). */
+   Day mode picks a day. Range of days: tap a start day, then an end day.
+   Range of months: the months grid, tap a start month, then an end month.
+   Range of years: the years grid, tap a start year, then an end year.
+   (An earlier second tap just swaps them.) The range is applied on the
+   second tap. On phones it opens as a bottom sheet (CSS only).
+   The One / Range switch is part of this dropdown. */
 const PK_WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTH_NAMES = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'long' }))
 const MONTH_SHORT = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-US', { month: 'short' }))
@@ -785,8 +1055,32 @@ const browseMonth   = ref(todayDate.getMonth()) // 0-11
 const pickerRoot    = ref(null)
 const pickerTrigger = ref(null)
 
-// Day and Week both drill down to a day grid.
-const pickerDaysMode = computed(() => periodMode.value === 'day' || periodMode.value === 'week')
+// Range mode: first tap (waiting for the end) and the cell under the cursor for the live preview.
+// Holds 'YYYY-MM-DD' for days, 'YYYY-MM' for months and 'YYYY' for years.
+const pkDraftStart = ref(null)
+const pkHoverKey   = ref(null)
+
+// Day and a range of days drill down to a day grid. A range of months / years uses its own grid.
+const pickerDaysMode = computed(() =>
+  periodMode.value === 'day' || (periodMode.value === 'range' && rangeUnit.value === 'day')
+)
+const rangeOfMonths = computed(() => periodMode.value === 'range' && rangeUnit.value === 'month')
+const rangeOfYears  = computed(() => periodMode.value === 'range' && rangeUnit.value === 'year')
+
+// Show the From / To boxes only on the grid where the range is actually picked.
+const showRangeHead = computed(() =>
+  periodMode.value === 'range' && (
+    rangeUnit.value === 'month' ? pickerView.value === 'months'
+    : rangeUnit.value === 'year' ? pickerView.value === 'years'
+    : pickerView.value === 'days'
+  )
+)
+const pkHintText = computed(() => {
+  const draft = !!pkDraftStart.value
+  if (rangeUnit.value === 'year')  return draft ? 'Now tap the end year.' : 'Tap a start year, then an end year.'
+  if (rangeUnit.value === 'month') return draft ? 'Now tap the end month.' : 'Tap a start month, then an end month.'
+  return draft ? 'Now tap the end date.' : 'Tap a start date, then an end date.'
+})
 
 const pickerLabel = computed(() => {
   if (periodMode.value === 'year') return String(selectedYear.value)
@@ -794,36 +1088,83 @@ const pickerLabel = computed(() => {
     const [y, m] = (selectedMonth.value || CUR_MONTH).split('-').map(Number)
     return `${MONTH_NAMES[m - 1]} ${y}`
   }
-  if (periodMode.value === 'week') return formatWeekRange(selectedWeek.value || CUR_WEEK)
+  if (periodMode.value === 'range') return formatRangeLabel(rangeStart.value, rangeEnd.value)
   const d = new Date(`${selectedDate.value || CUR_DATE}T00:00:00`)
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 })
 
-function openPicker() {
+// True when `b` is too far from the first tap `a` to stay within the range limit.
+function pkFar(a, b) {
+  if (rangeUnit.value === 'year') return Math.abs(Number(a) - Number(b)) >= MAX_RANGE_YEARS
+  if (rangeUnit.value === 'month') return Math.abs(monthIdxOf(a) - monthIdxOf(b)) >= MAX_RANGE_MONTHS
+  return Math.abs(dayDiff(a, b)) >= MAX_RANGE_DAYS
+}
+
+// Key kept while picking: 'YYYY' for years, 'YYYY-MM' for months, 'YYYY-MM-DD' for days.
+function pkKeyOf(dayStr) {
+  if (rangeUnit.value === 'year') return dayStr.slice(0, 4)
+  if (rangeUnit.value === 'month') return dayStr.slice(0, 7)
+  return dayStr
+}
+// Text for a From / To box: a day, a month or a year.
+function pkFmt(key) {
+  if (rangeUnit.value === 'year') return key.slice(0, 4)
+  if (rangeUnit.value === 'month') return formatMonthKey(key.slice(0, 7))
+  return formatShortDate(key)
+}
+
+const pkRangeFrom = computed(() => pkFmt(pkDraftStart.value || pkKeyOf(rangeStart.value)))
+const pkRangeTo = computed(() => {
+  if (!pkDraftStart.value) return pkFmt(pkKeyOf(rangeEnd.value))
+  const h = pkHoverKey.value
+  const distinct = rangeUnit.value === 'day' ? h !== pkDraftStart.value : true
+  return h && distinct && !pkFar(pkDraftStart.value, h) ? pkFmt(h) : 'Pick end date'
+})
+
+// Sets the grid (days / months / years) the dropdown opens on for the current mode.
+// Also used when the One / Range switch changes the mode while the dropdown is open.
+function initPickerView() {
+  pkDraftStart.value = null
+  pkHoverKey.value = null
   if (pickerDaysMode.value) {
-    const src = periodMode.value === 'week' ? (selectedWeek.value || CUR_WEEK) : (selectedDate.value || CUR_DATE)
+    const src = periodMode.value === 'range' ? (rangeEnd.value || CUR_DATE) : (selectedDate.value || CUR_DATE)
     const [y, m] = src.split('-').map(Number)
     browseYear.value = y
     browseMonth.value = m - 1
     pickerView.value = 'days'
-  } else if (periodMode.value === 'month') {
-    browseYear.value = Number((selectedMonth.value || CUR_MONTH).slice(0, 4))
+  } else if (rangeOfYears.value) {
+    // A range of years: open on the years grid.
+    browseYear.value = Number(rangeEnd.value.slice(0, 4))
+    pickerView.value = 'years'
+  } else if (periodMode.value === 'month' || periodMode.value === 'range') {
+    // Single month, or a range of months: open on the months grid.
+    const src = periodMode.value === 'range' ? (rangeEnd.value || CUR_DATE) : (selectedMonth.value || CUR_MONTH)
+    browseYear.value = Number(src.slice(0, 4))
     pickerView.value = 'months'
   } else {
     browseYear.value = selectedYear.value
     pickerView.value = 'years'
   }
+}
+function openPicker() {
+  initPickerView()
   pickerOpen.value = true
 }
 function closePicker(refocus = false) {
   if (!pickerOpen.value) return
   pickerOpen.value = false
+  pkDraftStart.value = null
+  pkHoverKey.value = null
   if (refocus) nextTick(() => pickerTrigger.value && pickerTrigger.value.focus())
 }
 function togglePicker() { pickerOpen.value ? closePicker() : openPicker() }
 
 function onDocPointer(e) {
-  if (pickerOpen.value && pickerRoot.value && !pickerRoot.value.contains(e.target)) pickerOpen.value = false
+  if (pickerOpen.value && pickerRoot.value && !pickerRoot.value.contains(e.target)) {
+    pickerOpen.value = false
+    pkDraftStart.value = null
+    pkHoverKey.value = null
+  }
 }
 
 const pkTitle = computed(() => {
@@ -858,66 +1199,164 @@ function pkUp() {
   else if (pickerView.value === 'months') pickerView.value = 'years'
 }
 
+// Day grid hover (range of days).
+function pkHover(key) {
+  if (periodMode.value !== 'range' || rangeUnit.value !== 'day' || !pkDraftStart.value) return
+  pkHoverKey.value = key
+}
+// Months grid hover (range of months only).
+function pkHoverMonth(key) {
+  if (!rangeOfMonths.value || !pkDraftStart.value) return
+  pkHoverKey.value = key
+}
+// Years grid hover (range of years only).
+function pkHoverYear(y) {
+  if (!rangeOfYears.value || !pkDraftStart.value) return
+  pkHoverKey.value = y === null || y === undefined ? null : String(y)
+}
+
 const pkDayCells = computed(() => {
   const y = browseYear.value
   const m = browseMonth.value
   const count = new Date(y, m + 1, 0).getDate()
   const lead = new Date(y, m, 1).getDay()
   const out = Array(lead).fill(null)
-  const weekMode = periodMode.value === 'week'
-  const wkStart = selectedWeek.value
-  const wkEnd = wkStart ? weekEndStr(wkStart) : ''
+  const rangeMode = periodMode.value === 'range'
+
+  // Range mode: the band to paint. While waiting for the end day it follows the cursor.
+  let ra = ''
+  let rb = ''
+  if (rangeMode) {
+    if (pkDraftStart.value) {
+      const a = pkDraftStart.value
+      const h = pkHoverKey.value || a
+      ra = h < a ? h : a
+      rb = h < a ? a : h
+    } else {
+      ra = rangeStart.value
+      rb = rangeEnd.value
+    }
+  }
+
   for (let d = 1; d <= count; d++) {
     const key = `${y}-${pad(m + 1)}-${pad(d)}`
+    const isEdge = rangeMode && (key === ra || key === rb)
     out.push({
       key, d,
       title: new Date(y, m, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
-      // Week mode: any day of the current week is still pickable (it selects the current week).
-      future: weekMode ? toDayStr(weekStartOf(key)) > CUR_WEEK : key > CUR_DATE,
+      future: key > CUR_DATE,
+      // Range mode: days that would make the range longer than the limit.
+      tooFar: rangeMode && !!pkDraftStart.value && pkFar(pkDraftStart.value, key),
       today: key === CUR_DATE,
-      selected: weekMode ? (key >= wkStart && key <= wkEnd) : (periodMode.value === 'day' && key === selectedDate.value),
+      selected: rangeMode ? isEdge : (periodMode.value === 'day' && key === selectedDate.value),
+      inRange: rangeMode && key > ra && key < rb,
+      edge: rangeMode && ra !== rb ? (key === ra ? 'start' : key === rb ? 'end' : '') : '',
     })
   }
   return out
 })
-const pkMonthCells = computed(() =>
-  MONTH_SHORT.map((label, m) => {
+const pkMonthCells = computed(() => {
+  // Range of months: paint the band between the two end months (follows the cursor after the first tap).
+  let ra = ''
+  let rb = ''
+  if (rangeOfMonths.value) {
+    if (pkDraftStart.value) {
+      const x = pkDraftStart.value
+      const h = pkHoverKey.value || x
+      ra = h < x ? h : x
+      rb = h < x ? x : h
+    } else {
+      ra = rangeStart.value.slice(0, 7)
+      rb = rangeEnd.value.slice(0, 7)
+    }
+  }
+  return MONTH_SHORT.map((label, m) => {
     const key = `${browseYear.value}-${pad(m + 1)}`
     const selected =
       periodMode.value === 'month' ? key === selectedMonth.value
       : periodMode.value === 'day' ? (selectedDate.value || '').startsWith(key)
-      : periodMode.value === 'week' ? (selectedWeek.value || '').startsWith(key)
+      : periodMode.value === 'range'
+        ? (rangeOfMonths.value ? key === ra || key === rb : (key >= (rangeStart.value || '').slice(0, 7) && key <= (rangeEnd.value || '').slice(0, 7)))
       : false
     return {
       key, m, label,
       title: `${MONTH_NAMES[m]} ${browseYear.value}`,
       future: key > CUR_MONTH,
+      tooFar: rangeOfMonths.value && !!pkDraftStart.value && pkFar(pkDraftStart.value, key),
       today: key === CUR_MONTH,
       selected,
+      inRange: rangeOfMonths.value && key > ra && key < rb,
+      edge: rangeOfMonths.value && ra !== rb ? (key === ra ? 'start' : key === rb ? 'end' : '') : '',
     }
   })
-)
-const pkYearCells = computed(() =>
-  [...yearOptions].reverse().map((y) => ({
+})
+const pkYearCells = computed(() => {
+  // Range of years: paint the band between the two end years (follows the cursor after the first tap).
+  let ra = 0
+  let rb = 0
+  if (rangeOfYears.value) {
+    if (pkDraftStart.value) {
+      const x = Number(pkDraftStart.value)
+      const h = Number(pkHoverKey.value || x)
+      ra = Math.min(h, x)
+      rb = Math.max(h, x)
+    } else {
+      ra = Number(rangeStart.value.slice(0, 4))
+      rb = Number(rangeEnd.value.slice(0, 4))
+    }
+  }
+  return [...yearOptions].reverse().map((y) => ({
     y,
     today: y === CUR_YEAR,
-    selected: periodMode.value === 'year' ? y === selectedYear.value : y === browseYear.value,
+    selected: rangeOfYears.value ? y === ra || y === rb : periodMode.value === 'year' ? y === selectedYear.value : y === browseYear.value,
+    inRange: rangeOfYears.value && y > ra && y < rb,
+    edge: rangeOfYears.value && ra !== rb ? (y === ra ? 'start' : y === rb ? 'end' : '') : '',
+    tooFar: rangeOfYears.value && !!pkDraftStart.value && pkFar(pkDraftStart.value, String(y)),
   }))
-)
+})
 
 async function pkPickDay(key) {
-  if (periodMode.value === 'week') {
-    selectedWeek.value = toDayStr(weekStartOf(key))
-  } else {
-    selectedDate.value = key
-    selectedMonth.value = key.slice(0, 7)
+  if (periodMode.value === 'range') {
+    // First tap = start, second tap = end (earlier day second just swaps them).
+    if (!pkDraftStart.value) {
+      pkDraftStart.value = key
+      pkHoverKey.value = key
+      return
+    }
+    const a = pkDraftStart.value
+    rangeStart.value = key < a ? key : a
+    rangeEnd.value = key < a ? a : key
+    closePicker(true)
+    await applyDateFilter()
+    return
   }
+  selectedDate.value = key
+  selectedMonth.value = key.slice(0, 7)
   closePicker(true)
   await applyDateFilter()
 }
 async function pkPickMonth(m) {
+  if (rangeOfMonths.value) {
+    // First tap = start month, second tap = end month: whole months, never past today.
+    const key = `${browseYear.value}-${pad(m + 1)}`
+    if (!pkDraftStart.value) {
+      pkDraftStart.value = key
+      pkHoverKey.value = key
+      return
+    }
+    const a = pkDraftStart.value
+    const lo = key < a ? key : a
+    const hi = key < a ? a : key
+    let e = lastDayOfMonth(hi)
+    if (e > CUR_DATE) e = CUR_DATE
+    rangeStart.value = `${lo}-01`
+    rangeEnd.value = e
+    closePicker(true)
+    await applyDateFilter()
+    return
+  }
   if (pickerDaysMode.value) {
-    // Day / Week mode: choosing a month just opens its days.
+    // Day / range of days: choosing a month just opens its days.
     browseMonth.value = m
     pickerView.value = 'days'
     return
@@ -927,13 +1366,32 @@ async function pkPickMonth(m) {
   await applyDateFilter()
 }
 async function pkPickYear(y) {
+  if (rangeOfYears.value) {
+    // First tap = start year, second tap = end year: whole years, never past today.
+    const key = String(y)
+    if (!pkDraftStart.value) {
+      pkDraftStart.value = key
+      pkHoverKey.value = key
+      return
+    }
+    const a = Number(pkDraftStart.value)
+    const lo = Math.min(a, y)
+    const hi = Math.max(a, y)
+    let e = `${hi}-12-31`
+    if (e > CUR_DATE) e = CUR_DATE
+    rangeStart.value = `${lo}-01-01`
+    rangeEnd.value = e
+    closePicker(true)
+    await applyDateFilter()
+    return
+  }
   if (periodMode.value === 'year') {
     selectedYear.value = y
     closePicker(true)
     await applyDateFilter()
     return
   }
-  // Day / Week / Month mode: choosing a year opens its months.
+  // Day / Month / Range mode: choosing a year opens its months.
   browseYear.value = y
   if (pickerDaysMode.value && y === CUR_YEAR && browseMonth.value > todayDate.getMonth()) browseMonth.value = todayDate.getMonth()
   pickerView.value = 'months'
@@ -953,8 +1411,11 @@ async function shiftPeriod(delta) {
   } else if (periodMode.value === 'month') {
     const [yy, mm] = selectedMonth.value.split('-').map(Number)
     selectedMonth.value = toMonthStr(new Date(yy, mm - 1 + delta, 1))
-  } else if (periodMode.value === 'week') {
-    selectedWeek.value = shiftDayStr(selectedWeek.value, delta * 7)
+  } else if (periodMode.value === 'range') {
+    // Slide the whole range by its own size (days, months or years), keeping it the same size.
+    const r = rangeShifted(delta)
+    rangeStart.value = r.start
+    rangeEnd.value = r.end
   } else {
     const d = new Date(`${selectedDate.value}T00:00:00`)
     d.setDate(d.getDate() + delta)
@@ -966,9 +1427,11 @@ async function shiftPeriod(delta) {
 
 async function goCurrent() {
   selectedDate.value  = CUR_DATE
-  selectedWeek.value  = CUR_WEEK
   selectedMonth.value = CUR_MONTH
   selectedYear.value  = CUR_YEAR
+  const r = last30Span()
+  rangeStart.value = r.start
+  rangeEnd.value = r.end
   await applyDateFilter()
 }
 
@@ -1165,6 +1628,35 @@ function typePill(item) {
 
 const withQty = (row) => ({ ...row, qty_info: qtyInfo(row), type_pill: typePill(row) })
 
+/* ── LATEST ACTIVITY FEED + SECTION JUMP BAR ── */
+const FEED_LIMIT = 6
+const feedItems = computed(() => recentActivity.value.slice(0, FEED_LIMIT))
+
+function feedIcon(item) {
+  if (isRemnantLog(item)) return 'fa-ruler-horizontal'
+  if (item.is_cut) return 'fa-scissors'
+  if (item.type === 'stock_in') return 'fa-arrow-down'
+  if (item.type === 'stock_out') return 'fa-arrow-up'
+  return 'fa-pen'
+}
+
+const sectionNav = computed(() => [
+  { id: 'sec-latest',   label: 'Latest',         icon: 'fa-clock-rotate-left',  count: feedItems.value.length },
+  { id: 'sec-top',      label: 'Top adjusted',   icon: 'fa-ranking-star',       count: (topAdjustedProducts.value || []).length },
+  { id: 'sec-services', label: 'Extra services', icon: 'fa-screwdriver-wrench', count: services.value.length },
+  { id: 'sec-logs',     label: 'Full history',   icon: 'fa-list',               count: inventoryLogs.value.length },
+])
+
+// Stock in minus stock out for one Top Adjusted row.
+function netInfo(item) {
+  const n = num(item.total_stock_in) - num(item.total_stock_out)
+  return {
+    n,
+    text: (n > 0 ? '+' : n < 0 ? '-' : '') + formatQty(Math.abs(n), item.Unit),
+    cls: n > 0 ? 'cell-positive' : n < 0 ? 'cell-negative' : 'cell-muted',
+  }
+}
+
 /* ── EXTRA SERVICES: totals + paging ── */
 const serviceTotals = computed(() => ({
   fee:    services.value.reduce((s, r) => s + num(r.Fee), 0),
@@ -1289,6 +1781,27 @@ function logMatchesFilter(item) {
   }
 }
 const filteredLogCount = computed(() => inventoryLogs.value.filter(logMatchesFilter).length)
+
+// Quick filter chips above the Full History table (with live counts)
+const LOG_FILTERS = [
+  { key: 'all',       label: 'All' },
+  { key: 'stock_in',  label: 'Stock in' },
+  { key: 'stock_out', label: 'Stock out' },
+  { key: 'cut',       label: 'Cut sales' },
+]
+const logCounts = computed(() => {
+  const l = inventoryLogs.value
+  return {
+    all: l.length,
+    stock_in: l.filter((i) => i.type === 'stock_in').length,
+    stock_out: l.filter((i) => i.type === 'stock_out').length,
+    cut: l.filter((i) => i.is_cut).length,
+  }
+})
+function setLogFilter(key) {
+  logFilter.value = key
+  if (dtLogs) dtLogs.draw()
+}
 
 // DataTables custom search: only applies to the Full History table.
 // Rows are rendered by Vue in the same order as inventoryLogs, so dataIndex lines up.
@@ -1433,8 +1946,8 @@ function computeRange() {
     const to = `${selectedMonth.value}-${pad(lastDay)}`
     return { from, to }
   }
-  if (periodMode.value === 'week') {
-    return { from: selectedWeek.value, to: weekEndStr(selectedWeek.value) }
+  if (periodMode.value === 'range') {
+    return { from: rangeStart.value, to: rangeEnd.value }
   }
   return { from: selectedDate.value, to: selectedDate.value }
 }
@@ -1446,21 +1959,21 @@ const filterLabel = computed(() => {
     const [year, month] = selectedMonth.value.split('-').map(Number)
     return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
   }
-  if (periodMode.value === 'week') {
-    return selectedWeek.value ? formatWeekRange(selectedWeek.value) : 'All Time'
+  if (periodMode.value === 'range') {
+    return rangeStart.value && rangeEnd.value ? formatRangeLabel(rangeStart.value, rangeEnd.value) : 'All Time'
   }
   if (!selectedDate.value) return 'All Time'
   return new Date(`${selectedDate.value}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 })
 
 /* ── PRINT: document reference + opening paragraph ── */
-// e.g. IL-M-202611 / IL-W-20261108 / IL-D-20261111 / IL-Y-2026
+// e.g. IL-M-202611 / IL-D-20261111 / IL-Y-2026 / IL-R-20261101-20261124
 const reportRef = computed(() => {
-  const code = { day: 'D', week: 'W', month: 'M', year: 'Y' }[periodMode.value]
+  const code = { day: 'D', month: 'M', year: 'Y', range: 'R' }[periodMode.value]
   const key =
     periodMode.value === 'year' ? String(selectedYear.value)
     : periodMode.value === 'month' ? String(selectedMonth.value || '').replace('-', '')
-    : periodMode.value === 'week' ? String(selectedWeek.value || '').replace(/-/g, '')
+    : periodMode.value === 'range' ? `${String(rangeStart.value || '').replace(/-/g, '')}-${String(rangeEnd.value || '').replace(/-/g, '')}`
     : String(selectedDate.value || '').replace(/-/g, '')
   return `IL-${code}-${key}`
 })
@@ -1484,7 +1997,6 @@ const execSummary = computed(() => {
 })
 
 // ── DataTables instances ──
-let dtRecent = null
 let dtTop    = null
 let dtLogs   = null
 
@@ -1627,6 +2139,12 @@ function csvEscape(value) {
 function buildReportCSV() {
   const rows = []
   rows.push(['Inventory Logs', filterLabel.value])
+  if (periodMode.value === 'range') {
+    rows.push(['Range of', `${rangeUnit.value}s`])
+    rows.push(['Range start', rangeStart.value])
+    rows.push(['Range end', rangeEnd.value])
+    rows.push(['Days in range', rangeDays.value])
+  }
   rows.push([])
 
   rows.push(['Inventory Activity Summary'])
@@ -1682,7 +2200,7 @@ function reportFileSlug() {
   const fallback =
     periodMode.value === 'year' ? selectedYear.value
     : periodMode.value === 'month' ? selectedMonth.value
-    : periodMode.value === 'week' ? selectedWeek.value
+    : periodMode.value === 'range' ? `${rangeStart.value}_to_${rangeEnd.value}`
     : selectedDate.value
   const base = filterLabel.value || fallback
   return `inventory-logs-${String(base).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
@@ -1797,17 +2315,6 @@ const SMALL_MENU = [[5, 10], [5, 10]]
 const LOGS_MENU  = [[10, 15], [10, 15]]
 const DT_LANGUAGE = { searchPlaceholder: 'Search…' }
 
-function initRecentTable() {
-  dtRecent = $('#recentActivityTable').DataTable({
-    dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
-    order: [],
-    pageLength: PAGE_SMALL,
-    lengthMenu: SMALL_MENU,
-    autoWidth: false,
-    language: DT_LANGUAGE,
-  })
-}
-
 function initTopTable() {
   dtTop = $('#topAdjustedTable').DataTable({
     dom: '<"inv-dt-toolbar inv-dt-toolbar--right"lf>rtip',
@@ -1844,13 +2351,11 @@ function initLogsTable() {
 }
 
 function initAllTables() {
-  initRecentTable()
   initTopTable()
   initLogsTable()
 }
 
 function destroyAllTables() {
-  if (dtRecent) { dtRecent.destroy(); dtRecent = null }
   if (dtTop)    { dtTop.destroy();    dtTop = null }
   if (dtLogs)   { dtLogs.destroy();   dtLogs = null }
 }
@@ -1875,15 +2380,6 @@ async function applyDateFilter() {
   } finally {
     isFiltering.value = false
   }
-}
-
-// Keeps the pickers on the same moment when switching Day / Week / Month / Year.
-function setPeriodMode(next) {
-  if (periodMode.value === next) return
-  closePicker()
-  syncPickers(periodMode.value)
-  periodMode.value = next
-  applyDateFilter()
 }
 
 onMounted(async () => {
@@ -2037,6 +2533,7 @@ html[data-theme="dark"] .inv-logs {
 .page-updated { display: none; margin: 4px 0 0; font-size: 11.5px; font-weight: 600; color: var(--il-text-muted); }
 .chip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 20px; white-space: nowrap; }
 .chip--live { color: var(--il-green); background: var(--il-green-soft); }
+.chip--muted { color: var(--il-text-secondary); background: var(--il-surface-raised); border: 1px solid var(--il-border); }
 
 /* ── STICKY STACK: period bar + summary cards stay together ──
    The page colour fills the stack and a soft halo (box-shadow) surrounds it,
@@ -2155,34 +2652,56 @@ html[data-theme="dark"] .inv-logs {
 .picker-trigger--open { border-color: var(--il-accent); box-shadow: 0 0 0 3px var(--il-accent-soft); }
 .picker-trigger--open .picker-caret { transform: rotate(180deg); }
 
+/* Compact dropdown: narrower, tighter padding / spacing, and it never grows taller
+   than the screen (scrolls inside itself as a last resort). */
 .picker-pop {
-  position: absolute; top: calc(100% + 8px); left: 0; z-index: 40;
-  width: 300px; max-width: calc(100vw - 32px);
-  padding: 14px;
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+  width: 272px; max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 120px); overflow-y: auto; overscroll-behavior: contain;
+  padding: 10px;
   background: var(--il-surface);
   border: 1px solid var(--il-border-strong);
-  border-radius: 18px;
-  box-shadow: 0 28px 56px -18px rgba(0,0,0,.5), 0 4px 14px rgba(0,0,0,.14);
+  border-radius: 16px;
+  box-shadow: 0 24px 48px -18px rgba(0,0,0,.5), 0 4px 14px rgba(0,0,0,.14);
   transform-origin: top left;
+  scrollbar-width: thin;
 }
 .pop-enter-active, .pop-leave-active { transition: opacity .16s ease, transform .2s var(--il-ease); }
 .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(-6px) scale(.97); }
 
-.pk-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 12px; }
+/* One / Range switch inside the dropdown: full width, equal halves */
+.pk-span { display: flex; width: 100%; margin-bottom: 8px; }
+.pk-span.seg--sm .seg-btn { flex: 1; text-align: center; padding: 5px 6px; font-size: 12px; }
+
+/* Range picker: From → To boxes + hint */
+.pk-range { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; }
+.pk-range-box {
+  min-width: 0; padding: 5px 9px;
+  border: 1px solid var(--il-border); border-radius: 9px;
+  background: var(--il-surface-sunken);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.pk-range-box span { display: block; font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--il-text-faint); }
+.pk-range-box strong { display: block; margin-top: 1px; font-size: 12.5px; font-weight: 700; color: var(--il-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pk-range-box--active { border-color: var(--il-accent); box-shadow: 0 0 0 3px var(--il-accent-soft); }
+.pk-hint { margin: 0 0 8px; font-size: 11.5px; line-height: 1.35; font-weight: 600; color: var(--il-text-muted); }
+.pk-limit { font-size: 11px; font-weight: 600; color: var(--il-text-faint); }
+
+.pk-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
 .pk-nav {
-  width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; cursor: pointer;
+  width: 28px; height: 28px; flex-shrink: 0; border-radius: 9px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid transparent; background: var(--il-surface-sunken);
-  color: var(--il-text-secondary); font-size: 11px;
+  color: var(--il-text-secondary); font-size: 10.5px;
   transition: background-color .15s ease, color .15s ease, border-color .15s ease;
 }
 .pk-nav:hover:not(:disabled) { background: var(--il-accent-soft); color: var(--il-accent); border-color: var(--il-accent-border); }
 .pk-nav:disabled { opacity: .35; cursor: not-allowed; }
 .pk-nav--hide { visibility: hidden; }
 .pk-title {
-  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  height: 32px; border: none; border-radius: 10px; background: transparent; cursor: pointer;
-  font: inherit; font-size: 14px; font-weight: 800; letter-spacing: -.01em;
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 28px; border: none; border-radius: 9px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 13.5px; font-weight: 800; letter-spacing: -.01em;
   color: var(--il-text-primary);
   transition: background-color .15s ease;
 }
@@ -2190,21 +2709,21 @@ html[data-theme="dark"] .inv-logs {
 .pk-title:hover:not(:disabled) { background: var(--il-surface-raised); }
 .pk-title:disabled { cursor: default; }
 
-.pk-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
-.pk-dow { text-align: center; padding: 4px 0 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--il-text-faint); }
+.pk-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.pk-dow { text-align: center; padding: 2px 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--il-text-faint); }
 .pk-blank { display: block; }
 .pk-day {
-  position: relative; aspect-ratio: 1; min-width: 0; padding: 0;
-  border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer;
-  font: inherit; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+  position: relative; height: 31px; min-width: 0; padding: 0;
+  border: 1px solid transparent; border-radius: 9px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
   color: var(--il-text-primary);
   transition: background-color .14s ease, color .14s ease, border-color .14s ease, transform .14s var(--il-ease);
 }
-.pk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.pk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
 .pk-cell {
-  position: relative; height: 46px; padding: 0;
-  border: 1px solid transparent; border-radius: 12px; background: transparent; cursor: pointer;
-  font: inherit; font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  position: relative; height: 38px; padding: 0;
+  border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
   color: var(--il-text-primary);
   transition: background-color .14s ease, color .14s ease, border-color .14s ease, transform .14s var(--il-ease);
 }
@@ -2213,17 +2732,21 @@ html[data-theme="dark"] .inv-logs {
 .pk-day:disabled, .pk-cell:disabled { opacity: .28; cursor: not-allowed; }
 .pk-today { border-color: var(--il-accent-border); color: var(--il-accent); }
 .pk-today::after {
-  content: ''; position: absolute; bottom: 5px; left: 50%; width: 4px; height: 4px; margin-left: -2px;
+  content: ''; position: absolute; bottom: 3px; left: 50%; width: 4px; height: 4px; margin-left: -2px;
   border-radius: 50%; background: var(--il-accent);
 }
 .pk-on { background: var(--il-accent); border-color: var(--il-accent); color: #fff; box-shadow: 0 6px 14px -6px var(--il-accent); }
 .pk-on::after { background: #fff; }
+/* Range band: soft fill between the two end days / months / years */
+.pk-mid { background: var(--il-accent-soft); border-radius: 6px; color: var(--il-text-primary); }
+.pk-edge-s { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+.pk-edge-e { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
 
-.pk-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--il-border); }
+.pk-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--il-border); }
 .pk-link {
-  display: inline-flex; align-items: center; gap: 7px; border: none; background: transparent; cursor: pointer;
-  font: inherit; font-size: 12.5px; font-weight: 700; color: var(--il-accent);
-  padding: 6px 9px; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; color: var(--il-accent);
+  padding: 4px 8px; border-radius: 8px;
   transition: background-color .15s ease;
 }
 .pk-link i { font-size: 11px; }
@@ -2682,7 +3205,7 @@ html[data-theme="dark"] .inv-logs .back-top:active { border-color: #334155; }
 
 /* ── Phone ──
    Goals: edge-to-edge layout that uses the shell's top and side padding, a slim
-   pinned bar (period only), big touch targets (≥ 40px), export actions in the
+   pinned bar (period only), big touch targets, export actions in the
    page header, bottom sheets instead of popovers, single-column cards. */
 @media screen and (max-width: 700px) {
   .inv-logs {
@@ -2715,27 +3238,29 @@ html[data-theme="dark"] .inv-logs .back-top:active { border-color: #334155; }
   }
   .period-end { display: none; }
 
-  /* Calendar picker becomes a bottom sheet with a dimmed backdrop */
+  /* Calendar picker becomes a compact bottom sheet with a dimmed backdrop */
   .picker-backdrop {
     display: block; position: fixed; inset: 0; z-index: 50;
     background: rgba(8, 10, 16, .5);
   }
   .picker-pop {
     position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60;
-    width: auto; max-width: none; max-height: 88vh; overflow-y: auto;
-    padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
-    border-radius: 22px 22px 0 0; border-bottom: none;
+    width: auto; max-width: none; max-height: 82vh; overflow-y: auto;
+    padding: 8px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-radius: 20px 20px 0 0; border-bottom: none;
     box-shadow: 0 -18px 50px -12px rgba(0,0,0,.45);
     transform-origin: bottom center;
   }
   .pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(32px); }
-  .pk-grab { display: block; width: 38px; height: 4px; margin: 0 auto 12px; border-radius: 4px; background: var(--il-border-strong); }
-  .pk-nav { width: 40px; height: 40px; font-size: 12px; }
-  .pk-title { height: 40px; font-size: 15px; }
-  .pk-days { gap: 4px; }
-  .pk-day { font-size: 14px; }
-  .pk-cell { height: 52px; font-size: 14.5px; }
-  .pk-link { padding: 10px 12px; font-size: 13.5px; }
+  .pk-grab { display: block; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 4px; background: var(--il-border-strong); }
+  .pk-span.seg--sm .seg-btn { padding: 8px 6px; font-size: 13px; }
+  .pk-nav { width: 34px; height: 34px; font-size: 11.5px; }
+  .pk-title { height: 34px; font-size: 14.5px; }
+  .pk-days { gap: 3px; }
+  .pk-day { height: 38px; font-size: 13.5px; }
+  .pk-cell { height: 44px; font-size: 14px; }
+  .pk-link { padding: 8px 10px; font-size: 13px; }
+  .pk-range-box strong { font-size: 13px; }
 
   /* Summary cards: a 2 × 3 grid (nothing hidden off-screen), icon above the text */
   .kpi-strip {
@@ -2802,6 +3327,138 @@ html[data-theme="dark"] .inv-logs .back-top:active { border-color: #334155; }
   .picker-pop { max-height: 92vh; }
 }
 
+/* ── SECTION JUMP BAR ── */
+.section-nav { display: flex; gap: 8px; flex-wrap: wrap; }
+.nav-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 12px 0 11px;
+  border: 1px solid var(--il-border); border-radius: 20px;
+  background: var(--il-surface); color: var(--il-text-secondary);
+  font-family: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
+}
+.nav-chip i { font-size: 11px; color: var(--il-accent); }
+.nav-chip:hover { background: var(--il-surface-raised); border-color: var(--il-accent-border); color: var(--il-text-primary); }
+.nav-count {
+  font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
+  background: var(--il-surface-sunken); color: var(--il-text-muted); font-variant-numeric: tabular-nums;
+}
+
+/* ── CARD HEADERS: icon tile + title + count badge ── */
+.card-head-main { display: flex; align-items: flex-start; gap: 12px; min-width: 0; flex: 1 1 260px; }
+.card-head-main .card-sub { margin-top: 3px; }
+.card-ico {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.card-ico--orange { background: var(--il-accent-soft); color: var(--il-accent); }
+.card-ico--blue   { background: var(--il-blue-icon);   color: var(--il-blue); }
+.card-ico--green  { background: var(--il-green-icon);  color: var(--il-green); }
+.card-ico--violet { background: var(--il-violet-icon); color: var(--il-violet); }
+.card-count {
+  align-self: center; white-space: nowrap;
+  font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 20px;
+  background: var(--il-surface-sunken); border: 1px solid var(--il-border); color: var(--il-text-secondary);
+}
+
+/* ── LATEST ACTIVITY FEED ── */
+.feed { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.feed-item {
+  display: flex; align-items: center; gap: 12px; min-width: 0;
+  padding: 10px 14px; border: 1px solid var(--il-border); border-radius: 12px;
+  background: var(--il-surface-raised);
+}
+.feed-ico {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+}
+.feed-ico--in      { background: var(--il-green-icon); color: var(--il-green); }
+.feed-ico--out     { background: var(--il-red-icon);   color: var(--il-red); }
+.feed-ico--neutral { background: #FEF3C7; color: #92400E; }
+html[data-theme="dark"] .feed-ico--neutral { background: rgba(245,158,11,0.16); color: #FCD34D; }
+.feed-main { flex: 1; min-width: 0; }
+.feed-name { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--il-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed-meta { margin: 2px 0 0; font-size: 11.5px; color: var(--il-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed-type { text-transform: capitalize; font-weight: 600; color: var(--il-text-secondary); }
+.feed-qty { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex-shrink: 0; text-align: right; }
+.feed-qty .qty-main { font-size: 14px; }
+.feed-cap { font-size: 10.5px; font-weight: 600; color: var(--il-text-faint); }
+
+/* ── EXTRA SERVICES: totals strip ── */
+.svc-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.svc-stat {
+  padding: 10px 14px; border: 1px solid var(--il-border); border-radius: 12px;
+  background: var(--il-surface-raised); min-width: 0;
+}
+.svc-stat span { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--il-text-muted); }
+.svc-stat strong { display: block; margin-top: 3px; font-size: 17px; font-weight: 800; letter-spacing: -.02em; color: var(--il-text-primary); overflow-wrap: anywhere; }
+.svc-stat--in strong  { color: var(--il-green); }
+.svc-stat--out strong { color: var(--il-red); }
+
+/* ── FULL HISTORY: quick filter chips ── */
+.log-filters { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.log-filters .seg-btn { display: inline-flex; align-items: center; gap: 7px; }
+.seg--sm .seg-btn { padding: 6px 12px; font-size: 12.5px; }
+.seg-count {
+  font-size: 11px; font-weight: 700; min-width: 20px; padding: 0 6px; text-align: center; border-radius: 10px;
+  background: var(--il-surface-raised); color: var(--il-text-muted); font-variant-numeric: tabular-nums;
+}
+.seg-btn--active .seg-count { background: rgba(255,255,255,.24); color: #fff; }
+
+/* ── CELL CONTENT: tidier product, type and quantity cells ── */
+.cell-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px; margin-top: 5px; }
+.cell-meta .cell-sku { margin-top: 0; font-weight: 600; letter-spacing: .02em; }
+.cell-meta .unit-pill { margin-left: 0; }
+.size-pill {
+  display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 700; color: var(--il-text-secondary);
+  background: var(--il-surface-sunken); border: 1px solid var(--il-border);
+}
+.cell-meta .category-pill { font-size: 10.5px; padding: 1px 8px; }
+.cell-strong { font-weight: 800; color: var(--il-text-primary); }
+
+.pill-stack { flex-direction: column; gap: 6px; }
+.pill-sub { display: flex; flex-wrap: wrap; gap: 5px; }
+.pill-sub .status-pill { font-size: 10.5px; padding: 3px 9px; }
+
+.qty-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.qty-chip {
+  display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 9px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; color: var(--il-text-primary); white-space: nowrap;
+  background: var(--il-surface-sunken); border: 1px solid var(--il-border);
+}
+.qty-chip em { font-style: normal; font-weight: 600; color: var(--il-text-muted); }
+
+/* Row colour bar: stock in / out / other at a glance */
+.data-table tbody tr.row--in td:first-child      { box-shadow: inset 3px 0 0 var(--il-green); }
+.data-table tbody tr.row--out td:first-child     { box-shadow: inset 3px 0 0 var(--il-red); }
+.data-table tbody tr.row--neutral td:first-child { box-shadow: inset 3px 0 0 #F59E0B; }
+
+@media screen and (max-width: 900px) {
+  .feed { grid-template-columns: minmax(0, 1fr); }
+  /* On cards the bar moves from the first cell to the card's left edge */
+  .data-table--stack tbody tr.row--in td:first-child,
+  .data-table--stack tbody tr.row--out td:first-child,
+  .data-table--stack tbody tr.row--neutral td:first-child { box-shadow: none; }
+  .data-table--stack tbody tr.row--in      { border-left: 4px solid var(--il-green); }
+  .data-table--stack tbody tr.row--out     { border-left: 4px solid var(--il-red); }
+  .data-table--stack tbody tr.row--neutral { border-left: 4px solid #F59E0B; }
+}
+@media screen and (max-width: 700px) {
+  .section-nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+  .section-nav::-webkit-scrollbar { display: none; }
+  .nav-chip { flex-shrink: 0; height: 38px; font-size: 13px; }
+  .card-head-main { flex-basis: 100%; }
+  .card-count { align-self: flex-start; }
+  .svc-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .svc-stat:first-child { grid-column: 1 / -1; }
+  .svc-stat strong { font-size: 16px; }
+  .log-filters .seg { width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .log-filters .seg-btn { flex: 1 0 auto; padding: 9px 10px; font-size: 12.5px; justify-content: center; }
+  .log-filters .link-btn { padding: 8px 10px; }
+  .feed-item { padding: 10px 12px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .inv-logs * { transition: none !important; }
   .kpi-card:hover { transform: none; }
@@ -2860,6 +3517,11 @@ html[data-theme="dark"] .inv-logs .back-top:active { border-color: #334155; }
   .section--screen,
   .card-eyebrow,
   .back-top,
+  .section-nav,
+  .log-filters,
+  .svc-stats,
+  .card-ico,
+  .card-count,
   .il-modal-backdrop { display: none !important; }
 
   /* The sticky stack is just a plain block on paper (only the summary tiles remain) */
@@ -2997,6 +3659,14 @@ html[data-theme="dark"] .inv-logs .back-top:active { border-color: #334155; }
 
   .unit-pill { font-size: 8px !important; padding: 1px 6px !important; background: #F1F5F9 !important; color: #475569 !important; }
   .category-pill { font-size: 8.5px !important; padding: 2px 8px !important; background: #E0E7FF !important; color: #4F46E5 !important; }
+
+  .card-head-main { display: block !important; }
+  .cell-meta { gap: 4px !important; margin-top: 3px !important; }
+  .size-pill { font-size: 8px !important; padding: 1px 6px !important; background: #F1F5F9 !important; border-color: #e2e8f0 !important; color: #475569 !important; }
+  .qty-chip { font-size: 8.5px !important; padding: 1px 6px !important; background: #f8fafc !important; border-color: #e2e8f0 !important; color: #0f172a !important; }
+  .qty-chip em { color: #64748b !important; }
+  .pill-sub .status-pill { font-size: 8px !important; }
+  .cell-strong { color: #0f172a !important; }
 
   /* ── Notes, sign-off, end of report ── */
   .print-notes { display: block !important; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }

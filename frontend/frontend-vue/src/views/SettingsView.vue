@@ -2,23 +2,13 @@
   <Layout title="Settings">
     <div class="settings-page">
 
-      <!-- HEADER (same pattern as Home / Suppliers) -->
+      <!-- HEADER -->
       <div class="page-header">
         <div class="page-heading">
           <h1 class="page-title">Settings</h1>
           <p class="page-sub">
             <span>Manage your account, appearance<template v-if="isAdmin"> and team</template>.</span>
-            <span v-if="dirty" class="status status--warn"><i class="fa-solid fa-pen"></i>Unsaved changes</span>
-            <span v-else-if="lastUpdated" class="status"><i class="live-dot"></i>Saved {{ lastUpdated }}</span>
           </p>
-        </div>
-        <div class="page-header-right">
-          <RouterLink to="/home" class="btn btn--back" aria-label="Back to dashboard">
-            <i class="fa-solid fa-arrow-left"></i><span class="btn-text">Dashboard</span>
-          </RouterLink>
-          <button type="button" class="btn btn--primary btn--header-save" :disabled="saving || !dirty" @click="saveChanges">
-            <i class="fa-solid" :class="saving ? 'fa-spinner fa-spin' : 'fa-floppy-disk'"></i>{{ saving ? 'Saving…' : 'Save changes' }}
-          </button>
         </div>
       </div>
 
@@ -82,7 +72,7 @@
       </div>
 
       <!-- FORM -->
-      <form @submit.prevent="saveChanges" class="settings-form" novalidate>
+      <form id="settings-form" @submit.prevent="saveChanges" class="settings-form" novalidate>
         <div class="row-two row-two--even">
 
           <section class="card" style="--d: 140ms" aria-labelledby="st-personal">
@@ -165,15 +155,6 @@
             </div>
           </section>
         </div>
-
-        <!-- ACTIONS (sticky bar on phones, hidden there until something changes) -->
-        <div class="form-actions" :class="{ 'form-actions--idle': !dirty }">
-          <span class="form-actions-note" v-if="dirty"><i class="fa-solid fa-circle-info"></i>You have unsaved changes.</span>
-          <button type="button" class="btn" :disabled="!dirty || saving" @click="discardChanges"><i class="fa-solid fa-rotate-left"></i>Discard</button>
-          <button type="submit" class="btn btn--primary" :disabled="saving || !dirty">
-            <i class="fa-solid" :class="saving ? 'fa-spinner fa-spin' : 'fa-floppy-disk'"></i>{{ saving ? 'Saving…' : 'Save changes' }}
-          </button>
-        </div>
       </form>
 
       <!-- TEAM (admin only; the real gate is UserController@authorizeAdmin) -->
@@ -242,6 +223,28 @@
         </div>
       </section>
 
+      <!-- ══ FLOATING SAVE BAR (same pattern as Add New Item: sticks to the bottom of the screen) ══ -->
+      <div class="save-bar" :class="{ 'save-bar--dirty': dirty }">
+        <div class="save-bar-status">
+          <span class="save-dot" :class="{ 'save-dot--dirty': dirty }"></span>
+          <div class="save-bar-text">
+            <strong>{{ dirty ? 'Unsaved changes' : (lastUpdated ? `Saved ${lastUpdated}` : 'Account settings') }}</strong>
+            <span class="save-bar-meta">{{ dirty ? 'Save to apply your name, email or password changes.' : 'Everything is up to date.' }}</span>
+          </div>
+        </div>
+        <div class="save-bar-actions">
+          <RouterLink to="/home" class="btn" aria-label="Back to dashboard">
+            <i class="fa-solid fa-arrow-left"></i><span class="btn-text">Dashboard</span>
+          </RouterLink>
+          <button v-if="dirty" type="button" class="btn" :disabled="saving" @click="discardChanges">
+            <i class="fa-solid fa-rotate-left"></i><span class="btn-text">Discard</span>
+          </button>
+          <button type="submit" form="settings-form" class="btn btn--primary" :disabled="saving || !dirty">
+            <i class="fa-solid" :class="saving ? 'fa-spinner fa-spin' : 'fa-floppy-disk'"></i>{{ saving ? 'Saving…' : 'Save changes' }}
+          </button>
+        </div>
+      </div>
+
     </div>
 
     <!-- ADD USER MODAL -->
@@ -267,23 +270,26 @@
               <div class="form-field modal-field">
                 <label class="form-label">Role</label>
                 <div class="role-dd" :class="{ 'role-dd--open': addRoleOpen }" ref="addRoleRoot">
-                  <button type="button" class="role-dd-trigger" aria-haspopup="listbox" :aria-expanded="addRoleOpen" @click.stop="toggleAddRole">
+                  <button type="button" class="role-dd-trigger" ref="addRoleTrigger" aria-haspopup="listbox" :aria-expanded="addRoleOpen" @click.stop="toggleAddRole">
                     <span class="role-dd-icon" :class="roleClass(addForm.role)"><i class="fa-solid" :class="roleIcon(addForm.role)"></i></span>
                     <span class="role-dd-value">{{ addForm.role || 'Select a role' }}</span>
                     <i class="fa-solid fa-chevron-down role-dd-chevron"></i>
                   </button>
-                  <transition name="dropdown">
-                    <ul v-if="addRoleOpen" class="role-dd-menu" role="listbox" @click.stop>
-                      <li v-for="r in ROLE_OPTIONS" :key="r" role="option" :aria-selected="addForm.role === r" class="role-dd-option" :class="{ 'role-dd-option--active': addForm.role === r }" @click="selectAddRole(r)">
-                        <span class="role-dd-icon" :class="roleClass(r)"><i class="fa-solid" :class="roleIcon(r)"></i></span>
-                        <span class="role-dd-option-text">
-                          <span class="role-dd-option-name">{{ r }}</span>
-                          <span class="role-dd-option-desc">{{ roleDesc(r) }}</span>
-                        </span>
-                        <i v-if="addForm.role === r" class="fa-solid fa-check role-dd-check"></i>
-                      </li>
-                    </ul>
-                  </transition>
+                  <!-- Teleported to <body> so the modal never grows a scrollbar; the list floats over it. -->
+                  <Teleport to="body">
+                    <transition name="dropdown">
+                      <ul v-if="addRoleOpen" class="role-dd-menu" role="listbox" :style="roleMenuStyle" @click.stop>
+                        <li v-for="r in ROLE_OPTIONS" :key="r" role="option" :aria-selected="addForm.role === r" class="role-dd-option" :class="{ 'role-dd-option--active': addForm.role === r }" @click="selectAddRole(r)">
+                          <span class="role-dd-icon" :class="roleClass(r)"><i class="fa-solid" :class="roleIcon(r)"></i></span>
+                          <span class="role-dd-option-text">
+                            <span class="role-dd-option-name">{{ r }}</span>
+                            <span class="role-dd-option-desc">{{ roleDesc(r) }}</span>
+                          </span>
+                          <i v-if="addForm.role === r" class="fa-solid fa-check role-dd-check"></i>
+                        </li>
+                      </ul>
+                    </transition>
+                  </Teleport>
                 </div>
               </div>
 
@@ -341,23 +347,25 @@
           <div class="form-field modal-field">
             <label class="form-label">Role</label>
             <div class="role-dd" :class="{ 'role-dd--open': editRoleOpen }" ref="editRoleRoot">
-              <button type="button" class="role-dd-trigger" aria-haspopup="listbox" :aria-expanded="editRoleOpen" @click.stop="toggleEditRole">
+              <button type="button" class="role-dd-trigger" ref="editRoleTrigger" aria-haspopup="listbox" :aria-expanded="editRoleOpen" @click.stop="toggleEditRole">
                 <span class="role-dd-icon" :class="roleClass(editModal.role)"><i class="fa-solid" :class="roleIcon(editModal.role)"></i></span>
                 <span class="role-dd-value">{{ editModal.role || 'Select a role' }}</span>
                 <i class="fa-solid fa-chevron-down role-dd-chevron"></i>
               </button>
-              <transition name="dropdown">
-                <ul v-if="editRoleOpen" class="role-dd-menu" role="listbox" @click.stop>
-                  <li v-for="r in ROLE_OPTIONS" :key="r" role="option" :aria-selected="editModal.role === r" class="role-dd-option" :class="{ 'role-dd-option--active': editModal.role === r }" @click="selectEditRole(r)">
-                    <span class="role-dd-icon" :class="roleClass(r)"><i class="fa-solid" :class="roleIcon(r)"></i></span>
-                    <span class="role-dd-option-text">
-                      <span class="role-dd-option-name">{{ r }}</span>
-                      <span class="role-dd-option-desc">{{ roleDesc(r) }}</span>
-                    </span>
-                    <i v-if="editModal.role === r" class="fa-solid fa-check role-dd-check"></i>
-                  </li>
-                </ul>
-              </transition>
+              <Teleport to="body">
+                <transition name="dropdown">
+                  <ul v-if="editRoleOpen" class="role-dd-menu" role="listbox" :style="roleMenuStyle" @click.stop>
+                    <li v-for="r in ROLE_OPTIONS" :key="r" role="option" :aria-selected="editModal.role === r" class="role-dd-option" :class="{ 'role-dd-option--active': editModal.role === r }" @click="selectEditRole(r)">
+                      <span class="role-dd-icon" :class="roleClass(r)"><i class="fa-solid" :class="roleIcon(r)"></i></span>
+                      <span class="role-dd-option-text">
+                        <span class="role-dd-option-name">{{ r }}</span>
+                        <span class="role-dd-option-desc">{{ roleDesc(r) }}</span>
+                      </span>
+                      <i v-if="editModal.role === r" class="fa-solid fa-check role-dd-check"></i>
+                    </li>
+                  </ul>
+                </transition>
+              </Teleport>
             </div>
           </div>
 
@@ -430,7 +438,9 @@ function setTheme(dark) {
   if (darkMode.value !== dark) toggleDark()
 }
 
-/* ══ ROLE DROPDOWN (themed replacement for native <select>) ══ */
+/* ══ ROLE DROPDOWN (themed replacement for native <select>) ══
+   The list is teleported to <body> and positioned with fixed coordinates,
+   so it floats over the modal instead of making the modal scroll. */
 const ROLE_OPTIONS = ['Administrator', 'Cashier', 'Inventory Staff']
 const ROLE_META = {
   Administrator: { icon: 'fa-user-shield', desc: 'Full access, including team & settings' },
@@ -440,14 +450,56 @@ const ROLE_META = {
 const roleIcon = (role) => ROLE_META[role]?.icon || 'fa-user'
 const roleDesc = (role) => ROLE_META[role]?.desc || ''
 
-const addRoleOpen  = ref(false)
-const editRoleOpen = ref(false)
-const addRoleRoot  = ref(null)
-const editRoleRoot = ref(null)
+const addRoleOpen     = ref(false)
+const editRoleOpen    = ref(false)
+const addRoleRoot     = ref(null)
+const editRoleRoot    = ref(null)
+const addRoleTrigger  = ref(null)
+const editRoleTrigger = ref(null)
 
-function toggleAddRole()  { addRoleOpen.value = !addRoleOpen.value; editRoleOpen.value = false }
+const roleMenuCoords = ref({ top: 0, bottom: 0, left: 0, width: 0, maxHeight: 260, flip: false })
+const roleMenuStyle = computed(() => {
+  const c = roleMenuCoords.value
+  return {
+    left: c.left + 'px',
+    width: c.width + 'px',
+    maxHeight: c.maxHeight + 'px',
+    ...(c.flip ? { bottom: c.bottom + 'px' } : { top: c.top + 'px' }),
+  }
+})
+
+/* Places the list under the trigger, or above it when there isn't room below. */
+function measureRoleMenu() {
+  const btn = addRoleOpen.value ? addRoleTrigger.value : editRoleOpen.value ? editRoleTrigger.value : null
+  if (!btn) return
+  const r = btn.getBoundingClientRect()
+  const wanted = ROLE_OPTIONS.length * 56 + 12
+  const spaceBelow = window.innerHeight - r.bottom - 16
+  const spaceAbove = r.top - 16
+  const flip = spaceBelow < wanted && spaceAbove > spaceBelow
+  roleMenuCoords.value = {
+    top: r.bottom + 6,
+    bottom: window.innerHeight - r.top + 6,
+    left: r.left,
+    width: r.width,
+    maxHeight: Math.max(120, Math.min(260, flip ? spaceAbove : spaceBelow)),
+    flip,
+  }
+}
+
+function toggleAddRole() {
+  editRoleOpen.value = false
+  if (addRoleOpen.value) { addRoleOpen.value = false; return }
+  addRoleOpen.value = true
+  measureRoleMenu()
+}
 function selectAddRole(r) { addForm.value.role = r; addRoleOpen.value = false }
-function toggleEditRole() { editRoleOpen.value = !editRoleOpen.value; addRoleOpen.value = false }
+function toggleEditRole() {
+  addRoleOpen.value = false
+  if (editRoleOpen.value) { editRoleOpen.value = false; return }
+  editRoleOpen.value = true
+  measureRoleMenu()
+}
 function selectEditRole(r) { if (editModal.value) editModal.value.role = r; editRoleOpen.value = false }
 
 /* ══ ACCOUNT FORM ══ */
@@ -677,7 +729,10 @@ async function toggleRowMenu(id) {
   await nextTick()
   measureRowMenu(id)
 }
-function onScrollOrResizeRowMenu() { if (openMenuId.value) measureRowMenu(openMenuId.value) }
+function onScrollOrResizeRowMenu() {
+  if (openMenuId.value) measureRowMenu(openMenuId.value)
+  if (addRoleOpen.value || editRoleOpen.value) measureRoleMenu()
+}
 const rowMenuStyle = computed(() => ({
   top:  openMenuCoords.value.top + 'px',
   left: openMenuCoords.value.left + 'px',
@@ -866,9 +921,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* ── TOKENS — same set as Home, also available inside the modals
-   (they render as siblings of .settings-page, not descendants). ── */
-.settings-page, .team-modal-backdrop {
+/* ── TOKENS — same set as Home, also available inside the modals and the
+   teleported role list (they render outside .settings-page). ── */
+.settings-page, .team-modal-backdrop, .role-dd-menu {
   --s-bg: var(--c-bg); --s-surface: var(--c-surface); --s-raised: var(--c-surface-raised); --s-sunken: var(--c-surface-sunken);
   --s-border: var(--c-border); --s-border-strong: var(--c-border-strong);
   --s-text: var(--c-text-primary); --s-text-2: var(--c-text-secondary); --s-muted: var(--c-text-muted); --s-faint: var(--c-text-faint);
@@ -883,7 +938,7 @@ onBeforeUnmount(() => {
   --s-shine: rgba(255,255,255,.7);
   --s-ease: cubic-bezier(.16, 1, .3, 1);
 }
-html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-backdrop {
+html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-backdrop, html[data-theme="dark"] .role-dd-menu {
   --s-green-soft: rgba(16,185,129,.16); --s-blue-soft: rgba(59,130,246,.18); --s-violet-soft: rgba(99,102,241,.2);
   --s-red-soft: rgba(244,63,94,.16); --s-amber-soft: rgba(245,158,11,.16);
   --s-shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.55);
@@ -897,22 +952,24 @@ html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-back
      every page. --bleed-* lets this page reclaim part of it on desktop.
      Raise a value to push the content closer to the edge, lower it (or set
      it to 0px) if content ever touches the sidebar or top bar.
-     --bleed-b reclaims the shell's bottom padding. */
+     --bleed-b / --bleed-bm stay at 0 on purpose: pulling the page's bottom edge
+     up into the shell padding stops the floating save bar from resting at the
+     bottom (same as Add New Item, which has no bottom bleed). */
   --bleed-x: 32px;
   --bleed-y: 30px;
-  --bleed-b: 30px;
+  --bleed-b: 0px;
   /* Same idea for tablet and phone (below 1001px). The shell pads those screens
      too, so the page pulls out into that padding. Raise these to use more space,
      lower them (or use 0px) if content gets cut off at the screen edge. */
   --bleed-xm: 12px;
   --bleed-ym: 12px;
-  --bleed-bm: 12px;
+  --bleed-bm: 0px;
   --s-gap: 14px;
 
   /* Height follows the content (no min-height), so a short page never forces a
      scrollbar. border-box keeps the padding inside the width. */
   box-sizing: border-box;
-  background: var(--s-bg); padding: 12px 16px 20px;
+  background: var(--s-bg); padding: 12px 16px 40px;
   font-family: 'Inter', system-ui, sans-serif;
   display: flex; flex-direction: column; gap: var(--s-gap);
   -webkit-font-smoothing: antialiased;
@@ -927,12 +984,6 @@ html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-back
 .page-heading { min-width: 0; }
 .page-title { font-size: 26px; font-weight: 800; color: var(--s-text); letter-spacing: -.03em; margin: 0; line-height: 1.15; }
 .page-sub { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin: 4px 0 0; font-size: 13.5px; font-weight: 500; color: var(--s-text-2); }
-.status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--s-muted); padding: 2px 10px 2px 8px; background: var(--s-surface); border: 1px solid var(--s-border); border-radius: 999px; white-space: nowrap; }
-.status i:not(.live-dot) { font-size: 10px; }
-.status--warn { color: var(--s-amber); border-color: rgba(245,158,11,.4); background: var(--s-amber-soft); font-weight: 600; }
-.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--s-green); animation: pulse 2.2s ease-out infinite; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,.45); } 70%, 100% { box-shadow: 0 0 0 7px rgba(16,185,129,0); } }
-.page-header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* ── buttons ── */
 .btn {
@@ -940,6 +991,7 @@ html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-back
   font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-decoration: none; white-space: nowrap;
   color: var(--s-text-2); background: var(--s-surface); border: 1px solid var(--s-border-strong); border-radius: 10px;
   box-shadow: 0 1px 2px rgba(16,24,40,.05);
+  touch-action: manipulation;
   transition: border-color .15s ease, color .15s ease, transform .15s ease, box-shadow .15s ease, filter .15s ease;
 }
 .btn:hover:not(:disabled) { border-color: var(--s-accent-border); color: var(--s-text); transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgba(16,24,40,.18); }
@@ -1065,9 +1117,25 @@ html[data-theme="dark"] .settings-page, html[data-theme="dark"] .team-modal-back
 .pw-strength--good   .pw-strength-fill { background: #3b82f6; } .pw-strength--good   .pw-strength-label { color: #3b82f6; }
 .pw-strength--strong .pw-strength-fill { background: #10b981; } .pw-strength--strong .pw-strength-label { color: #10b981; }
 
-.form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
-.form-actions-note { margin-right: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--s-muted); }
-.form-actions-note i { color: var(--s-amber); }
+/* ── FLOATING SAVE BAR — same look and behaviour as Add New Item ── */
+.save-bar {
+  position: sticky; bottom: 16px; z-index: 30;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 14px 12px 18px; border-radius: 16px;
+  background: var(--s-surface); border: 1px solid var(--s-border-strong);
+  box-shadow: 0 12px 34px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.08);
+  transition: border-color .2s, box-shadow .2s, background-color .22s;
+}
+.save-bar--dirty { border-color: var(--s-accent); box-shadow: 0 12px 34px rgba(0,0,0,.20), 0 0 0 3px var(--s-ring); }
+.save-bar-status { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.save-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--s-border-strong); }
+.save-dot--dirty { background: var(--s-amber); box-shadow: 0 0 0 4px rgba(245,158,11,.22); animation: dot-pulse 1.6s ease-in-out infinite; }
+@keyframes dot-pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(245,158,11,.22); } 50% { box-shadow: 0 0 0 6px rgba(245,158,11,.10); } }
+.save-bar-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.save-bar-text strong { font-size: 13.5px; font-weight: 700; color: var(--s-text); }
+.save-bar-meta { font-size: 12px; color: var(--s-muted); }
+.save-bar-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.save-bar-actions .btn { height: 40px; }
 
 /* ── team ── */
 .team-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -1169,7 +1237,7 @@ html[data-theme="dark"] .copy-status--error { color: #F87171; }
 
 /* Tablet / large phone: tighter page padding */
 @media (max-width: 900px) {
-  .settings-page { padding: 10px 12px 20px; --s-gap: 12px; }
+  .settings-page { padding: 10px 12px 32px; --s-gap: 12px; }
 }
 
 /* Team table becomes one compact card per person */
@@ -1194,16 +1262,10 @@ html[data-theme="dark"] .copy-status--error { color: #F87171; }
 
 /* Phones */
 @media (max-width: 600px) {
-  .settings-page { padding: 8px 10px 20px; --s-gap: 10px; }
+  .settings-page { padding: 8px 10px 24px; --s-gap: 10px; }
 
-  /* Header stays on one row: title left, compact back button right */
-  .page-header { flex-wrap: nowrap; align-items: flex-start; gap: 10px; }
   .page-title { font-size: 22px; }
   .page-sub { font-size: 13px; margin-top: 3px; }
-  .page-header-right { flex-shrink: 0; flex-wrap: nowrap; }
-  .btn--back { width: 38px; padding: 0; }
-  .btn--back .btn-text { display: none; }
-  .btn--header-save { display: none; } /* the sticky action bar below covers this on phones */
 
   .card { padding: 14px 12px; border-radius: 14px; }
   .card::before { left: 18px; right: 18px; }
@@ -1226,16 +1288,11 @@ html[data-theme="dark"] .copy-status--error { color: #F87171; }
   .form-input { height: 46px; }
   .form-stack { gap: 14px; }
 
-  /* Save / Discard bar: only shows once there is something to save */
-  .form-actions {
-    position: sticky; bottom: 8px; z-index: 5;
-    flex-direction: row; align-items: stretch; gap: 8px; padding: 10px;
-    background: var(--s-surface); border: 1px solid var(--s-border); border-radius: 14px;
-    box-shadow: var(--s-shadow-hover);
-  }
-  .form-actions .btn { flex: 1; height: 42px; }
-  .form-actions-note { display: none; }
-  .form-actions--idle { display: none; }
+  /* Floating bar: status hides, buttons share the width */
+  .save-bar { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding: 10px; border-radius: 14px; }
+  .save-bar-status { display: none; }
+  .save-bar-actions { width: 100%; gap: 8px; }
+  .save-bar-actions .btn { flex: 1; height: 44px; padding: 0 10px; }
 
   /* Team */
   .team-tools { width: 100%; }
@@ -1257,6 +1314,7 @@ html[data-theme="dark"] .copy-status--error { color: #F87171; }
 
 @media (prefers-reduced-motion: reduce) {
   .settings-page * { transition: none !important; animation: none !important; }
+  .save-dot--dirty { animation: none; }
 }
 </style>
 
@@ -1279,7 +1337,10 @@ html[data-theme="dark"] .copy-status--error { color: #F87171; }
 .role-dd-value { flex: 1; text-align: left; font-size: 13.5px; font-weight: 600; color: var(--c-text-primary); }
 .role-dd-chevron { font-size: 11px; color: var(--c-text-faint); transition: transform .18s ease; flex-shrink: 0; }
 .role-dd--open .role-dd-chevron { transform: rotate(180deg); color: var(--c-accent); }
-.role-dd-menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); margin: 0; padding: 6px; list-style: none; background: var(--c-surface-overlay); border: 1px solid var(--c-border); border-radius: 12px; box-shadow: var(--c-shadow-lg); z-index: 20; max-height: 260px; overflow-y: auto; }
+/* The list is teleported to <body> and placed with fixed coordinates (see measureRoleMenu),
+   so it floats above the modal and never adds a scrollbar to it. It sits above the
+   modal backdrop (z-index 9999). */
+.role-dd-menu { position: fixed; margin: 0; padding: 6px; list-style: none; background: var(--c-surface-overlay); border: 1px solid var(--c-border); border-radius: 12px; box-shadow: var(--c-shadow-lg); z-index: 10000; overflow-y: auto; font-family: 'Inter', system-ui, sans-serif; }
 .role-dd-option { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; transition: background-color .15s ease; }
 .role-dd-option:hover { background: var(--c-surface-raised); }
 .role-dd-option--active { background: var(--c-accent-soft); }
